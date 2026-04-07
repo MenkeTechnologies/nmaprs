@@ -1,0 +1,186 @@
+//! Expand nmap-style glued short options (`-sS`, `-PS80`, `-T4`) before clap parsing.
+
+/// Expand argv for nmaprs so clap can parse long-style flags consistently.
+pub fn expand_nmap_style_argv<I>(args: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let args: Vec<String> = args.into_iter().collect();
+    if args.is_empty() {
+        return args;
+    }
+    let mut out: Vec<String> = Vec::with_capacity(args.len() + 8);
+    out.push(args[0].clone());
+    let mut i = 1usize;
+    while i < args.len() {
+        let a = &args[i];
+        // -sL list scan, -sn ping scan (no port scan)
+        if a.as_str() == "-sL" {
+            out.push("--sL".to_string());
+            i += 1;
+            continue;
+        }
+        if a.as_str() == "-sn" {
+            out.push("--sn".to_string());
+            i += 1;
+            continue;
+        }
+        // -sI <zombie> (idle scan — parsed for CLI parity)
+        if a.as_str() == "-sI" {
+            out.push("--sI".to_string());
+            i += 1;
+            if i < args.len() {
+                let n = &args[i];
+                if !n.starts_with('-') {
+                    out.push(n.clone());
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        // -iL / -iR (nmap target input)
+        if a.as_str() == "-iL" {
+            out.push("--iL".to_string());
+            i += 1;
+            continue;
+        }
+        if a.as_str() == "-iR" {
+            out.push("--iR".to_string());
+            i += 1;
+            continue;
+        }
+        // -oN / -oX / -oS / -oG / -oA
+        if a.len() == 3 && a.starts_with("-o") {
+            let k = a.as_bytes()[2] as char;
+            if matches!(k, 'N' | 'X' | 'S' | 'G' | 'A') {
+                out.push(format!("--o{k}"));
+                i += 1;
+                continue;
+            }
+        }
+        if let Some(rest) = a.strip_prefix('-') {
+            if rest.is_empty() {
+                out.push(a.clone());
+                i += 1;
+                continue;
+            }
+            // Long options pass through
+            if rest.starts_with('-') {
+                out.push(a.clone());
+                i += 1;
+                continue;
+            }
+            // -sX: overloaded in nmap — scan types, -sV version, -sC script default
+            if rest.len() == 2 && rest.starts_with('s') {
+                let ch = rest.as_bytes()[1] as char;
+                if ch.is_ascii_alphabetic() {
+                    match ch {
+                        'V' => {
+                            out.push("--version-scan".to_string());
+                            i += 1;
+                            continue;
+                        }
+                        'C' => {
+                            out.push("--script-default".to_string());
+                            i += 1;
+                            continue;
+                        }
+                        _ => {
+                            out.push("--scan-type".to_string());
+                            out.push(ch.to_string());
+                            i += 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+            // -Pn
+            if rest == "Pn" {
+                out.push("--no-ping".to_string());
+                i += 1;
+                continue;
+            }
+            // -PE / -PP / -PM (no port list)
+            if matches!(rest, "PE" | "PP" | "PM") {
+                let letter = rest.as_bytes()[1] as char;
+                out.push(format!("--ping-{letter}"));
+                i += 1;
+                continue;
+            }
+            // -PS [ports], -PA, -PU, -PY, -PO
+            if rest.len() >= 2 && rest.starts_with('P') {
+                let kind = rest.as_bytes()[1] as char;
+                if matches!(kind, 'S' | 'A' | 'U' | 'Y' | 'O') {
+                    if rest.len() == 2 {
+                        out.push(format!("--ping-{kind}"));
+                        i += 1;
+                        continue;
+                    }
+                    // -PS80 or -PS22,80
+                    let tail = &rest[2..];
+                    out.push(format!("--ping-{kind}"));
+                    out.push(tail.to_string());
+                    i += 1;
+                    continue;
+                }
+            }
+            // -PO protocol list
+            if rest.starts_with("PO") && rest.len() > 2 {
+                out.push("--ping-ip-proto".to_string());
+                out.push(rest[2..].to_string());
+                i += 1;
+                continue;
+            }
+            // -T0 .. -T5
+            if rest.len() == 2 && rest.starts_with('T') {
+                let d = rest.as_bytes()[1];
+                if d.is_ascii_digit() && (d - b'0') <= 5 {
+                    out.push("--timing".to_string());
+                    out.push((d - b'0').to_string());
+                    i += 1;
+                    continue;
+                }
+            }
+            // -v, -vv, -vvv
+            if rest.chars().all(|c| c == 'v') && !rest.is_empty() && rest.len() <= 5 {
+                out.push(format!("--verbosity={}", rest.len()));
+                i += 1;
+                continue;
+            }
+            // -d, -dd
+            if rest.chars().all(|c| c == 'd') && !rest.is_empty() && rest.len() <= 5 {
+                out.push(format!("--debug={}", rest.len()));
+                i += 1;
+                continue;
+            }
+        }
+        out.push(a.clone());
+        i += 1;
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expands_scan_and_timing() {
+        let v = expand_nmap_style_argv(vec![
+            "nmaprs".into(),
+            "-sT".into(),
+            "-T4".into(),
+            "host".into(),
+        ]);
+        assert_eq!(
+            v,
+            vec!["nmaprs", "--scan-type", "T", "--timing", "4", "host"]
+        );
+    }
+
+    #[test]
+    fn expands_pn_and_ps_ports() {
+        let v = expand_nmap_style_argv(vec!["nmaprs".into(), "-Pn".into(), "-PS80,443".into()]);
+        assert_eq!(v, vec!["nmaprs", "--no-ping", "--ping-S", "80,443"]);
+    }
+}
