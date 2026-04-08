@@ -447,7 +447,8 @@ impl Args {
             Err(err) => {
                 use clap::error::ErrorKind;
                 match err.kind() {
-                    ErrorKind::DisplayHelp | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
+                    ErrorKind::DisplayHelp
+                    | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
                         crate::help_tp::print_help(&bin);
                         std::process::exit(0);
                     }

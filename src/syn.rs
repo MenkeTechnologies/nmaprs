@@ -18,8 +18,7 @@ use dashmap::DashMap;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::tcp::{ipv4_checksum, ipv6_checksum, MutableTcpPacket, TcpFlags, TcpPacket};
 use pnet::transport::{
-    tcp_packet_iter, transport_channel, TransportChannelType, TransportProtocol,
-    TransportReceiver,
+    tcp_packet_iter, transport_channel, TransportChannelType, TransportProtocol, TransportReceiver,
 };
 use pnet_sys;
 use rand::Rng;
@@ -123,10 +122,12 @@ fn recv_ipv6_tcp_with_timeout(
     let _ = pnet_sys::set_socket_receive_timeout(fd, old_timeout);
     match r {
         Ok(len) => {
-            let ip = pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
-                .ip();
+            let ip =
+                pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
+                    .ip();
             let buf = &tr.buffer[..len];
-            let tcp_slice = ipv6_l4::ipv6_l4_slice(buf, IpNextHeaderProtocols::Tcp.0).unwrap_or(buf);
+            let tcp_slice =
+                ipv6_l4::ipv6_l4_slice(buf, IpNextHeaderProtocols::Tcp.0).unwrap_or(buf);
             let Some(pkt) = TcpPacket::new(tcp_slice) else {
                 return Ok(None);
             };
@@ -290,7 +291,9 @@ fn tcp_ipv4_one_round(
             if ge.is_some_and(|g| now >= g) {
                 break;
             }
-            let remain = ge.map(|g| g.saturating_duration_since(now)).unwrap_or(RECV_SLICE);
+            let remain = ge
+                .map(|g| g.saturating_duration_since(now))
+                .unwrap_or(RECV_SLICE);
             let slice = remain.min(RECV_SLICE);
             match iter.next_with_timeout(slice) {
                 Ok(Some((pkt, addr))) => {
@@ -299,11 +302,7 @@ fn tcp_ipv4_one_round(
                     };
                     let sport = pkt.get_destination();
                     let dport = pkt.get_source();
-                    let key = SynKeyV4 {
-                        dst,
-                        dport,
-                        sport,
-                    };
+                    let key = SynKeyV4 { dst, dport, sport };
                     let Some((_, gidx)) = pending_r.get(&key).map(|e| *e.value()) else {
                         continue;
                     };
@@ -363,8 +362,7 @@ fn tcp_ipv4_one_round(
                 break s;
             }
         };
-        let (seq, ack_num, flags) =
-            tcp_probe_fields(probe_kind, send_flags_override, &mut rng);
+        let (seq, ack_num, flags) = tcp_probe_fields(probe_kind, send_flags_override, &mut rng);
         let deadline = Instant::now() + per_probe_timeout;
         ge_max = ge_max.max(deadline);
         pending.insert(
@@ -396,7 +394,9 @@ fn tcp_ipv4_one_round(
 
     *global_end.lock().expect("global_end") = Some(ge_max);
 
-    let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
+    let recv_res = recv_handle
+        .join()
+        .map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
     recv_res?;
     Ok(())
 }
@@ -431,7 +431,8 @@ fn tcp_scan_ipv4_with_kind(
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V4(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] = Some(SynOutcome::HostTimeout);
+                    global_results.lock().expect("global_results")[idx] =
+                        Some(SynOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -599,7 +600,9 @@ fn tcp_ipv6_one_round(
             if ge.is_some_and(|g| now >= g) {
                 break;
             }
-            let remain = ge.map(|g| g.saturating_duration_since(now)).unwrap_or(RECV_SLICE);
+            let remain = ge
+                .map(|g| g.saturating_duration_since(now))
+                .unwrap_or(RECV_SLICE);
             let slice = remain.min(RECV_SLICE);
             match recv_ipv6_tcp_with_timeout(&mut rx, slice) {
                 Ok(Some((pkt, addr))) => {
@@ -608,11 +611,7 @@ fn tcp_ipv6_one_round(
                     };
                     let sport = pkt.get_destination();
                     let dport = pkt.get_source();
-                    let key = SynKeyV6 {
-                        dst,
-                        dport,
-                        sport,
-                    };
+                    let key = SynKeyV6 { dst, dport, sport };
                     let Some((_, gidx)) = pending_r.get(&key).map(|e| *e.value()) else {
                         continue;
                     };
@@ -672,8 +671,7 @@ fn tcp_ipv6_one_round(
                 break s;
             }
         };
-        let (seq, ack_num, flags) =
-            tcp_probe_fields(probe_kind, send_flags_override, &mut rng);
+        let (seq, ack_num, flags) = tcp_probe_fields(probe_kind, send_flags_override, &mut rng);
         let deadline = Instant::now() + per_probe_timeout;
         ge_max = ge_max.max(deadline);
         pending.insert(
@@ -705,7 +703,9 @@ fn tcp_ipv6_one_round(
 
     *global_end.lock().expect("global_end") = Some(ge_max);
 
-    let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
+    let recv_res = recv_handle
+        .join()
+        .map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
     recv_res?;
     Ok(())
 }
@@ -740,7 +740,8 @@ fn tcp_scan_ipv6_with_kind(
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V6(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] = Some(SynOutcome::HostTimeout);
+                    global_results.lock().expect("global_results")[idx] =
+                        Some(SynOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -923,7 +924,11 @@ pub fn parallel_tcp_port_scan_ipv4(
         match r {
             Ok(Ok(lines)) => merged.extend(lines),
             Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(io::Error::other(format!("raw TCP port scan shard join: {e:?}"))),
+            Err(e) => {
+                return Err(io::Error::other(format!(
+                    "raw TCP port scan shard join: {e:?}"
+                )))
+            }
         }
     }
     Ok(merged)
@@ -1022,7 +1027,11 @@ pub fn parallel_tcp_port_scan_ipv6(
         match r {
             Ok(Ok(lines)) => merged.extend(lines),
             Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(io::Error::other(format!("raw TCP port scan shard join: {e:?}"))),
+            Err(e) => {
+                return Err(io::Error::other(format!(
+                    "raw TCP port scan shard join: {e:?}"
+                )))
+            }
         }
     }
     Ok(merged)

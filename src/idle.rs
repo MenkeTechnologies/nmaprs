@@ -9,7 +9,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pnet::packet::ip::IpNextHeaderProtocols;
-use pnet::packet::ipv4::{checksum as ipv4_header_checksum, Ipv4Flags, Ipv4Packet, MutableIpv4Packet};
+use pnet::packet::ipv4::{
+    checksum as ipv4_header_checksum, Ipv4Flags, Ipv4Packet, MutableIpv4Packet,
+};
 use pnet::packet::tcp::{ipv4_checksum, MutableTcpPacket, TcpFlags, TcpPacket};
 use pnet::packet::Packet;
 use pnet::transport::{transport_channel, TransportChannelType, TransportReceiver};
@@ -125,7 +127,9 @@ fn probe_zombie_ipid(
     tx.send_to(ip, IpAddr::V4(zombie))?;
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        let slice = deadline.saturating_duration_since(Instant::now()).min(RECV_SLICE);
+        let slice = deadline
+            .saturating_duration_since(Instant::now())
+            .min(RECV_SLICE);
         if let Some(ip) = recv_ipv4_with_timeout(rx, slice)? {
             if ip.get_next_level_protocol() != IpNextHeaderProtocols::Tcp {
                 continue;
@@ -225,13 +229,7 @@ pub fn idle_scan_ipv4(
 
             let t0 = Instant::now();
             let r1 = probe_zombie_ipid(
-                &mut tx,
-                &mut rx,
-                my_ip,
-                zombie,
-                probe_port,
-                timeout,
-                &mut rng,
+                &mut tx, &mut rx, my_ip, zombie, probe_port, timeout, &mut rng,
             );
             let ipid1 = match r1 {
                 Ok(v) => v,
@@ -278,13 +276,7 @@ pub fn idle_scan_ipv4(
             thread::sleep(inter);
 
             let ipid2 = match probe_zombie_ipid(
-                &mut tx,
-                &mut rx,
-                my_ip,
-                zombie,
-                probe_port,
-                timeout,
-                &mut rng,
+                &mut tx, &mut rx, my_ip, zombie, probe_port, timeout, &mut rng,
             ) {
                 Ok(v) => v,
                 Err(_) => {

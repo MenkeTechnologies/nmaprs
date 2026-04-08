@@ -2,30 +2,30 @@
 
 pub mod argv_expand;
 pub mod cli;
-pub mod help_tp;
 pub mod config;
 pub mod discovery;
 pub mod ftp_bounce;
-pub mod idle;
+pub mod help_tp;
 pub mod icmp_listen;
 pub mod icmp_ping;
+pub mod idle;
 pub mod ip_proto;
 pub mod ipv6_l4;
 pub mod nse;
-pub mod os_detect;
 pub mod os_db;
+pub mod os_detect;
 pub mod output;
-pub mod skiddie;
-pub mod vscan;
 pub mod ping;
 pub mod ports;
 pub mod resume;
 pub mod scan;
 pub mod scanflags;
 pub mod sctp;
+pub mod skiddie;
 pub mod syn;
 pub mod target;
 pub mod trace;
+pub mod vscan;
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -402,10 +402,9 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 Ok(mut lines) => collected.append(&mut lines),
                 Err(e) => {
                     if kind.tcp_connect_fallback_on_raw_error() {
-                        warn!(
-                            "{kind} scan failed ({e}); falling back to TCP connect for IPv4"
-                        );
-                        collected.extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone()).await);
+                        warn!("{kind} scan failed ({e}); falling back to TCP connect for IPv4");
+                        collected
+                            .extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone()).await);
                     } else {
                         warn!(
                             "{kind} scan failed ({e}); skipping TCP connect fallback (raw scan semantics differ from connect)"
@@ -420,7 +419,8 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                         warn!(
                             "IPv6 {kind} scan failed ({e}); falling back to TCP connect for IPv6"
                         );
-                        collected.extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone()).await);
+                        collected
+                            .extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone()).await);
                     } else {
                         warn!(
                             "IPv6 {kind} scan failed ({e}); skipping TCP connect fallback (raw scan semantics differ from connect)"
@@ -556,16 +556,17 @@ async fn expand_specs_ordered(
         return Ok(vec![]);
     }
     let c = concurrency.max(1);
-    let results: Vec<Result<(usize, Vec<IpAddr>), anyhow::Error>> = stream::iter(specs.into_iter().enumerate())
-        .map(|(i, token)| async move {
+    let results: Vec<Result<(usize, Vec<IpAddr>), anyhow::Error>> =
+        stream::iter(specs.into_iter().enumerate())
+            .map(|(i, token)| async move {
                 let ips = expand_target(&token, &opts)
                     .await
                     .map_err(|e| anyhow!("expand target {token}: {e}"))?;
                 Ok((i, ips))
-        })
-        .buffer_unordered(c)
-        .collect()
-        .await;
+            })
+            .buffer_unordered(c)
+            .collect()
+            .await;
     let mut indexed: Vec<(usize, Vec<IpAddr>)> = Vec::with_capacity(results.len());
     for r in results {
         indexed.push(r?);
@@ -585,9 +586,7 @@ async fn collect_hosts(args: &Args, concurrency: usize) -> Result<Vec<IpAddr>> {
         hosts.extend(random_addresses(n, args.ipv6));
     }
     if !args.targets.is_empty() {
-        hosts.extend(
-            expand_specs_ordered(args.targets.clone(), opts, concurrency).await?,
-        );
+        hosts.extend(expand_specs_ordered(args.targets.clone(), opts, concurrency).await?);
     }
     Ok(hosts)
 }
@@ -769,8 +768,11 @@ pub async fn run(args: Args) -> Result<i32> {
     if plan.scan_kind == ScanKind::Udp {
         let has_v4 = hosts.iter().any(|h| h.is_ipv4());
         let has_v6 = hosts.iter().any(|h| h.is_ipv6());
-        let mut icmp_session: Option<(UdpIcmpNotes, Arc<AtomicBool>, Vec<std::thread::JoinHandle<()>>)> =
-            None;
+        let mut icmp_session: Option<(
+            UdpIcmpNotes,
+            Arc<AtomicBool>,
+            Vec<std::thread::JoinHandle<()>>,
+        )> = None;
 
         for batch_hosts in host_batches(&hosts, &plan) {
             let mut work = build_work(&batch_hosts, &plan.ports);
@@ -826,19 +828,20 @@ pub async fn run(args: Args) -> Result<i32> {
             let intensity = plan.version_intensity;
             let connect_timeout = plan.connect_timeout;
             let conc = plan.effective_probe_concurrency();
-            let bundle = match tokio::task::spawn_blocking(move || crate::vscan::load_service_probes(&path))
-                .await
-            {
-                Ok(Ok(p)) => p,
-                Ok(Err(e)) => {
-                    warn!("-sV: {e}");
-                    crate::vscan::ServiceProbes::default()
-                }
-                Err(e) => {
-                    warn!("-sV: load task: {e}");
-                    crate::vscan::ServiceProbes::default()
-                }
-            };
+            let bundle =
+                match tokio::task::spawn_blocking(move || crate::vscan::load_service_probes(&path))
+                    .await
+                {
+                    Ok(Ok(p)) => p,
+                    Ok(Err(e)) => {
+                        warn!("-sV: {e}");
+                        crate::vscan::ServiceProbes::default()
+                    }
+                    Err(e) => {
+                        warn!("-sV: load task: {e}");
+                        crate::vscan::ServiceProbes::default()
+                    }
+                };
             let tcp_probes = Arc::new(bundle.tcp);
             let udp_probes = Arc::new(bundle.udp);
             if !tcp_probes.is_empty() {
@@ -948,15 +951,14 @@ pub async fn run(args: Args) -> Result<i32> {
     outs.write_footer()?;
 
     if plan.os_detect_requested && !plan.ping_only {
-        let any_open_tcp = lines
-            .iter()
-            .any(|l| l.proto == "tcp" && l.state == "open");
+        let any_open_tcp = lines.iter().any(|l| l.proto == "tcp" && l.state == "open");
         if plan.osscan_limit && !any_open_tcp {
             if plan.verbosity >= 1 {
                 info!("--osscan-limit: skipping OS detection (no open TCP ports)");
             }
         } else {
-            let ping_out = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
+            let ping_out =
+                crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
             for o in ping_out {
                 if o.up {
                     println!(

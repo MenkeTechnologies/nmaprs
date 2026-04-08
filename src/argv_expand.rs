@@ -204,10 +204,7 @@ mod tests {
     #[test]
     fn expands_po_default_protos() {
         let v = expand_nmap_style_argv(vec!["nmaprs".into(), "-PO".into(), "host".into()]);
-        assert_eq!(
-            v,
-            vec!["nmaprs", "--ping-ip-proto", "1,2,4", "host"]
-        );
+        assert_eq!(v, vec!["nmaprs", "--ping-ip-proto", "1,2,4", "host"]);
     }
 
     #[test]

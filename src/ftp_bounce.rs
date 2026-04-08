@@ -23,10 +23,7 @@ fn port_command_line(ip: Ipv4Addr, port: u16) -> String {
     let o = ip.octets();
     let ph = (port >> 8) as u8;
     let pl = (port & 0xff) as u8;
-    format!(
-        "PORT {},{},{},{},{},{}",
-        o[0], o[1], o[2], o[3], ph, pl
-    )
+    format!("PORT {},{},{},{},{},{}", o[0], o[1], o[2], o[3], ph, pl)
 }
 
 async fn read_ftp_reply(reader: &mut BufReader<impl AsyncRead + Unpin>) -> Result<(u16, String)> {
@@ -36,7 +33,9 @@ async fn read_ftp_reply(reader: &mut BufReader<impl AsyncRead + Unpin>) -> Resul
     if first.len() < 3 {
         bail!("FTP: short reply: {first:?}");
     }
-    let code: u16 = first[..3].parse().map_err(|_| anyhow!("FTP: bad code in {first:?}"))?;
+    let code: u16 = first[..3]
+        .parse()
+        .map_err(|_| anyhow!("FTP: bad code in {first:?}"))?;
     let mut body = first.to_string();
     if first.len() >= 4 && first.as_bytes().get(3) == Some(&b'-') {
         for _ in 0..256 {
@@ -109,20 +108,14 @@ async fn bounce_one_port(
 
     // Drain completion / data transfer messages so QUIT is clean.
     if matches!(c, 150 | 125) {
-        let _ = tokio::time::timeout(
-            connect_timeout,
-            read_ftp_reply(&mut reader),
-        )
-        .await;
+        let _ = tokio::time::timeout(connect_timeout, read_ftp_reply(&mut reader)).await;
     }
 
     let _ = send_line(&mut write_half, "QUIT").await;
 
     let elapsed = start.elapsed().as_millis();
 
-    let open = matches!(c, 150 | 125 | 250)
-        || text.contains("150 ")
-        || text.contains("125 ");
+    let open = matches!(c, 150 | 125 | 250) || text.contains("150 ") || text.contains("125 ");
     if open {
         return Ok((true, elapsed));
     }
@@ -223,11 +216,7 @@ pub async fn ftp_bounce_scan(
                                     host,
                                     port,
                                     "tcp",
-                                    if no_ping {
-                                        "open|filtered"
-                                    } else {
-                                        "filtered"
-                                    },
+                                    if no_ping { "open|filtered" } else { "filtered" },
                                     PortReason::Timeout,
                                     None,
                                 ));

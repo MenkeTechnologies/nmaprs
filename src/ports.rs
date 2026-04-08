@@ -152,7 +152,10 @@ mod tests {
     #[test]
     fn fast_ip_protocols_sorted_unique_in_range() {
         let v = fast_ip_protocols_nmap();
-        assert!(v.len() > 1, "embedded nmap IP protocol list must not be empty");
+        assert!(
+            v.len() > 1,
+            "embedded nmap IP protocol list must not be empty"
+        );
         for w in v.windows(2) {
             assert!(w[0] < w[1], "expected sorted unique list");
         }

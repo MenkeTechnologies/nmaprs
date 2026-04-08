@@ -71,11 +71,7 @@ impl OutputSet {
                     )?;
                 }
             }
-            writeln!(
-                f,
-                r#"<nmaprs><cmdline>{}</cmdline>"#,
-                xml_escape(cmdline)
-            )?;
+            writeln!(f, r#"<nmaprs><cmdline>{}</cmdline>"#, xml_escape(cmdline))?;
         }
         Ok(())
     }

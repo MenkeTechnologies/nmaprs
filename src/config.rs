@@ -88,10 +88,7 @@ pub fn parse_idle_scan(spec: &str) -> Result<IdleScanTarget> {
             _ => None,
         })
         .ok_or_else(|| anyhow!("idle (-sI): no IPv4 address for {host}"))?;
-    Ok(IdleScanTarget {
-        zombie,
-        probe_port,
-    })
+    Ok(IdleScanTarget { zombie, probe_port })
 }
 
 /// Resolved scan configuration after validating nmap-style flags.
@@ -679,23 +676,13 @@ mod rate_validation_tests {
         ])
         .expect("parse");
         let err = ScanPlan::from_args(&args).unwrap_err();
-        assert!(
-            err.to_string().contains("mutually exclusive"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("mutually exclusive"), "{err}");
     }
 
     #[test]
     fn min_rate_raises_effective_probe_concurrency_without_explicit_cap() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "--min-rate",
-            "1000",
-            "-p",
-            "80",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "--min-rate", "1000", "-p", "80", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.concurrency, 256);
         assert!(!plan.max_parallelism_explicit);
@@ -762,14 +749,7 @@ mod rate_validation_tests {
 
     #[test]
     fn aggressive_enables_os_version_scripts_traceroute() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-A",
-            "-p",
-            "80",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-A", "-p", "80", "127.0.0.1"]).expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.aggressive);
         assert!(plan.os_detect_requested);
@@ -780,8 +760,7 @@ mod rate_validation_tests {
 
     #[test]
     fn dash_o_enables_os_detection_only() {
-        let args =
-            Args::try_parse_from(["nmaprs", "-O", "-p", "22", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-O", "-p", "22", "127.0.0.1"]).expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.os_detect_requested);
         assert!(!plan.version_scan_requested);
@@ -820,11 +799,22 @@ mod rate_validation_tests {
             ("--scan-type", "F", ScanKind::TcpFin, TcpPortScanKind::Fin),
             ("--scan-type", "X", ScanKind::TcpXmas, TcpPortScanKind::Xmas),
             ("--scan-type", "A", ScanKind::TcpAck, TcpPortScanKind::Ack),
-            ("--scan-type", "W", ScanKind::TcpWindow, TcpPortScanKind::Window),
-            ("--scan-type", "M", ScanKind::TcpMaimon, TcpPortScanKind::Maimon),
+            (
+                "--scan-type",
+                "W",
+                ScanKind::TcpWindow,
+                TcpPortScanKind::Window,
+            ),
+            (
+                "--scan-type",
+                "M",
+                ScanKind::TcpMaimon,
+                TcpPortScanKind::Maimon,
+            ),
         ];
         for (opt, ch, kind, raw) in cases {
-            let args = Args::try_parse_from(["nmaprs", opt, ch, "-p", "22", "127.0.0.1"]).expect("parse");
+            let args =
+                Args::try_parse_from(["nmaprs", opt, ch, "-p", "22", "127.0.0.1"]).expect("parse");
             let plan = ScanPlan::from_args(&args).expect("plan");
             assert_eq!(plan.scan_kind, kind, "{opt} {ch}");
             assert_eq!(plan.scan_kind.tcp_port_raw_kind(), Some(raw));
@@ -891,15 +881,9 @@ mod rate_validation_tests {
     fn idle_scan_sets_kind_and_probe_port() {
         use super::ScanKind;
 
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "--sI",
-            "192.0.2.1:443",
-            "-p",
-            "80",
-            "10.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "--sI", "192.0.2.1:443", "-p", "80", "10.0.0.1"])
+                .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.scan_kind, ScanKind::Idle);
         assert_eq!(plan.idle_scan.expect("idle").probe_port, 443);
@@ -909,15 +893,24 @@ mod rate_validation_tests {
     fn scan_type_sctp_y_and_z() {
         use super::ScanKind;
 
-        let y = Args::try_parse_from(["nmaprs", "--scan-type", "Y", "-p", "38412", "127.0.0.1"]).expect("parse");
-        assert_eq!(ScanPlan::from_args(&y).expect("plan").scan_kind, ScanKind::SctpInit);
-        let z = Args::try_parse_from(["nmaprs", "--scan-type", "z", "-p", "38412", "127.0.0.1"]).expect("parse");
-        assert_eq!(ScanPlan::from_args(&z).expect("plan").scan_kind, ScanKind::SctpCookieEcho);
+        let y = Args::try_parse_from(["nmaprs", "--scan-type", "Y", "-p", "38412", "127.0.0.1"])
+            .expect("parse");
+        assert_eq!(
+            ScanPlan::from_args(&y).expect("plan").scan_kind,
+            ScanKind::SctpInit
+        );
+        let z = Args::try_parse_from(["nmaprs", "--scan-type", "z", "-p", "38412", "127.0.0.1"])
+            .expect("parse");
+        assert_eq!(
+            ScanPlan::from_args(&z).expect("plan").scan_kind,
+            ScanKind::SctpCookieEcho
+        );
     }
 
     #[test]
     fn scan_type_letter_o_points_to_so_flag() {
-        let args = Args::try_parse_from(["nmaprs", "--scan-type", "O", "127.0.0.1"]).expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "--scan-type", "O", "127.0.0.1"]).expect("parse");
         let err = ScanPlan::from_args(&args).unwrap_err();
         let s = err.to_string();
         assert!(s.contains("sO") || s.contains("-sO"), "{s}");
@@ -925,7 +918,8 @@ mod rate_validation_tests {
 
     #[test]
     fn scan_type_letter_i_points_to_si_flag() {
-        let args = Args::try_parse_from(["nmaprs", "--scan-type", "i", "127.0.0.1"]).expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "--scan-type", "i", "127.0.0.1"]).expect("parse");
         let err = ScanPlan::from_args(&args).unwrap_err();
         let s = err.to_string();
         assert!(s.contains("sI") || s.contains("-sI"), "{s}");
@@ -933,16 +927,9 @@ mod rate_validation_tests {
 
     #[test]
     fn ip_proto_with_scan_type_errors() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "--sO",
-            "--scan-type",
-            "S",
-            "-p",
-            "1",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "--sO", "--scan-type", "S", "-p", "1", "127.0.0.1"])
+                .expect("parse");
         let err = ScanPlan::from_args(&args).unwrap_err();
         let s = err.to_string();
         assert!(s.contains("sO") || s.contains("scan-type"), "{s}");

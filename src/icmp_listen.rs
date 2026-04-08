@@ -111,13 +111,7 @@ pub fn run_udp_icmp_dual_stack(notes: UdpIcmpNotes, stop: Arc<AtomicBool>) -> io
     ];
 
     while !stop.load(Ordering::Relaxed) {
-        let pr = unsafe {
-            libc::poll(
-                fds.as_mut_ptr(),
-                fds.len() as libc::nfds_t,
-                150,
-            )
-        };
+        let pr = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, 150) };
         if pr < 0 {
             let err = io::Error::last_os_error();
             if err.kind() == io::ErrorKind::Interrupted {
@@ -189,7 +183,10 @@ fn drain_icmpv6(
 }
 
 /// ICMPv4 type 3: code 3 → `closed`; any other code with a parsable embedded UDP probe → `filtered`.
-pub fn run_ipv4_port_unreachable_listener(notes: UdpIcmpNotes, stop: Arc<AtomicBool>) -> io::Result<()> {
+pub fn run_ipv4_port_unreachable_listener(
+    notes: UdpIcmpNotes,
+    stop: Arc<AtomicBool>,
+) -> io::Result<()> {
     let (mut _tx, mut rx) = transport_channel(
         65536,
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp)),
@@ -208,7 +205,10 @@ pub fn run_ipv4_port_unreachable_listener(notes: UdpIcmpNotes, stop: Arc<AtomicB
 }
 
 /// ICMPv6 type 1: code 4 → `closed`; other codes with parsable embedded UDP → `filtered` [RFC 4443].
-pub fn run_ipv6_port_unreachable_listener(notes: UdpIcmpNotes, stop: Arc<AtomicBool>) -> io::Result<()> {
+pub fn run_ipv6_port_unreachable_listener(
+    notes: UdpIcmpNotes,
+    stop: Arc<AtomicBool>,
+) -> io::Result<()> {
     let (mut _tx, mut rx) = transport_channel(
         65536,
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Icmpv6)),

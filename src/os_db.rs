@@ -128,14 +128,9 @@ pub fn format_os_guess(ttl: Option<u8>, db: Option<&OsDb>, max_examples: usize) 
     let cap = max_examples.max(1);
     let ex = db.examples_for_ttl(ttl, cap);
     if ex.is_empty() {
-        return format!(
-            "{base} (nmap-os-db loaded; full probe matching not implemented)"
-        );
+        return format!("{base} (nmap-os-db loaded; full probe matching not implemented)");
     }
-    format!(
-        "{base} — example DB titles: {}",
-        ex.join("; ")
-    )
+    format!("{base} — example DB titles: {}", ex.join("; "))
 }
 
 #[cfg(test)]

@@ -445,7 +445,8 @@ pub async fn udp_scan(
                                 if let Some(ref notes) = icmp_notes {
                                     tokio::time::sleep(Duration::from_millis(UDP_ICMP_DRAIN_MS))
                                         .await;
-                                    if let Some(out) = notes.get(&(host, port)).as_deref().copied() {
+                                    if let Some(out) = notes.get(&(host, port)).as_deref().copied()
+                                    {
                                         return Some(match out {
                                             UdpIcmpOutcome::Closed => PortLine::new(
                                                 host,

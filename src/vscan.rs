@@ -85,8 +85,7 @@ fn server_name(host: IpAddr) -> ServerName<'static> {
 }
 
 pub fn load_service_probes(path: &Path) -> Result<ServiceProbes> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     parse_probes(&text).context("parse nmap-service-probes")
 }
 
@@ -365,9 +364,7 @@ fn parse_match_line(line: &str) -> Result<Option<ServiceMatch>> {
 
 fn split_first_token(s: &str) -> (&str, &str) {
     let s = s.trim_start();
-    let end = s
-        .find(char::is_whitespace)
-        .unwrap_or(s.len());
+    let end = s.find(char::is_whitespace).unwrap_or(s.len());
     (&s[..end], &s[end..])
 }
 

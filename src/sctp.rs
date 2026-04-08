@@ -13,9 +13,13 @@ use std::time::{Duration, Instant};
 use crc32c::crc32c as crc32c_fn;
 use dashmap::DashMap;
 use pnet::packet::ip::IpNextHeaderProtocols;
-use pnet::packet::ipv4::{checksum as ipv4_header_checksum, Ipv4Flags, Ipv4Packet, MutableIpv4Packet};
+use pnet::packet::ipv4::{
+    checksum as ipv4_header_checksum, Ipv4Flags, Ipv4Packet, MutableIpv4Packet,
+};
 use pnet::packet::Packet;
-use pnet::transport::{transport_channel, TransportChannelType, TransportProtocol, TransportReceiver};
+use pnet::transport::{
+    transport_channel, TransportChannelType, TransportProtocol, TransportReceiver,
+};
 use pnet_sys;
 use rand::Rng;
 
@@ -96,8 +100,9 @@ fn recv_ipv4_with_timeout(
     let _ = pnet_sys::set_socket_receive_timeout(fd, old_timeout);
     match r {
         Ok(len) => {
-            let ip = pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
-                .ip();
+            let ip =
+                pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
+                    .ip();
             let buf = &tr.buffer[..len];
             let Some(ipkt) = Ipv4Packet::new(buf) else {
                 return Ok(None);
@@ -121,8 +126,9 @@ fn recv_ipv6_sctp_with_timeout(
     let _ = pnet_sys::set_socket_receive_timeout(fd, old_timeout);
     match r {
         Ok(len) => {
-            let ip = pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
-                .ip();
+            let ip =
+                pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
+                    .ip();
             let buf = &tr.buffer[..len];
             let sctp_slice = match ipv6_l4::ipv6_l4_slice(buf, IpNextHeaderProtocols::Sctp.0) {
                 Some(s) => s,
@@ -156,12 +162,7 @@ fn set_sctp_checksum(sctp: &mut [u8]) {
 }
 
 /// SCTP INIT or COOKIE_ECHO segment (CRC32c).
-fn build_sctp_segment(
-    kind: SctpProbeKind,
-    sport: u16,
-    dport: u16,
-    rng: &mut impl Rng,
-) -> Vec<u8> {
+fn build_sctp_segment(kind: SctpProbeKind, sport: u16, dport: u16, rng: &mut impl Rng) -> Vec<u8> {
     let mut sctp: Vec<u8> = match kind {
         SctpProbeKind::Init => {
             // Common 12 + INIT chunk length 20 (fixed params only).
@@ -272,7 +273,9 @@ fn sctp_ipv4_one_round(
             if ge.is_some_and(|g| now >= g) {
                 break;
             }
-            let remain = ge.map(|g| g.saturating_duration_since(now)).unwrap_or(RECV_SLICE);
+            let remain = ge
+                .map(|g| g.saturating_duration_since(now))
+                .unwrap_or(RECV_SLICE);
             let slice = remain.min(RECV_SLICE);
             match recv_ipv4_with_timeout(&mut rx_tr, slice) {
                 Ok(Some((ip, _addr))) => {
@@ -378,7 +381,9 @@ fn sctp_ipv4_one_round(
 
     *global_end.lock().expect("global_end") = Some(ge_max);
 
-    let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("SCTP recv: {e:?}")))?;
+    let recv_res = recv_handle
+        .join()
+        .map_err(|e| io::Error::other(format!("SCTP recv: {e:?}")))?;
     recv_res?;
     Ok(())
 }
@@ -423,7 +428,9 @@ fn sctp_ipv6_one_round(
             if ge.is_some_and(|g| now >= g) {
                 break;
             }
-            let remain = ge.map(|g| g.saturating_duration_since(now)).unwrap_or(RECV_SLICE);
+            let remain = ge
+                .map(|g| g.saturating_duration_since(now))
+                .unwrap_or(RECV_SLICE);
             let slice = remain.min(RECV_SLICE);
             match recv_ipv6_sctp_with_timeout(&mut rx, slice) {
                 Ok(Some((sctp, addr))) => {
@@ -518,8 +525,9 @@ fn sctp_ipv6_one_round(
 
     *global_end.lock().expect("global_end") = Some(ge_max);
 
-    let recv_res =
-        recv_handle.join().map_err(|e| io::Error::other(format!("SCTP IPv6 recv: {e:?}")))?;
+    let recv_res = recv_handle
+        .join()
+        .map_err(|e| io::Error::other(format!("SCTP IPv6 recv: {e:?}")))?;
     recv_res?;
     Ok(())
 }
@@ -552,7 +560,8 @@ fn sctp_scan_ipv6_inner(
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V6(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] = Some(SctpOutcome::HostTimeout);
+                    global_results.lock().expect("global_results")[idx] =
+                        Some(SctpOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -629,7 +638,8 @@ fn sctp_scan_ipv4_inner(
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V4(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] = Some(SctpOutcome::HostTimeout);
+                    global_results.lock().expect("global_results")[idx] =
+                        Some(SctpOutcome::HostTimeout);
                     continue;
                 }
             }

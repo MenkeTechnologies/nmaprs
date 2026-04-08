@@ -16,14 +16,18 @@ use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
-use pnet::packet::ip::IpNextHeaderProtocol;
-use pnet::packet::ipv4::{checksum as ipv4_header_checksum, Ipv4Packet, Ipv4Flags, MutableIpv4Packet};
-use pnet::packet::Packet;
 #[cfg(unix)]
 use pnet::packet::icmpv6::{Icmpv6Packet, Icmpv6Types};
+use pnet::packet::ip::IpNextHeaderProtocol;
+use pnet::packet::ipv4::{
+    checksum as ipv4_header_checksum, Ipv4Flags, Ipv4Packet, MutableIpv4Packet,
+};
 #[cfg(unix)]
 use pnet::packet::ipv6::{Ipv6Packet, MutableIpv6Packet};
-use pnet::transport::{transport_channel, TransportChannelType, TransportProtocol, TransportReceiver};
+use pnet::packet::Packet;
+use pnet::transport::{
+    transport_channel, TransportChannelType, TransportProtocol, TransportReceiver,
+};
 use pnet_sys;
 use rand::Rng;
 
@@ -75,7 +79,10 @@ fn icmp_packet_from_recv_buffer(buf: &[u8]) -> Option<IcmpPacket<'_>> {
     IcmpPacket::new(buf)
 }
 
-fn recv_icmp_with_timeout(tr: &mut TransportReceiver, t: Duration) -> io::Result<Option<(IcmpPacket<'_>, IpAddr)>> {
+fn recv_icmp_with_timeout(
+    tr: &mut TransportReceiver,
+    t: Duration,
+) -> io::Result<Option<(IcmpPacket<'_>, IpAddr)>> {
     let fd = tr.socket.fd;
     let old_timeout = pnet_sys::get_socket_receive_timeout(fd)?;
     pnet_sys::set_socket_receive_timeout(fd, t)?;
@@ -84,8 +91,9 @@ fn recv_icmp_with_timeout(tr: &mut TransportReceiver, t: Duration) -> io::Result
     let _ = pnet_sys::set_socket_receive_timeout(fd, old_timeout);
     match r {
         Ok(len) => {
-            let ip = pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
-                .ip();
+            let ip =
+                pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
+                    .ip();
             let buf = &tr.buffer[..len];
             let Some(pkt) = icmp_packet_from_recv_buffer(buf) else {
                 return Ok(None);
@@ -138,7 +146,9 @@ fn ip_proto_ipv4_one_round(
 
     let mut rx_tr = transport_channel(
         RX_BUF,
-        TransportChannelType::Layer4(TransportProtocol::Ipv4(pnet::packet::ip::IpNextHeaderProtocols::Icmp)),
+        TransportChannelType::Layer4(TransportProtocol::Ipv4(
+            pnet::packet::ip::IpNextHeaderProtocols::Icmp,
+        )),
     )?
     .1;
 
@@ -159,7 +169,9 @@ fn ip_proto_ipv4_one_round(
             if ge.is_some_and(|g| now >= g) {
                 break;
             }
-            let remain = ge.map(|g| g.saturating_duration_since(now)).unwrap_or(RECV_SLICE);
+            let remain = ge
+                .map(|g| g.saturating_duration_since(now))
+                .unwrap_or(RECV_SLICE);
             let slice = remain.min(RECV_SLICE);
             match recv_icmp_with_timeout(&mut rx_tr, slice) {
                 Ok(Some((icmp, _addr))) => {
@@ -235,7 +247,9 @@ fn ip_proto_ipv4_one_round(
 
     *global_end.lock().expect("global_end") = Some(ge_max);
 
-    let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("ICMP recv: {e:?}")))?;
+    let recv_res = recv_handle
+        .join()
+        .map_err(|e| io::Error::other(format!("ICMP recv: {e:?}")))?;
     recv_res?;
     Ok(())
 }
@@ -267,7 +281,8 @@ fn ip_proto_scan_ipv4_inner(
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V4(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] = Some(ProtoOutcome::HostTimeout);
+                    global_results.lock().expect("global_results")[idx] =
+                        Some(ProtoOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -378,7 +393,11 @@ pub fn parallel_ip_proto_scan_ipv4(
         match r {
             Ok(Ok(lines)) => merged.extend(lines),
             Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(io::Error::other(format!("IP protocol scan shard join: {e:?}"))),
+            Err(e) => {
+                return Err(io::Error::other(format!(
+                    "IP protocol scan shard join: {e:?}"
+                )))
+            }
         }
     }
     Ok(merged)
@@ -404,8 +423,9 @@ fn recv_icmpv6_with_timeout(
     let _ = pnet_sys::set_socket_receive_timeout(fd, old_timeout);
     match r {
         Ok(len) => {
-            let ip = pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
-                .ip();
+            let ip =
+                pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
+                    .ip();
             let buf = &tr.buffer[..len];
             let icmp_slice = ipv6_l4::icmpv6_slice_after_ipv6(buf).unwrap_or(buf);
             let Some(pkt) = Icmpv6Packet::new(icmp_slice) else {
@@ -420,7 +440,9 @@ fn recv_icmpv6_with_timeout(
 
 /// ICMPv6 Parameter Problem code 1 — unrecognized Next Header (RFC 4443).
 #[cfg(unix)]
-fn embedded_ipv6_from_icmpv6_param_problem<'a>(icmp: &'a Icmpv6Packet<'a>) -> Option<Ipv6Packet<'a>> {
+fn embedded_ipv6_from_icmpv6_param_problem<'a>(
+    icmp: &'a Icmpv6Packet<'a>,
+) -> Option<Ipv6Packet<'a>> {
     if icmp.get_icmpv6_type() != Icmpv6Types::ParameterProblem {
         return None;
     }
@@ -541,7 +563,9 @@ fn ip_proto_ipv6_one_round(
 
     let mut rx_tr = transport_channel(
         RX_BUF,
-        TransportChannelType::Layer4(TransportProtocol::Ipv6(pnet::packet::ip::IpNextHeaderProtocols::Icmpv6)),
+        TransportChannelType::Layer4(TransportProtocol::Ipv6(
+            pnet::packet::ip::IpNextHeaderProtocols::Icmpv6,
+        )),
     )?
     .1;
 
@@ -562,7 +586,9 @@ fn ip_proto_ipv6_one_round(
             if ge.is_some_and(|g| now >= g) {
                 break;
             }
-            let remain = ge.map(|g| g.saturating_duration_since(now)).unwrap_or(RECV_SLICE);
+            let remain = ge
+                .map(|g| g.saturating_duration_since(now))
+                .unwrap_or(RECV_SLICE);
             let slice = remain.min(RECV_SLICE);
             match recv_icmpv6_with_timeout(&mut rx_tr, slice) {
                 Ok(Some((icmp, _addr))) => {
@@ -617,8 +643,9 @@ fn ip_proto_ipv6_one_round(
 
     *global_end.lock().expect("global_end") = Some(ge_max);
 
-    let recv_res =
-        recv_handle.join().map_err(|e| io::Error::other(format!("ICMPv6 recv: {e:?}")))?;
+    let recv_res = recv_handle
+        .join()
+        .map_err(|e| io::Error::other(format!("ICMPv6 recv: {e:?}")))?;
     recv_res?;
     Ok(())
 }
@@ -651,7 +678,8 @@ fn ip_proto_scan_ipv6_inner(
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V6(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] = Some(ProtoOutcome::HostTimeout);
+                    global_results.lock().expect("global_results")[idx] =
+                        Some(ProtoOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -760,7 +788,11 @@ pub fn parallel_ip_proto_scan_ipv6(
         match r {
             Ok(Ok(lines)) => merged.extend(lines),
             Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(io::Error::other(format!("IPv6 IP protocol scan shard join: {e:?}"))),
+            Err(e) => {
+                return Err(io::Error::other(format!(
+                    "IPv6 IP protocol scan shard join: {e:?}"
+                )))
+            }
         }
     }
     Ok(merged)

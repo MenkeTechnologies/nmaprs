@@ -26,10 +26,10 @@ use tokio::io::ErrorKind as TokioErrorKind;
 use tokio::net::{TcpStream, UdpSocket};
 
 use crate::cli::Args;
+use crate::ip_proto::MAX_IP_PROTO_PARALLEL_SHARDS;
 use crate::ping::ping_hosts;
 use crate::ports::parse_port_spec;
 use crate::scan::PortLine;
-use crate::ip_proto::MAX_IP_PROTO_PARALLEL_SHARDS;
 use crate::sctp::MAX_SCTP_PARALLEL_SHARDS;
 use crate::syn::MAX_SYN_PARALLEL_SHARDS;
 
@@ -153,15 +153,7 @@ async fn syn_raw_discovery_collect(
         }
         tokio::task::spawn_blocking(move || {
             let lines = crate::syn::parallel_syn_scan_ipv4(
-                v4,
-                timeout,
-                None,
-                None,
-                None,
-                None,
-                None,
-                0,
-                max_shards,
+                v4, timeout, None, None, None, None, None, 0, max_shards,
             )?;
             Ok(port_lines_to_alive_hosts(lines))
         })
@@ -175,15 +167,7 @@ async fn syn_raw_discovery_collect(
         }
         tokio::task::spawn_blocking(move || {
             let lines = crate::syn::parallel_syn_scan_ipv6(
-                v6,
-                timeout,
-                None,
-                None,
-                None,
-                None,
-                None,
-                0,
-                max_shards,
+                v6, timeout, None, None, None, None, None, 0, max_shards,
             )?;
             Ok(port_lines_to_alive_hosts(lines))
         })
@@ -225,15 +209,7 @@ async fn ack_raw_discovery_collect(
         }
         tokio::task::spawn_blocking(move || {
             let lines = crate::syn::parallel_ack_ping_scan_ipv4(
-                v4,
-                timeout,
-                None,
-                None,
-                None,
-                None,
-                None,
-                0,
-                max_shards,
+                v4, timeout, None, None, None, None, None, 0, max_shards,
             )?;
             Ok(port_lines_to_alive_hosts(lines))
         })
@@ -247,15 +223,7 @@ async fn ack_raw_discovery_collect(
         }
         tokio::task::spawn_blocking(move || {
             let lines = crate::syn::parallel_ack_ping_scan_ipv6(
-                v6,
-                timeout,
-                None,
-                None,
-                None,
-                None,
-                None,
-                0,
-                max_shards,
+                v6, timeout, None, None, None, None, None, 0, max_shards,
             )?;
             Ok(port_lines_to_alive_hosts(lines))
         })
@@ -388,15 +356,7 @@ async fn ip_proto_ping_discovery_collect(
         }
         let r = tokio::task::spawn_blocking(move || {
             crate::ip_proto::parallel_ip_proto_scan_ipv4(
-                v4,
-                timeout,
-                None,
-                None,
-                None,
-                None,
-                None,
-                0,
-                max_shards,
+                v4, timeout, None, None, None, None, None, 0, max_shards,
             )
             .map(port_lines_to_alive_hosts)
         })
@@ -414,15 +374,7 @@ async fn ip_proto_ping_discovery_collect(
         }
         let r = tokio::task::spawn_blocking(move || {
             crate::ip_proto::parallel_ip_proto_scan_ipv6(
-                v6,
-                timeout,
-                None,
-                None,
-                None,
-                None,
-                None,
-                0,
-                max_shards,
+                v6, timeout, None, None, None, None, None, 0, max_shards,
             )
             .map(port_lines_to_alive_hosts)
         })
@@ -469,7 +421,8 @@ async fn sctp_discovery_merge(
     max_shards: usize,
 ) {
     let skip = alive.clone();
-    let s = sctp_raw_discovery_collect(hosts, ports, Some(&skip), connect_timeout, max_shards).await;
+    let s =
+        sctp_raw_discovery_collect(hosts, ports, Some(&skip), connect_timeout, max_shards).await;
     alive.extend(s);
 }
 
@@ -754,9 +707,7 @@ pub async fn hosts_after_discovery(
     let max_sctp_shards = c.clamp(1, MAX_SCTP_PARALLEL_SHARDS);
     let max_ip_proto_shards = c.clamp(1, MAX_IP_PROTO_PARALLEL_SHARDS);
 
-    if (args.ping_timestamp || args.ping_mask)
-        && hosts.iter().any(|h| matches!(h, IpAddr::V6(_)))
-    {
+    if (args.ping_timestamp || args.ping_mask) && hosts.iter().any(|h| matches!(h, IpAddr::V6(_))) {
         let n = hosts.iter().filter(|h| matches!(h, IpAddr::V6(_))).count();
         tracing::warn!(
             count = n,
@@ -826,11 +777,13 @@ pub async fn hosts_after_discovery(
         }
         if args.ping_syn.is_some() {
             let ports = ports_from_ping_tcp(&args.ping_syn, TCP_SYN_DEFAULT)?;
-            tcp_ps_discovery_merge(&hosts, &ports, c, &mut alive, connect_timeout, max_shards).await;
+            tcp_ps_discovery_merge(&hosts, &ports, c, &mut alive, connect_timeout, max_shards)
+                .await;
         }
         if args.ping_ack.is_some() {
             let ports = ports_from_ping_tcp(&args.ping_ack, TCP_ACK_DEFAULT)?;
-            tcp_pa_discovery_merge(&hosts, &ports, c, &mut alive, connect_timeout, max_shards).await;
+            tcp_pa_discovery_merge(&hosts, &ports, c, &mut alive, connect_timeout, max_shards)
+                .await;
         }
         if args.ping_udp.is_some() {
             let ports = ports_from_ping_udp(&args.ping_udp)?;
@@ -838,14 +791,8 @@ pub async fn hosts_after_discovery(
         }
         if args.ping_sctp.is_some() {
             let ports = ports_from_ping_sctp(&args.ping_sctp)?;
-            sctp_discovery_merge(
-                &hosts,
-                &ports,
-                &mut alive,
-                connect_timeout,
-                max_sctp_shards,
-            )
-            .await;
+            sctp_discovery_merge(&hosts, &ports, &mut alive, connect_timeout, max_sctp_shards)
+                .await;
         }
         if let Some(opt) = &args.ping_ip_proto {
             let protos = parse_ping_ip_proto_list(opt.as_deref().unwrap_or(""))?;
@@ -881,10 +828,7 @@ mod tests {
 
     #[test]
     fn ports_from_ping_tcp_variants() {
-        assert_eq!(
-            ports_from_ping_tcp(&Some(None), 80).unwrap(),
-            vec![80]
-        );
+        assert_eq!(ports_from_ping_tcp(&Some(None), 80).unwrap(), vec![80]);
         assert_eq!(
             ports_from_ping_tcp(&Some(Some("443".into())), 80).unwrap(),
             vec![443]

@@ -80,10 +80,7 @@ fn print_banner_and_status(color: bool) {
     } else {
         print!("{}", BANNER_PLAIN);
         println!(" ┌──────────────────────────────────────────────────────┐");
-        println!(
-            " │ STATUS: ONLINE // SIGNAL: ████████░░ // v{} │",
-            VERSION
-        );
+        println!(" │ STATUS: ONLINE // SIGNAL: ████████░░ // v{} │", VERSION);
         println!(" └──────────────────────────────────────────────────────┘");
         println!("  >> NMAPRS // GRID SCANNER // FULL SPECTRUM <<");
     }
@@ -92,13 +89,11 @@ fn print_banner_and_status(color: bool) {
 fn print_footer(color: bool) {
     println!("{}", section_line("SYSTEM", 52, color));
     if color {
-        println!(
-            concat!(
-                "\x1b[35m v",
-                env!("CARGO_PKG_VERSION"),
-                " \x1b[0m// \x1b[33m(c) MenkeTechnologies\x1b[0m"
-            )
-        );
+        println!(concat!(
+            "\x1b[35m v",
+            env!("CARGO_PKG_VERSION"),
+            " \x1b[0m// \x1b[33m(c) MenkeTechnologies\x1b[0m"
+        ));
         println!("\x1b[35m The grid is wide and infinite.\x1b[0m");
         println!("\x1b[33m >>> JACK IN. MAP THE GRID. OWN YOUR PORTS. <<<\x1b[0m");
         println!("\x1b[36m ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░\x1b[0m");
@@ -120,10 +115,7 @@ pub fn print_help(bin: &str) {
     println!("Parallel network scanner — nmap-compatible CLI (see README).");
     println!();
     if color {
-        println!(
-            "\x1b[33m USAGE:\x1b[0m {} [OPTIONS] [TARGET]...",
-            bin
-        );
+        println!("\x1b[33m USAGE:\x1b[0m {} [OPTIONS] [TARGET]...", bin);
     } else {
         println!("  USAGE: {bin} [OPTIONS] [TARGET]...");
     }
@@ -171,7 +163,10 @@ pub fn print_help(bin: &str) {
             ("--sI <ZOMBIE>", "Idle scan (or -sI)"),
             ("--sO", "IP protocol scan"),
             ("-b <FTP>", "FTP bounce scan"),
-            ("-sS -sT -sU …", "Short scan types (-sN -sF -sX -sA -sW -sM -sY -sZ)"),
+            (
+                "-sS -sT -sU …",
+                "Short scan types (-sN -sF -sX -sA -sW -sM -sY -sZ)",
+            ),
         ],
         color,
     );
@@ -216,11 +211,20 @@ pub fn print_help(bin: &str) {
         &[
             ("-T <0-5>, --timing <0-5>", "Timing template"),
             ("--min-hostgroup / --max-hostgroup <N>", "Host batch sizes"),
-            ("--min-parallelism / -M, --max-parallelism <N>", "Probe parallelism"),
-            ("--min-rtt-timeout / --max-rtt-timeout / --initial-rtt-timeout", "RTT bounds"),
+            (
+                "--min-parallelism / -M, --max-parallelism <N>",
+                "Probe parallelism",
+            ),
+            (
+                "--min-rtt-timeout / --max-rtt-timeout / --initial-rtt-timeout",
+                "RTT bounds",
+            ),
             ("--max-retries <N>", "Extra probe retries after timeout"),
             ("--host-timeout <TIME>", "Give up on host after TIME"),
-            ("--scan-delay / --max-scan-delay <TIME>", "Inter-probe delay"),
+            (
+                "--scan-delay / --max-scan-delay <TIME>",
+                "Inter-probe delay",
+            ),
             ("--min-rate / --max-rate <RATE>", "Global probe start rate"),
             ("--stats-every <TIME>", "Stats interval (parsed)"),
         ],
@@ -304,12 +308,10 @@ pub fn print_help(bin: &str) {
 
     print_section(
         "POSITIONAL",
-        &[
-            (
-                "[TARGET]...",
-                "Hostnames, IPs, CIDR, nmap-style octet ranges",
-            ),
-        ],
+        &[(
+            "[TARGET]...",
+            "Hostnames, IPs, CIDR, nmap-style octet ranges",
+        )],
         color,
     );
 

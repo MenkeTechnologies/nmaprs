@@ -34,9 +34,18 @@ fn build_icmp_timestamp_request(id: u16, seq: u16) -> Vec<u8> {
             id as u8,
             (seq >> 8) as u8,
             seq as u8,
-            0, 0, 0, 0,
-            0, 0, 0, 0,
-            0, 0, 0, 0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         ];
         m.set_payload(&pl);
     }
