@@ -7,6 +7,8 @@
 //! TCP connect if raw sockets fail.
 //!
 //! **UDP `-PU`**: UDP datagram; reply or ICMP-unreachable-style socket errors → “up”.
+//!
+//! **`-PY`**: SCTP **INIT** (same engines as `-sY`); INIT-ACK / ABORT ⇒ host responded (up).
 
 use std::collections::HashSet;
 use std::io::ErrorKind as IoErrorKind;
@@ -22,6 +24,7 @@ use crate::cli::Args;
 use crate::ping::ping_hosts;
 use crate::ports::parse_port_spec;
 use crate::scan::PortLine;
+use crate::sctp::MAX_SCTP_PARALLEL_SHARDS;
 use crate::syn::MAX_SYN_PARALLEL_SHARDS;
 
 /// TCP ports for default discovery (Nmap: SYN 443, ACK 80).
@@ -30,6 +33,8 @@ const DEFAULT_TCP_DISCOVERY_PORTS: &[u16] = &[443, 80];
 const TCP_SYN_DEFAULT: u16 = 80;
 const TCP_ACK_DEFAULT: u16 = 80;
 const UDP_PING_DEFAULT: u16 = 40_125;
+/// Nmap default SCTP ping port (`-PY` with no port list).
+const SCTP_PING_DEFAULT: u16 = 80;
 
 fn has_explicit_discovery_flags(args: &Args) -> bool {
     args.ping_echo
@@ -47,6 +52,7 @@ fn has_implemented_explicit_probes(args: &Args) -> bool {
         || args.ping_syn.is_some()
         || args.ping_ack.is_some()
         || args.ping_udp.is_some()
+        || args.ping_sctp.is_some()
 }
 
 fn ports_from_ping_tcp(opt: &Option<Option<String>>, default: u16) -> Result<Vec<u16>> {
@@ -61,6 +67,14 @@ fn ports_from_ping_udp(opt: &Option<Option<String>>) -> Result<Vec<u16>> {
     match opt {
         None => Ok(vec![]),
         Some(None) => Ok(vec![UDP_PING_DEFAULT]),
+        Some(Some(s)) => parse_port_spec(s.trim()).map_err(|e| anyhow!("{e}")),
+    }
+}
+
+fn ports_from_ping_sctp(opt: &Option<Option<String>>) -> Result<Vec<u16>> {
+    match opt {
+        None => Ok(vec![]),
+        Some(None) => Ok(vec![SCTP_PING_DEFAULT]),
         Some(Some(s)) => parse_port_spec(s.trim()).map_err(|e| anyhow!("{e}")),
     }
 }
@@ -215,6 +229,108 @@ async fn ack_raw_discovery_collect(
     let mut out = r4?;
     out.extend(r6?);
     Ok(out)
+}
+
+/// Raw SCTP INIT discovery (`-PY`): INIT-ACK or ABORT ⇒ host responded.
+/// IPv4 / IPv6 are merged independently; one family may warn and yield empty while the other succeeds.
+async fn sctp_raw_discovery_collect(
+    hosts: &[IpAddr],
+    ports: &[u16],
+    skip: Option<&HashSet<IpAddr>>,
+    timeout: Duration,
+    max_shards: usize,
+) -> HashSet<IpAddr> {
+    let mut v4: Vec<(Ipv4Addr, u16)> = Vec::new();
+    let mut v6: Vec<(Ipv6Addr, u16)> = Vec::new();
+    for &h in hosts {
+        if skip.map(|s| s.contains(&h)).unwrap_or(false) {
+            continue;
+        }
+        for &p in ports {
+            match h {
+                IpAddr::V4(a) => v4.push((a, p)),
+                IpAddr::V6(a) => v6.push((a, p)),
+            }
+        }
+    }
+
+    let v4_fut = async {
+        if v4.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let r = tokio::task::spawn_blocking(move || {
+            crate::sctp::parallel_sctp_scan_ipv4(
+                v4,
+                crate::sctp::SctpProbeKind::Init,
+                timeout,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                max_shards,
+            )
+            .map(port_lines_to_alive_hosts)
+        })
+        .await;
+        match r {
+            Ok(Ok(s)) => Ok(s),
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(std::io::Error::other(format!("{e}"))),
+        }
+    };
+
+    let v6_fut = async {
+        if v6.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let r = tokio::task::spawn_blocking(move || {
+            crate::sctp::parallel_sctp_scan_ipv6(
+                v6,
+                crate::sctp::SctpProbeKind::Init,
+                timeout,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                max_shards,
+            )
+            .map(port_lines_to_alive_hosts)
+        })
+        .await;
+        match r {
+            Ok(Ok(s)) => Ok(s),
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(std::io::Error::other(format!("{e}"))),
+        }
+    };
+
+    let (r4, r6) = tokio::join!(v4_fut, v6_fut);
+    let mut out = HashSet::new();
+    match r4 {
+        Ok(s) => out.extend(s),
+        Err(e) => tracing::warn!(error = %e, "SCTP discovery IPv4 (-PY) failed"),
+    }
+    match r6 {
+        Ok(s) => out.extend(s),
+        Err(e) => tracing::warn!(error = %e, "SCTP discovery IPv6 (-PY) failed"),
+    }
+    out
+}
+
+async fn sctp_discovery_merge(
+    hosts: &[IpAddr],
+    ports: &[u16],
+    alive: &mut HashSet<IpAddr>,
+    connect_timeout: Duration,
+    max_shards: usize,
+) {
+    let skip = alive.clone();
+    let s = sctp_raw_discovery_collect(hosts, ports, Some(&skip), connect_timeout, max_shards).await;
+    alive.extend(s);
 }
 
 /// `-PS` / default TCP ports: raw SYN when possible, else TCP connect.
@@ -417,6 +533,7 @@ pub async fn hosts_after_discovery(
 
     let c = concurrency.max(1);
     let max_shards = c.clamp(1, MAX_SYN_PARALLEL_SHARDS);
+    let max_sctp_shards = c.clamp(1, MAX_SCTP_PARALLEL_SHARDS);
 
     if args.ping_timestamp {
         tracing::warn!("-PP (ICMP timestamp) host discovery is not implemented; ignoring");
@@ -426,9 +543,6 @@ pub async fn hosts_after_discovery(
     }
     if args.ping_ip_proto.is_some() {
         tracing::warn!("-PO (IP protocol ping) is not implemented; ignoring");
-    }
-    if args.ping_sctp.is_some() {
-        tracing::warn!("-PY (SCTP ping) is not implemented; ignoring");
     }
 
     let explicit = has_explicit_discovery_flags(args);
@@ -497,6 +611,17 @@ pub async fn hosts_after_discovery(
             let ports = ports_from_ping_udp(&args.ping_udp)?;
             udp_discovery(&hosts, &ports, c, &mut alive, connect_timeout).await;
         }
+        if args.ping_sctp.is_some() {
+            let ports = ports_from_ping_sctp(&args.ping_sctp)?;
+            sctp_discovery_merge(
+                &hosts,
+                &ports,
+                &mut alive,
+                connect_timeout,
+                max_sctp_shards,
+            )
+            .await;
+        }
     }
 
     let out: Vec<IpAddr> = hosts.into_iter().filter(|h| alive.contains(h)).collect();
@@ -535,6 +660,16 @@ mod tests {
             vec![53]
         );
         assert!(ports_from_ping_udp(&None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn ports_from_ping_sctp_variants() {
+        assert_eq!(ports_from_ping_sctp(&Some(None)).unwrap(), vec![80]);
+        assert_eq!(
+            ports_from_ping_sctp(&Some(Some("38412".into()))).unwrap(),
+            vec![38412]
+        );
+        assert!(ports_from_ping_sctp(&None).unwrap().is_empty());
     }
 
     #[test]
