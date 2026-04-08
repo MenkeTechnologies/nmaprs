@@ -11,7 +11,7 @@ use std::io;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -182,6 +182,8 @@ impl AtomicSynResults {
     }
 }
 
+use crate::net_util::AtomicDeadline;
+
 /// Map raw recv outcomes to [`PortLine`] (SYN-style vs ACK scan semantics).
 fn port_line_from_syn_outcome(
     kind: RawTcpProbeKind,
@@ -307,7 +309,7 @@ fn tcp_ipv4_one_round(
     let mut rng = rand::thread_rng();
 
     let pending: Arc<DashMap<SynKeyV4, (Instant, usize)>> = Arc::new(DashMap::new());
-    let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let global_end = Arc::new(AtomicDeadline::new(Instant::now()));
 
     let pending_r = Arc::clone(&pending);
     let results_r = Arc::clone(&global_results);
@@ -318,7 +320,7 @@ fn tcp_ipv4_one_round(
         let mut iter = tcp_packet_iter(&mut rx);
         loop {
             let now = Instant::now();
-            let ge = *global_end_r.lock().expect("global_end");
+            let ge = global_end_r.get();
             if pending_r.is_empty() && ge.is_some() {
                 break;
             }
@@ -501,7 +503,7 @@ fn tcp_ipv4_one_round(
         )?;
     }
 
-    *global_end.lock().expect("global_end") = Some(ge_max);
+    global_end.set(ge_max);
 
     let recv_res = recv_handle
         .join()
@@ -696,7 +698,7 @@ fn tcp_ipv6_one_round(
     let mut rng = rand::thread_rng();
 
     let pending: Arc<DashMap<SynKeyV6, (Instant, usize)>> = Arc::new(DashMap::new());
-    let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let global_end = Arc::new(AtomicDeadline::new(Instant::now()));
 
     let pending_r = Arc::clone(&pending);
     let results_r = Arc::clone(&global_results);
@@ -706,7 +708,7 @@ fn tcp_ipv6_one_round(
     let recv_handle = thread::spawn(move || -> io::Result<()> {
         loop {
             let now = Instant::now();
-            let ge = *global_end_r.lock().expect("global_end");
+            let ge = global_end_r.get();
             if pending_r.is_empty() && ge.is_some() {
                 break;
             }
@@ -814,7 +816,7 @@ fn tcp_ipv6_one_round(
         }
     }
 
-    *global_end.lock().expect("global_end") = Some(ge_max);
+    global_end.set(ge_max);
 
     let recv_res = recv_handle
         .join()

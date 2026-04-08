@@ -1,8 +1,10 @@
-//! Shared network utilities (cached local-IP lookup for checksum computation).
+//! Shared network utilities (cached local-IP lookup, lock-free deadline).
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 static LOCAL_V4: OnceLock<Ipv4Addr> = OnceLock::new();
 static LOCAL_V6: OnceLock<Ipv6Addr> = OnceLock::new();
@@ -40,4 +42,36 @@ pub fn local_ipv6() -> io::Result<Ipv6Addr> {
         let addr = probe_local_ipv6()?;
         Ok(*LOCAL_V6.get_or_init(|| addr))
     })
+}
+
+/// Lock-free deadline shared between a send thread and recv thread.
+///
+/// Encodes `Option<Instant>` as a nanosecond offset from a shared epoch.
+/// `0` = not set; any other value = nanos since `epoch`.
+pub struct AtomicDeadline {
+    epoch: Instant,
+    nanos: AtomicU64,
+}
+
+impl AtomicDeadline {
+    pub fn new(epoch: Instant) -> Self {
+        Self {
+            epoch,
+            nanos: AtomicU64::new(0),
+        }
+    }
+    /// Set the deadline (called once by the send thread after all probes are sent).
+    pub fn set(&self, deadline: Instant) {
+        let off = deadline.saturating_duration_since(self.epoch).as_nanos() as u64;
+        self.nanos.store(off.max(1), Ordering::Release);
+    }
+    /// Read the deadline (called repeatedly by the recv thread).
+    pub fn get(&self) -> Option<Instant> {
+        let v = self.nanos.load(Ordering::Acquire);
+        if v == 0 {
+            None
+        } else {
+            Some(self.epoch + Duration::from_nanos(v))
+        }
+    }
 }

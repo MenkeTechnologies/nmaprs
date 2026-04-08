@@ -406,9 +406,8 @@ async fn ip_proto_ping_discovery_merge(
     connect_timeout: Duration,
     max_shards: usize,
 ) {
-    let skip = alive.clone();
     let s =
-        ip_proto_ping_discovery_collect(hosts, protos, Some(&skip), connect_timeout, max_shards)
+        ip_proto_ping_discovery_collect(hosts, protos, Some(&*alive), connect_timeout, max_shards)
             .await;
     alive.extend(s);
 }
@@ -420,9 +419,8 @@ async fn sctp_discovery_merge(
     connect_timeout: Duration,
     max_shards: usize,
 ) {
-    let skip = alive.clone();
     let s =
-        sctp_raw_discovery_collect(hosts, ports, Some(&skip), connect_timeout, max_shards).await;
+        sctp_raw_discovery_collect(hosts, ports, Some(&*alive), connect_timeout, max_shards).await;
     alive.extend(s);
 }
 
@@ -452,12 +450,11 @@ async fn tcp_ps_discovery_merge(
     connect_timeout: Duration,
     max_shards: usize,
 ) {
-    let skip = alive.clone();
     let new_up = tcp_ps_discovery_or_connect(
         hosts,
         ports,
         concurrency,
-        Some(&skip),
+        Some(&*alive),
         connect_timeout,
         max_shards,
     )
@@ -491,12 +488,11 @@ async fn tcp_pa_discovery_merge(
     connect_timeout: Duration,
     max_shards: usize,
 ) {
-    let skip = alive.clone();
     let new_up = tcp_pa_discovery_or_connect(
         hosts,
         ports,
         concurrency,
-        Some(&skip),
+        Some(&*alive),
         connect_timeout,
         max_shards,
     )
@@ -605,8 +601,7 @@ async fn udp_discovery(
     alive: &mut HashSet<IpAddr>,
     icmp_wait: Duration,
 ) {
-    let skip = alive.clone();
-    let new_up = udp_discovery_collect(hosts, ports, concurrency, Some(&skip), icmp_wait).await;
+    let new_up = udp_discovery_collect(hosts, ports, concurrency, Some(&*alive), icmp_wait).await;
     alive.extend(new_up);
 }
 
@@ -617,11 +612,10 @@ async fn icmp_timestamp_discovery_merge(
     timeout: Duration,
     concurrency: usize,
 ) {
-    let skip = alive.clone();
     let v4: Vec<Ipv4Addr> = hosts
         .iter()
         .copied()
-        .filter(|h| !skip.contains(h))
+        .filter(|h| !alive.contains(h))
         .filter_map(|h| match h {
             IpAddr::V4(a) => Some(a),
             IpAddr::V6(_) => None,
@@ -656,11 +650,10 @@ async fn icmp_mask_discovery_merge(
     timeout: Duration,
     concurrency: usize,
 ) {
-    let skip = alive.clone();
     let v4: Vec<Ipv4Addr> = hosts
         .iter()
         .copied()
-        .filter(|h| !skip.contains(h))
+        .filter(|h| !alive.contains(h))
         .filter_map(|h| match h {
             IpAddr::V4(a) => Some(a),
             IpAddr::V6(_) => None,

@@ -11,7 +11,7 @@ use std::io;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -179,7 +179,7 @@ fn ip_proto_ipv4_one_round(
     .1;
 
     let pending: Arc<DashMap<ProtoKey, (Instant, usize)>> = Arc::new(DashMap::new());
-    let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let global_end = Arc::new(crate::net_util::AtomicDeadline::new(Instant::now()));
 
     let pending_r = Arc::clone(&pending);
     let results_r = Arc::clone(&global_results);
@@ -188,7 +188,7 @@ fn ip_proto_ipv4_one_round(
     let recv_handle = thread::spawn(move || -> io::Result<()> {
         loop {
             let now = Instant::now();
-            let ge = *global_end_r.lock().expect("global_end");
+            let ge = global_end_r.get();
             if pending_r.is_empty() && ge.is_some() {
                 break;
             }
@@ -271,7 +271,7 @@ fn ip_proto_ipv4_one_round(
         }
     }
 
-    *global_end.lock().expect("global_end") = Some(ge_max);
+    global_end.set(ge_max);
 
     let recv_res = recv_handle
         .join()
@@ -594,7 +594,7 @@ fn ip_proto_ipv6_one_round(
     .1;
 
     let pending: Arc<DashMap<ProtoKeyV6, (Instant, usize)>> = Arc::new(DashMap::new());
-    let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let global_end = Arc::new(crate::net_util::AtomicDeadline::new(Instant::now()));
 
     let pending_r = Arc::clone(&pending);
     let results_r = Arc::clone(&global_results);
@@ -603,7 +603,7 @@ fn ip_proto_ipv6_one_round(
     let recv_handle = thread::spawn(move || -> io::Result<()> {
         loop {
             let now = Instant::now();
-            let ge = *global_end_r.lock().expect("global_end");
+            let ge = global_end_r.get();
             if pending_r.is_empty() && ge.is_some() {
                 break;
             }
@@ -665,7 +665,7 @@ fn ip_proto_ipv6_one_round(
         send_ipv6_proto_header_probe(&tx, src_ip, dst_ip, proto, &mut rng)?;
     }
 
-    *global_end.lock().expect("global_end") = Some(ge_max);
+    global_end.set(ge_max);
 
     let recv_res = recv_handle
         .join()

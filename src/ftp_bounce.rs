@@ -141,8 +141,8 @@ pub async fn ftp_bounce_scan(
     let scan_delay = plan.scan_delay;
     let max_scan_delay = plan.max_scan_delay;
     let server = target.server;
-    let user = target.user;
-    let pass = target.pass;
+    let user: Arc<str> = target.user.into();
+    let pass: Arc<str> = target.pass.into();
     let max_tries = 1u32.saturating_add(connect_retries);
 
     stream::iter(work)

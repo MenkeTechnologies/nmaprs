@@ -7,7 +7,7 @@ use std::io;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -289,7 +289,7 @@ fn sctp_ipv4_one_round(
     .1;
 
     let pending: Arc<DashMap<SctpKeyV4, (Instant, usize)>> = Arc::new(DashMap::new());
-    let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let global_end = Arc::new(crate::net_util::AtomicDeadline::new(Instant::now()));
 
     let pending_r = Arc::clone(&pending);
     let results_r = Arc::clone(&global_results);
@@ -299,7 +299,7 @@ fn sctp_ipv4_one_round(
     let recv_handle = thread::spawn(move || -> io::Result<()> {
         loop {
             let now = Instant::now();
-            let ge = *global_end_r.lock().expect("global_end");
+            let ge = global_end_r.get();
             if pending_r.is_empty() && ge.is_some() {
                 break;
             }
@@ -412,7 +412,7 @@ fn sctp_ipv4_one_round(
         tx.send_to(ip, IpAddr::V4(dst_ip))?;
     }
 
-    *global_end.lock().expect("global_end") = Some(ge_max);
+    global_end.set(ge_max);
 
     let recv_res = recv_handle
         .join()
@@ -444,7 +444,7 @@ fn sctp_ipv6_one_round(
     )?;
 
     let pending: Arc<DashMap<SctpKeyV6, (Instant, usize)>> = Arc::new(DashMap::new());
-    let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let global_end = Arc::new(crate::net_util::AtomicDeadline::new(Instant::now()));
 
     let pending_r = Arc::clone(&pending);
     let results_r = Arc::clone(&global_results);
@@ -454,7 +454,7 @@ fn sctp_ipv6_one_round(
     let recv_handle = thread::spawn(move || -> io::Result<()> {
         loop {
             let now = Instant::now();
-            let ge = *global_end_r.lock().expect("global_end");
+            let ge = global_end_r.get();
             if pending_r.is_empty() && ge.is_some() {
                 break;
             }
@@ -556,7 +556,7 @@ fn sctp_ipv6_one_round(
         tx.send_to(RawSctp(&seg), IpAddr::V6(dst_ip)).map(|_| ())?;
     }
 
-    *global_end.lock().expect("global_end") = Some(ge_max);
+    global_end.set(ge_max);
 
     let recv_res = recv_handle
         .join()
