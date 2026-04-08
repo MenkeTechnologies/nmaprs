@@ -110,9 +110,19 @@ cargo test
 
 ## Benchmarks
 
+**Criterion** (Rust internals, TCP connect to three closed localhost ports):
+
 ```bash
 cargo bench --bench scan
 ```
+
+**vs Nmap** (wall time, same logical work — not feature parity): after `cargo build --release`, run:
+
+```bash
+./scripts/benchmark_vs_nmap.sh
+```
+
+Requires **`nmap`** and **[hyperfine](https://github.com/sharkdp/hyperfine)** on `PATH`. The script compares **TCP connect** (`-sT` / nmaprs default) to **127.0.0.1** with matched **`-n`**, **`-Pn`**, **`--min-rtt-timeout 50ms`**, **`--max-retries 0`**, **256-way parallelism**, **`-oN /dev/null`**, for (A) three high closed ports and (B) **`--top-ports 100`**. On a quiet machine, nmaprs is often **~2–5×** faster in that scenario; your OS, Nmap build, and open ports on loopback will change the numbers.
 
 ## Architecture
 
