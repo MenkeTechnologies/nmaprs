@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 use dashmap::DashMap;
@@ -259,14 +260,25 @@ pub async fn run(args: Args) -> Result<i32> {
             let syn_pacer = plan
                 .max_probe_rate
                 .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
+            let syn_host_start = plan
+                .host_timeout
+                .map(|_| Arc::new(DashMap::<IpAddr, Instant>::new()));
+            let syn_host_limit = plan.host_timeout;
 
             let v4_fut = async {
                 if work_v4.is_empty() {
                     return Ok(Ok(vec![]));
                 }
                 let pacer = syn_pacer.clone();
+                let host_start = syn_host_start.clone();
                 match tokio::task::spawn_blocking(move || {
-                    crate::syn::syn_scan_ipv4(work_v4, to, pacer)
+                    crate::syn::syn_scan_ipv4(
+                        work_v4,
+                        to,
+                        pacer,
+                        syn_host_limit,
+                        host_start,
+                    )
                 })
                 .await
                 {
@@ -279,8 +291,15 @@ pub async fn run(args: Args) -> Result<i32> {
                     return Ok(Ok(vec![]));
                 }
                 let pacer = syn_pacer.clone();
+                let host_start = syn_host_start.clone();
                 match tokio::task::spawn_blocking(move || {
-                    crate::syn::syn_scan_ipv6(work_v6, to, pacer)
+                    crate::syn::syn_scan_ipv6(
+                        work_v6,
+                        to,
+                        pacer,
+                        syn_host_limit,
+                        host_start,
+                    )
                 })
                 .await
                 {

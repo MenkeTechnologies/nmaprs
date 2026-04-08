@@ -42,6 +42,8 @@ pub struct ScanPlan {
     pub resume_path: Option<PathBuf>,
     /// Cap on probe **starts** per second (`--max-rate`). `None` = no limit.
     pub max_probe_rate: Option<u64>,
+    /// Max wall-clock time per host for the port scan phase (`--host-timeout`).
+    pub host_timeout: Option<Duration>,
     pub unimplemented: Vec<String>,
 }
 
@@ -173,6 +175,12 @@ impl ScanPlan {
             connect_timeout = parse_duration(s).with_context(|| "initial-rtt-timeout")?;
         }
 
+        let host_timeout = if let Some(s) = &args.host_timeout {
+            Some(parse_duration(s).with_context(|| "host-timeout")?)
+        } else {
+            None
+        };
+
         let mut output_normal = args.output_normal.clone();
         let mut output_grepable = args.output_grepable.clone();
         let mut output_xml = args.output_xml.clone();
@@ -208,6 +216,7 @@ impl ScanPlan {
             traceroute: args.traceroute,
             resume_path: args.resume.clone(),
             max_probe_rate: args.max_rate,
+            host_timeout,
             unimplemented,
         };
 

@@ -21,7 +21,7 @@ use pnet_sys;
 use rand::Rng;
 
 use crate::ipv6_l4;
-use crate::scan::{MaxRatePacer, PortLine, PortReason};
+use crate::scan::{host_over_deadline, MaxRatePacer, PortLine, PortReason};
 
 const RECV_SLICE: Duration = Duration::from_millis(50);
 const RX_BUF: usize = 65536;
@@ -74,6 +74,7 @@ fn recv_ipv6_tcp_with_timeout(
 enum SynOutcome {
     Open,
     Closed,
+    HostTimeout,
 }
 
 /// Half-open SYN scan for IPv4: receiver thread + main-thread send pipeline.
@@ -81,6 +82,8 @@ pub fn syn_scan_ipv4(
     order: Vec<(Ipv4Addr, u16)>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<MaxRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
 ) -> io::Result<Vec<PortLine>> {
     let (mut tx, mut rx) = transport_channel(
         RX_BUF,
@@ -158,6 +161,13 @@ pub fn syn_scan_ipv4(
     let mut pkt_buf = vec![0u8; tcp_len];
     let mut ge_max = Instant::now();
     for (idx, (dst_ip, port)) in order.iter().enumerate() {
+        if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
+            let ip = IpAddr::V4(*dst_ip);
+            if host_over_deadline(hs.as_ref(), ip, limit) {
+                results.lock().expect("results")[idx] = Some(SynOutcome::HostTimeout);
+                continue;
+            }
+        }
         if let Some(p) = pacer.as_ref() {
             p.wait_turn_sync();
         }
@@ -213,6 +223,7 @@ pub fn syn_scan_ipv4(
         let (state, reason) = match results[i] {
             Some(SynOutcome::Open) => ("open", PortReason::SynAck),
             Some(SynOutcome::Closed) => ("closed", PortReason::ConnRefused),
+            Some(SynOutcome::HostTimeout) => ("filtered", PortReason::HostTimeout),
             None => ("filtered", PortReason::Timeout),
         };
         out.push(PortLine {
@@ -233,6 +244,8 @@ pub fn syn_scan_ipv6(
     order: Vec<(Ipv6Addr, u16)>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<MaxRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
 ) -> io::Result<Vec<PortLine>> {
     let (mut tx, mut rx) = transport_channel(
         RX_BUF,
@@ -309,6 +322,13 @@ pub fn syn_scan_ipv6(
     let mut pkt_buf = vec![0u8; tcp_len];
     let mut ge_max = Instant::now();
     for (idx, (dst_ip, port)) in order.iter().enumerate() {
+        if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
+            let ip = IpAddr::V6(*dst_ip);
+            if host_over_deadline(hs.as_ref(), ip, limit) {
+                results.lock().expect("results")[idx] = Some(SynOutcome::HostTimeout);
+                continue;
+            }
+        }
         if let Some(p) = pacer.as_ref() {
             p.wait_turn_sync();
         }
@@ -364,6 +384,7 @@ pub fn syn_scan_ipv6(
         let (state, reason) = match results[i] {
             Some(SynOutcome::Open) => ("open", PortReason::SynAck),
             Some(SynOutcome::Closed) => ("closed", PortReason::ConnRefused),
+            Some(SynOutcome::HostTimeout) => ("filtered", PortReason::HostTimeout),
             None => ("filtered", PortReason::Timeout),
         };
         out.push(PortLine {

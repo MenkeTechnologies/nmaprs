@@ -26,6 +26,7 @@ Created by **MenkeTechnologies**.
 | `-O` / `-A` OS | **Heuristic** — ICMP TTL bucket guess (+ ping after TCP scan when not `-sn`) |
 | `--script` / `-sC` | **Partial** — `default` / `banner` builtins; Lua NSE **not** embedded |
 | `--iflist` | **Implemented** — lists interfaces via `if-addrs` |
+| `--host-timeout` | **Implemented** — per-host wall clock from first probe; remaining ports marked `filtered` with reason `host-timeout` (TCP connect, UDP, raw SYN; mixed v4+v6 SYN share one per-`IpAddr` clock) |
 | `--max-rate` | **Implemented** — global cap on probe **starts** per second (TCP connect, UDP, raw SYN; mixed IPv4+IPv6 SYN share one limiter) |
 | `--min-rate` | **Not implemented** — ignored with a warning |
 | Port specs (`-p`, `-F`, `--top-ports`, …) | **Implemented** — embedded TCP frequency list |

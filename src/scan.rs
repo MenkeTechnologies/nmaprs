@@ -14,6 +14,17 @@ use tokio::sync::Semaphore;
 
 use crate::config::ScanPlan;
 
+/// First probe per host records a start time; later probes are skipped once `limit` elapses (Nmap `--host-timeout`).
+pub(crate) fn host_over_deadline(
+    host_start: &DashMap<IpAddr, Instant>,
+    host: IpAddr,
+    limit: Duration,
+) -> bool {
+    let now = Instant::now();
+    let start = *host_start.entry(host).or_insert(now);
+    now.duration_since(start) > limit
+}
+
 /// Global cap on how fast probe tasks may **start** (matches `--max-rate` in Nmap terms).
 ///
 /// Shared across threads (e.g. concurrent IPv4 + IPv6 SYN senders) via [`Arc`].
@@ -103,6 +114,7 @@ pub enum PortReason {
     SynAck,
     ConnRefused,
     Timeout,
+    HostTimeout,
     Error,
     UdpResponse,
     IcmpPortUnreachable,
@@ -127,12 +139,27 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
     let pacer = plan
         .max_probe_rate
         .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
+    let host_deadline = plan.host_timeout.map(|_| Arc::new(DashMap::new()));
+    let host_limit = plan.host_timeout;
 
     stream::iter(work)
         .map(|(host, port)| {
             let sem = sem.clone();
             let pacer = pacer.clone();
+            let host_deadline = host_deadline.clone();
             async move {
+                if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
+                    if host_over_deadline(hs.as_ref(), host, limit) {
+                        return Some(PortLine {
+                            host,
+                            port,
+                            proto: "tcp",
+                            state: "filtered",
+                            reason: PortReason::HostTimeout,
+                            latency_ms: None,
+                        });
+                    }
+                }
                 if let Some(p) = pacer.as_ref() {
                     p.wait_turn().await;
                 }
@@ -202,13 +229,28 @@ pub async fn udp_scan(
     let pacer = plan
         .max_probe_rate
         .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
+    let host_deadline = plan.host_timeout.map(|_| Arc::new(DashMap::new()));
+    let host_limit = plan.host_timeout;
 
     stream::iter(work)
         .map(|(host, port)| {
             let sem = sem.clone();
             let icmp_notes = icmp_notes.clone();
             let pacer = pacer.clone();
+            let host_deadline = host_deadline.clone();
             async move {
+                if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
+                    if host_over_deadline(hs.as_ref(), host, limit) {
+                        return Some(PortLine {
+                            host,
+                            port,
+                            proto: "udp",
+                            state: "filtered",
+                            reason: PortReason::HostTimeout,
+                            latency_ms: None,
+                        });
+                    }
+                }
                 if let Some(p) = pacer.as_ref() {
                     p.wait_turn().await;
                 }
@@ -292,6 +334,24 @@ pub async fn udp_scan(
         .filter_map(|x| async move { x })
         .collect()
         .await
+}
+
+#[cfg(test)]
+mod host_deadline_tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
+
+    use dashmap::DashMap;
+
+    use super::host_over_deadline;
+
+    #[test]
+    fn host_deadline_two_probes_within_limit() {
+        let m = DashMap::new();
+        let h = IpAddr::V4(Ipv4Addr::new(9, 8, 7, 6));
+        assert!(!host_over_deadline(&m, h, Duration::from_secs(60)));
+        assert!(!host_over_deadline(&m, h, Duration::from_secs(60)));
+    }
 }
 
 #[cfg(test)]
