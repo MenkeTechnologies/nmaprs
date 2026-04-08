@@ -264,6 +264,8 @@ pub async fn run(args: Args) -> Result<i32> {
                 .host_timeout
                 .map(|_| Arc::new(DashMap::<IpAddr, Instant>::new()));
             let syn_host_limit = plan.host_timeout;
+            let syn_scan_delay = plan.scan_delay;
+            let syn_max_scan_delay = plan.max_scan_delay;
 
             let v4_fut = async {
                 if work_v4.is_empty() {
@@ -278,6 +280,8 @@ pub async fn run(args: Args) -> Result<i32> {
                         pacer,
                         syn_host_limit,
                         host_start,
+                        syn_scan_delay,
+                        syn_max_scan_delay,
                     )
                 })
                 .await
@@ -299,6 +303,8 @@ pub async fn run(args: Args) -> Result<i32> {
                         pacer,
                         syn_host_limit,
                         host_start,
+                        syn_scan_delay,
+                        syn_max_scan_delay,
                     )
                 })
                 .await

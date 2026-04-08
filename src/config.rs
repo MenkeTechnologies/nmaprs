@@ -46,6 +46,9 @@ pub struct ScanPlan {
     pub host_timeout: Option<Duration>,
     /// Extra TCP connect attempts after timeout (`--max-retries`); total tries = `1 + connect_retries`.
     pub connect_retries: u32,
+    /// Minimum delay before each probe (`--scan-delay`); with `--max-scan-delay`, delay is uniform in `[min, max]`.
+    pub scan_delay: Option<Duration>,
+    pub max_scan_delay: Option<Duration>,
     pub unimplemented: Vec<String>,
 }
 
@@ -186,6 +189,22 @@ impl ScanPlan {
             connect_timeout = connect_timeout.max(min);
         }
 
+        let scan_delay = if let Some(s) = &args.scan_delay {
+            Some(parse_duration(s).with_context(|| "scan-delay")?)
+        } else {
+            None
+        };
+        let max_scan_delay = if let Some(s) = &args.max_scan_delay {
+            Some(parse_duration(s).with_context(|| "max-scan-delay")?)
+        } else {
+            None
+        };
+        if let (Some(lo), Some(hi)) = (scan_delay, max_scan_delay) {
+            if hi < lo {
+                bail!("--max-scan-delay must be >= --scan-delay");
+            }
+        }
+
         let host_timeout = if let Some(s) = &args.host_timeout {
             Some(parse_duration(s).with_context(|| "host-timeout")?)
         } else {
@@ -229,6 +248,8 @@ impl ScanPlan {
             max_probe_rate: args.max_rate,
             host_timeout,
             connect_retries: args.max_retries.unwrap_or(0),
+            scan_delay,
+            max_scan_delay,
             unimplemented,
         };
 

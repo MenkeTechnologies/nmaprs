@@ -9,6 +9,7 @@ use std::thread;
 
 use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
+use rand::Rng;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
 
@@ -23,6 +24,65 @@ pub(crate) fn host_over_deadline(
     let now = Instant::now();
     let start = *host_start.entry(host).or_insert(now);
     now.duration_since(start) > limit
+}
+
+/// Samples a delay for `--scan-delay` / `--max-scan-delay` (uniform in `[min, max]` when both set).
+pub(crate) fn sample_inter_probe_delay(
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+) -> Option<Duration> {
+    let mut rng = rand::thread_rng();
+    match (scan_delay, max_scan_delay) {
+        (None, None) => None,
+        (Some(d), None) => Some(d),
+        (None, Some(max)) => {
+            let span = max.as_nanos();
+            if span == 0 {
+                return Some(Duration::ZERO);
+            }
+            let n = rng.gen_range(0u128..=span);
+            Some(duration_from_nanos_saturating(n))
+        }
+        (Some(min), Some(max)) => {
+            if max <= min {
+                return Some(min);
+            }
+            let span = max.saturating_sub(min).as_nanos();
+            let n = rng.gen_range(0u128..=span);
+            Some(min.saturating_add(duration_from_nanos_saturating(n)))
+        }
+    }
+}
+
+fn duration_from_nanos_saturating(n: u128) -> Duration {
+    if n <= u64::MAX as u128 {
+        Duration::from_nanos(n as u64)
+    } else {
+        Duration::from_nanos(u64::MAX)
+    }
+}
+
+pub(crate) async fn sleep_inter_probe_delay(
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+) {
+    if let Some(d) = sample_inter_probe_delay(scan_delay, max_scan_delay) {
+        if !d.is_zero() {
+            tokio::time::sleep(d).await;
+        }
+    }
+}
+
+/// Blocking SYN send loop: sleep before each probe (after host-timeout check).
+pub fn sleep_inter_probe_delay_sync(
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+) {
+    if let Some(d) = sample_inter_probe_delay(scan_delay, max_scan_delay) {
+        if !d.is_zero() {
+            thread::sleep(d);
+        }
+    }
 }
 
 /// Global cap on how fast probe tasks may **start** (matches `--max-rate` in Nmap terms).
@@ -142,6 +202,8 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
         .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
     let host_deadline = plan.host_timeout.map(|_| Arc::new(DashMap::new()));
     let host_limit = plan.host_timeout;
+    let scan_delay = plan.scan_delay;
+    let max_scan_delay = plan.max_scan_delay;
 
     stream::iter(work)
         .map(|(host, port)| {
@@ -168,6 +230,7 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
                         }
                     }
                     if timeouts == 0 {
+                        sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
                         if let Some(p) = pacer.as_ref() {
                             p.wait_turn().await;
                         }
@@ -244,6 +307,8 @@ pub async fn udp_scan(
         .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
     let host_deadline = plan.host_timeout.map(|_| Arc::new(DashMap::new()));
     let host_limit = plan.host_timeout;
+    let scan_delay = plan.scan_delay;
+    let max_scan_delay = plan.max_scan_delay;
 
     stream::iter(work)
         .map(|(host, port)| {
@@ -264,6 +329,7 @@ pub async fn udp_scan(
                         });
                     }
                 }
+                sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
                 if let Some(p) = pacer.as_ref() {
                     p.wait_turn().await;
                 }
@@ -347,6 +413,22 @@ pub async fn udp_scan(
         .filter_map(|x| async move { x })
         .collect()
         .await
+}
+
+#[cfg(test)]
+mod inter_probe_delay_tests {
+    use std::time::Duration;
+
+    use super::sample_inter_probe_delay;
+
+    #[test]
+    fn sample_fixed_when_only_scan_delay() {
+        let d = Duration::from_millis(40);
+        assert_eq!(
+            sample_inter_probe_delay(Some(d), None),
+            Some(Duration::from_millis(40))
+        );
+    }
 }
 
 #[cfg(test)]

@@ -21,7 +21,9 @@ use pnet_sys;
 use rand::Rng;
 
 use crate::ipv6_l4;
-use crate::scan::{host_over_deadline, MaxRatePacer, PortLine, PortReason};
+use crate::scan::{
+    host_over_deadline, sleep_inter_probe_delay_sync, MaxRatePacer, PortLine, PortReason,
+};
 
 const RECV_SLICE: Duration = Duration::from_millis(50);
 const RX_BUF: usize = 65536;
@@ -84,6 +86,8 @@ pub fn syn_scan_ipv4(
     pacer: Option<Arc<MaxRatePacer>>,
     host_timeout: Option<Duration>,
     host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
 ) -> io::Result<Vec<PortLine>> {
     let (mut tx, mut rx) = transport_channel(
         RX_BUF,
@@ -168,6 +172,7 @@ pub fn syn_scan_ipv4(
                 continue;
             }
         }
+        sleep_inter_probe_delay_sync(scan_delay, max_scan_delay);
         if let Some(p) = pacer.as_ref() {
             p.wait_turn_sync();
         }
@@ -246,6 +251,8 @@ pub fn syn_scan_ipv6(
     pacer: Option<Arc<MaxRatePacer>>,
     host_timeout: Option<Duration>,
     host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
 ) -> io::Result<Vec<PortLine>> {
     let (mut tx, mut rx) = transport_channel(
         RX_BUF,
@@ -329,6 +336,7 @@ pub fn syn_scan_ipv6(
                 continue;
             }
         }
+        sleep_inter_probe_delay_sync(scan_delay, max_scan_delay);
         if let Some(p) = pacer.as_ref() {
             p.wait_turn_sync();
         }

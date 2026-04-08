@@ -29,6 +29,7 @@ Created by **MenkeTechnologies**.
 | `--host-timeout` | **Implemented** — per-host wall clock from first probe; remaining ports marked `filtered` with reason `host-timeout` (TCP connect, UDP, raw SYN; mixed v4+v6 SYN share one per-`IpAddr` clock) |
 | `--max-retries` | **Implemented** — TCP connect only: extra attempts after **probe timeout** (total tries = `1 + N`); not used for UDP or raw SYN |
 | `--min-rtt-timeout` | **Implemented** — lower bound on per-probe wait (`connect_timeout = max(..., min)`); applies to TCP connect, UDP, and SYN probe timeout |
+| `--scan-delay` / `--max-scan-delay` | **Implemented** — per-probe delay before send/connect: fixed `scan-delay`, or uniform random in `[scan-delay, max-scan-delay]` when both set; TCP (first attempt), UDP, raw SYN; `max` must be `>=` `min` |
 | `--max-rate` | **Implemented** — global cap on probe **starts** per second (TCP connect, UDP, raw SYN; mixed IPv4+IPv6 SYN share one limiter) |
 | `--min-rate` | **Not implemented** — ignored with a warning |
 | Port specs (`-p`, `-F`, `--top-ports`, …) | **Implemented** — embedded TCP frequency list |
