@@ -181,6 +181,11 @@ impl ScanPlan {
             connect_timeout = parse_duration(s).with_context(|| "initial-rtt-timeout")?;
         }
 
+        if let Some(s) = &args.min_rtt_timeout {
+            let min = parse_duration(s).with_context(|| "min-rtt-timeout")?;
+            connect_timeout = connect_timeout.max(min);
+        }
+
         let host_timeout = if let Some(s) = &args.host_timeout {
             Some(parse_duration(s).with_context(|| "host-timeout")?)
         } else {
