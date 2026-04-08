@@ -83,6 +83,7 @@ fn reason_str(l: &PortLine) -> &'static str {
     match l.reason {
         SynAck => "syn-ack",
         ConnRefused => "conn-refused",
+        TcpRst => "reset",
         Timeout => "no-response",
         HostTimeout => "host-timeout",
         Error => "error",

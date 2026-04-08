@@ -109,10 +109,36 @@ fn recv_ipv6_tcp_with_timeout(
 enum SynOutcome {
     Open,
     Closed,
+    /// RST on TCP ACK port scan (`-sA`) — Nmap `unfiltered`.
+    Unfiltered,
     HostTimeout,
 }
 
-/// Raw TCP packet for port scans (`Syn`, `Null`, `Fin`, `Xmas`) vs Nmap-style **TCP ACK ping**
+/// Map raw recv outcomes to [`PortLine`] (SYN-style vs ACK scan semantics).
+fn port_line_from_syn_outcome(
+    kind: RawTcpProbeKind,
+    outcome: Option<SynOutcome>,
+    host: IpAddr,
+    port: u16,
+) -> PortLine {
+    let (state, reason) = match (kind, outcome) {
+        (_, Some(SynOutcome::Open)) => ("open", PortReason::SynAck),
+        (_, Some(SynOutcome::Unfiltered)) => ("unfiltered", PortReason::TcpRst),
+        (_, Some(SynOutcome::Closed)) => ("closed", PortReason::ConnRefused),
+        (_, Some(SynOutcome::HostTimeout)) => ("filtered", PortReason::HostTimeout),
+        (_, None) => ("filtered", PortReason::Timeout),
+    };
+    PortLine {
+        host,
+        port,
+        proto: "tcp",
+        state,
+        reason,
+        latency_ms: None,
+    }
+}
+
+/// Raw TCP packet for port scans (`Syn`, `Null`, `Fin`, `Xmas`, `AckPortScan`) vs Nmap-style **TCP ACK ping**
 /// (`AckPing`) for `-PA` discovery.
 #[derive(Clone, Copy)]
 enum RawTcpProbeKind {
@@ -123,6 +149,8 @@ enum RawTcpProbeKind {
     Fin,
     /// `-sX`: FIN \| PSH \| URG (Christmas tree).
     Xmas,
+    /// `-sA`: ACK scan — RST ⇒ `unfiltered`, no reply ⇒ `filtered` (not TCP `closed`/`open`).
+    AckPortScan,
     AckPing,
 }
 
@@ -133,6 +161,16 @@ pub enum TcpPortScanKind {
     Null,
     Fin,
     Xmas,
+    /// TCP ACK scan (`-sA`); no TCP connect fallback on raw failure (semantics differ).
+    Ack,
+}
+
+impl TcpPortScanKind {
+    /// Whether a failed raw socket setup should fall back to TCP connect (same as Nmap for half-open scans).
+    #[must_use]
+    pub fn tcp_connect_fallback_on_raw_error(self) -> bool {
+        !matches!(self, Self::Ack)
+    }
 }
 
 impl From<TcpPortScanKind> for RawTcpProbeKind {
@@ -142,6 +180,7 @@ impl From<TcpPortScanKind> for RawTcpProbeKind {
             TcpPortScanKind::Null => RawTcpProbeKind::Null,
             TcpPortScanKind::Fin => RawTcpProbeKind::Fin,
             TcpPortScanKind::Xmas => RawTcpProbeKind::Xmas,
+            TcpPortScanKind::Ack => RawTcpProbeKind::AckPortScan,
         }
     }
 }
@@ -153,6 +192,7 @@ impl fmt::Display for TcpPortScanKind {
             TcpPortScanKind::Null => "NULL",
             TcpPortScanKind::Fin => "FIN",
             TcpPortScanKind::Xmas => "Xmas",
+            TcpPortScanKind::Ack => "ACK",
         })
     }
 }
@@ -195,6 +235,7 @@ fn tcp_ipv4_one_round(
     let pending_r = Arc::clone(&pending);
     let results_r = Arc::clone(&global_results);
     let global_end_r = Arc::clone(&global_end);
+    let recv_pk = probe_kind;
 
     let recv_handle = thread::spawn(move || -> io::Result<()> {
         let mut iter = tcp_packet_iter(&mut rx);
@@ -226,7 +267,12 @@ fn tcp_ipv4_one_round(
                     };
                     let f = pkt.get_flags();
                     if f & TcpFlags::RST != 0 {
-                        results_r.lock().expect("results")[gidx] = Some(SynOutcome::Closed);
+                        let o = if matches!(recv_pk, RawTcpProbeKind::AckPortScan) {
+                            SynOutcome::Unfiltered
+                        } else {
+                            SynOutcome::Closed
+                        };
+                        results_r.lock().expect("results")[gidx] = Some(o);
                         pending_r.remove(&key);
                     } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
                         results_r.lock().expect("results")[gidx] = Some(SynOutcome::Open);
@@ -275,7 +321,7 @@ fn tcp_ipv4_one_round(
             RawTcpProbeKind::Null => (0u32, 0),
             RawTcpProbeKind::Fin => (0u32, TcpFlags::FIN),
             RawTcpProbeKind::Xmas => (0u32, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG),
-            RawTcpProbeKind::AckPing => {
+            RawTcpProbeKind::AckPortScan | RawTcpProbeKind::AckPing => {
                 let a = rng.gen::<u32>() | 1;
                 (a, TcpFlags::ACK)
             }
@@ -371,26 +417,18 @@ fn tcp_scan_ipv4_with_kind(
     let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
-        let (state, reason) = match results[i] {
-            Some(SynOutcome::Open) => ("open", PortReason::SynAck),
-            Some(SynOutcome::Closed) => ("closed", PortReason::ConnRefused),
-            Some(SynOutcome::HostTimeout) => ("filtered", PortReason::HostTimeout),
-            None => ("filtered", PortReason::Timeout),
-        };
-        out.push(PortLine {
-            host: IpAddr::V4(host),
+        out.push(port_line_from_syn_outcome(
+            kind,
+            results[i],
+            IpAddr::V4(host),
             port,
-            proto: "tcp",
-            state,
-            reason,
-            latency_ms: None,
-        });
+        ));
     }
 
     Ok(out)
 }
 
-/// Raw TCP port scan (SYN / NULL / FIN / Xmas): same pipeline as [`syn_scan_ipv4`].
+/// Raw TCP port scan (SYN / NULL / FIN / Xmas / ACK): same pipeline as [`syn_scan_ipv4`].
 #[allow(clippy::too_many_arguments)]
 pub fn tcp_port_scan_ipv4(
     kind: TcpPortScanKind,
@@ -503,6 +541,7 @@ fn tcp_ipv6_one_round(
     let pending_r = Arc::clone(&pending);
     let results_r = Arc::clone(&global_results);
     let global_end_r = Arc::clone(&global_end);
+    let recv_pk = probe_kind;
 
     let recv_handle = thread::spawn(move || -> io::Result<()> {
         loop {
@@ -533,7 +572,12 @@ fn tcp_ipv6_one_round(
                     };
                     let f = pkt.get_flags();
                     if f & TcpFlags::RST != 0 {
-                        results_r.lock().expect("results")[gidx] = Some(SynOutcome::Closed);
+                        let o = if matches!(recv_pk, RawTcpProbeKind::AckPortScan) {
+                            SynOutcome::Unfiltered
+                        } else {
+                            SynOutcome::Closed
+                        };
+                        results_r.lock().expect("results")[gidx] = Some(o);
                         pending_r.remove(&key);
                     } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
                         results_r.lock().expect("results")[gidx] = Some(SynOutcome::Open);
@@ -582,7 +626,7 @@ fn tcp_ipv6_one_round(
             RawTcpProbeKind::Null => (0u32, 0),
             RawTcpProbeKind::Fin => (0u32, TcpFlags::FIN),
             RawTcpProbeKind::Xmas => (0u32, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG),
-            RawTcpProbeKind::AckPing => {
+            RawTcpProbeKind::AckPortScan | RawTcpProbeKind::AckPing => {
                 let a = rng.gen::<u32>() | 1;
                 (a, TcpFlags::ACK)
             }
@@ -678,26 +722,18 @@ fn tcp_scan_ipv6_with_kind(
     let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
-        let (state, reason) = match results[i] {
-            Some(SynOutcome::Open) => ("open", PortReason::SynAck),
-            Some(SynOutcome::Closed) => ("closed", PortReason::ConnRefused),
-            Some(SynOutcome::HostTimeout) => ("filtered", PortReason::HostTimeout),
-            None => ("filtered", PortReason::Timeout),
-        };
-        out.push(PortLine {
-            host: IpAddr::V6(host),
+        out.push(port_line_from_syn_outcome(
+            kind,
+            results[i],
+            IpAddr::V6(host),
             port,
-            proto: "tcp",
-            state,
-            reason,
-            latency_ms: None,
-        });
+        ));
     }
 
     Ok(out)
 }
 
-/// Raw TCP port scan (SYN / NULL / FIN / Xmas), IPv6.
+/// Raw TCP port scan (SYN / NULL / FIN / Xmas / ACK), IPv6.
 #[allow(clippy::too_many_arguments)]
 pub fn tcp_port_scan_ipv6(
     kind: TcpPortScanKind,

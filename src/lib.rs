@@ -156,7 +156,11 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
         ScanKind::Udp => {
             unreachable!("UDP scans use shared ICMP listeners in run(); do not call port_scan")
         }
-        ScanKind::TcpSyn | ScanKind::TcpNull | ScanKind::TcpFin | ScanKind::TcpXmas => {
+        ScanKind::TcpSyn
+        | ScanKind::TcpNull
+        | ScanKind::TcpFin
+        | ScanKind::TcpXmas
+        | ScanKind::TcpAck => {
             let kind = plan
                 .scan_kind
                 .tcp_port_raw_kind()
@@ -240,19 +244,31 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
             match v4_out? {
                 Ok(mut lines) => collected.append(&mut lines),
                 Err(e) => {
-                    warn!(
-                        "{kind} scan failed ({e}); falling back to TCP connect for IPv4"
-                    );
-                    collected.extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone()).await);
+                    if kind.tcp_connect_fallback_on_raw_error() {
+                        warn!(
+                            "{kind} scan failed ({e}); falling back to TCP connect for IPv4"
+                        );
+                        collected.extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone()).await);
+                    } else {
+                        warn!(
+                            "{kind} scan failed ({e}); skipping TCP connect fallback (ACK scan semantics differ)"
+                        );
+                    }
                 }
             }
             match v6_out? {
                 Ok(mut lines) => collected.append(&mut lines),
                 Err(e) => {
-                    warn!(
-                        "IPv6 {kind} scan failed ({e}); falling back to TCP connect for IPv6"
-                    );
-                    collected.extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone()).await);
+                    if kind.tcp_connect_fallback_on_raw_error() {
+                        warn!(
+                            "IPv6 {kind} scan failed ({e}); falling back to TCP connect for IPv6"
+                        );
+                        collected.extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone()).await);
+                    } else {
+                        warn!(
+                            "IPv6 {kind} scan failed ({e}); skipping TCP connect fallback (ACK scan semantics differ)"
+                        );
+                    }
                 }
             }
 

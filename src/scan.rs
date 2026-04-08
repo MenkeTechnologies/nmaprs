@@ -180,6 +180,8 @@ pub(crate) fn merge_udp_icmp_note(notes: &UdpIcmpNotes, k: (IpAddr, u16), new: U
 pub enum PortReason {
     SynAck,
     ConnRefused,
+    /// RST on raw TCP ACK scan (`-sA`) — reported as `unfiltered`.
+    TcpRst,
     Timeout,
     HostTimeout,
     Error,
