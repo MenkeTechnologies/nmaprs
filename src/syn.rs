@@ -14,6 +14,7 @@ use pnet::transport::{
 use pnet_sys;
 use rand::Rng;
 
+use crate::ipv6_l4;
 use crate::scan::{PortLine, PortReason};
 
 fn local_ipv4_for_checksum() -> io::Result<Ipv4Addr> {
@@ -34,40 +35,6 @@ fn local_ipv6_for_checksum() -> io::Result<Ipv6Addr> {
     }
 }
 
-/// Strip IPv6 (and common extension headers) so `TcpPacket` starts at the TCP header.
-fn tcp_slice_after_ipv6(buf: &[u8]) -> &[u8] {
-    if buf.len() < 40 || (buf[0] >> 4) != 6 {
-        return buf;
-    }
-    let mut off = 40usize;
-    let mut nh = buf[6];
-    while nh != IpNextHeaderProtocols::Tcp.0 {
-        if off + 2 > buf.len() {
-            return buf;
-        }
-        let next_after_ext = buf[off];
-        match nh {
-            0 | 43 | 50 | 51 | 60 => {
-                let elen = buf[off + 1] as usize * 8 + 8;
-                if off + elen > buf.len() {
-                    return buf;
-                }
-                off += elen;
-                nh = next_after_ext;
-            }
-            44 => {
-                if off + 8 > buf.len() {
-                    return buf;
-                }
-                off += 8;
-                nh = next_after_ext;
-            }
-            _ => return buf,
-        }
-    }
-    buf.get(off..).unwrap_or(buf)
-}
-
 fn recv_ipv6_tcp_with_timeout(
     tr: &mut TransportReceiver,
     t: Duration,
@@ -82,7 +49,8 @@ fn recv_ipv6_tcp_with_timeout(
         Ok(len) => {
             let ip = pnet_sys::sockaddr_to_addr(&caddr, mem::size_of::<pnet_sys::SockAddrStorage>())?
                 .ip();
-            let tcp_slice = tcp_slice_after_ipv6(&tr.buffer[..len]);
+            let buf = &tr.buffer[..len];
+            let tcp_slice = ipv6_l4::ipv6_l4_slice(buf, IpNextHeaderProtocols::Tcp.0).unwrap_or(buf);
             let Some(pkt) = TcpPacket::new(tcp_slice) else {
                 return Ok(None);
             };

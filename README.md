@@ -16,7 +16,7 @@ Created by **MenkeTechnologies**.
 | Area | Status |
 |------|--------|
 | TCP connect (`-sT`, default) | **Implemented** — async, parallel, timeout-bound |
-| UDP (`-sU`) | **Implemented** — reply → `open`; timeout → `open|filtered`; on **IPv4**, ICMP type 3 code 3 (port unreachable) refines to `closed` when privileged ICMP capture works |
+| UDP (`-sU`) | **Implemented** — reply → `open`; timeout → `open|filtered`; **IPv4** ICMP type 3 code 3 and **IPv6** ICMPv6 type 1 code 4 (port unreachable) refine to `closed` when raw ICMP listeners work (privileged) |
 | SYN (`-sS`) | **Implemented** — raw IPv4 + **separate** raw IPv6 TCP path via `pnet` — **requires privileges**; falls back to TCP connect per address family on failure |
 | Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6` |
 | IPv6 (`-6`) | **Implemented** — targets + scans (including raw SYN when privileged) |
@@ -79,7 +79,7 @@ cargo bench --bench scan
 1. **Argv expansion** (`src/argv_expand.rs`) normalizes glued nmap tokens before `clap`.
 2. **Plan** (`src/config.rs`) → `ScanPlan`.
 3. **Targets** (`src/target.rs`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`.
-4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`) — TCP connect / UDP (+ optional IPv4 ICMP port-unreachable) / raw IPv4 + IPv6 SYN.
+4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — TCP connect / UDP (+ parallel ICMP + ICMPv6 listeners for port-unreachable) / raw IPv4 + IPv6 SYN.
 5. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
 6. **Output** (`src/output.rs`).
 

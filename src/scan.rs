@@ -4,17 +4,17 @@ use std::collections::HashSet;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
 use futures::stream::{self, StreamExt};
+use parking_lot::Mutex;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
 
 use crate::config::ScanPlan;
 
-/// Filled by the IPv4 ICMP listener when ICMP type 3 code 3 (port unreachable) is observed.
+/// Filled by ICMP / ICMPv6 listeners when a UDP port-unreachable is observed (IPv4: type 3 code 3; IPv6: type 1 code 4).
 pub type UdpIcmpClosedSet = Arc<Mutex<HashSet<(IpAddr, u16)>>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,8 +101,8 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
 
 /// UDP scan: send a minimal datagram and treat any UDP reply as `open`; timeout → `open|filtered`.
 ///
-/// When `icmp_closed` is set (IPv4 ICMP listener), a port-unreachable after the UDP timeout marks the
-/// port `closed` instead of `open|filtered`.
+/// When `icmp_closed` is set (ICMP / ICMPv6 listeners), a port-unreachable after the UDP timeout
+/// marks the port `closed` instead of `open|filtered`.
 pub async fn udp_scan(
     work: Vec<(IpAddr, u16)>,
     plan: Arc<ScanPlan>,
@@ -158,22 +158,16 @@ pub async fn udp_scan(
                     },
                     Err(_) => {
                         if let Some(ref set) = icmp_closed {
-                            if host.is_ipv4() {
-                                tokio::time::sleep(Duration::from_millis(5)).await;
-                                if set
-                                    .lock()
-                                    .ok()
-                                    .is_some_and(|s| s.contains(&(host, port)))
-                                {
-                                    return Some(PortLine {
-                                        host,
-                                        port,
-                                        proto: "udp",
-                                        state: "closed",
-                                        reason: PortReason::IcmpPortUnreachable,
-                                        latency_ms: None,
-                                    });
-                                }
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                            if set.lock().contains(&(host, port)) {
+                                return Some(PortLine {
+                                    host,
+                                    port,
+                                    proto: "udp",
+                                    state: "closed",
+                                    reason: PortReason::IcmpPortUnreachable,
+                                    latency_ms: None,
+                                });
                             }
                         }
                         PortLine {
