@@ -621,18 +621,42 @@ pub async fn run(args: Args) -> Result<i32> {
     }
 
     if plan.ping_only {
-        let outs = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
-        for o in &outs {
-            if o.up {
-                println!("Nmap scan report for {} - Host is up", o.host);
-                if plan.os_detect_requested {
-                    println!(
-                        "OS guess: {}",
-                        crate::os_db::format_os_guess(o.ttl, os_db.as_deref())
-                    );
-                }
+        let cmdline = std::env::args().collect::<Vec<_>>().join(" ");
+        let mut outs = OutputSet::open(
+            plan.output_normal.as_deref(),
+            plan.output_grepable.as_deref(),
+            plan.output_xml.as_deref(),
+            plan.output_script_kiddie.as_deref(),
+            plan.append_output,
+        )?;
+        outs.write_headers(&cmdline)?;
+
+        let ping_out = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
+        for o in &ping_out {
+            if !o.up {
+                continue;
             }
+            println!("Nmap scan report for {} - Host is up", o.host);
+            let os_line = if plan.os_detect_requested {
+                let s = format!(
+                    "OS guess: {}",
+                    crate::os_db::format_os_guess(o.ttl, os_db.as_deref())
+                );
+                println!("{}", s);
+                Some(s)
+            } else {
+                None
+            };
+            crate::output::write_sn_host_files(
+                outs.normal.as_mut(),
+                outs.skiddie.as_mut(),
+                outs.grep.as_mut(),
+                outs.xml.as_mut(),
+                o.host,
+                os_line.as_deref(),
+            )?;
         }
+        outs.write_footer()?;
         if plan.traceroute {
             crate::trace::run_traceroute(&hosts, plan.effective_probe_concurrency()).await?;
         }
@@ -712,20 +736,22 @@ pub async fn run(args: Args) -> Result<i32> {
             let intensity = plan.version_intensity;
             let connect_timeout = plan.connect_timeout;
             let conc = plan.effective_probe_concurrency();
-            let probes = match tokio::task::spawn_blocking(move || crate::vscan::load_tcp_probes(&path))
+            let bundle = match tokio::task::spawn_blocking(move || crate::vscan::load_service_probes(&path))
                 .await
             {
-                Ok(Ok(p)) => Arc::new(p),
+                Ok(Ok(p)) => p,
                 Ok(Err(e)) => {
                     warn!("-sV: {e}");
-                    Arc::new(vec![])
+                    crate::vscan::ServiceProbes::default()
                 }
                 Err(e) => {
                     warn!("-sV: load task: {e}");
-                    Arc::new(vec![])
+                    crate::vscan::ServiceProbes::default()
                 }
             };
-            if !probes.is_empty() {
+            let tcp_probes = Arc::new(bundle.tcp);
+            let udp_probes = Arc::new(bundle.udp);
+            if !tcp_probes.is_empty() {
                 let open_tcp: Vec<_> = lines
                     .iter()
                     .filter(|l| l.proto == "tcp" && l.state == "open")
@@ -733,7 +759,7 @@ pub async fn run(args: Args) -> Result<i32> {
                     .collect();
                 let vmap = crate::vscan::run_tcp_version_scan(
                     open_tcp,
-                    probes,
+                    tcp_probes,
                     intensity,
                     connect_timeout,
                     conc,
@@ -742,6 +768,28 @@ pub async fn run(args: Args) -> Result<i32> {
                 for l in &mut lines {
                     if l.proto == "tcp" && l.state == "open" {
                         if let Some(v) = vmap.get(&(l.host, l.port)) {
+                            l.version_info = Some(v.clone());
+                        }
+                    }
+                }
+            }
+            if !udp_probes.is_empty() {
+                let open_udp: Vec<_> = lines
+                    .iter()
+                    .filter(|l| l.proto == "udp" && l.state == "open")
+                    .map(|l| (l.host, l.port))
+                    .collect();
+                let vmap_u = crate::vscan::run_udp_version_scan(
+                    open_udp,
+                    udp_probes,
+                    intensity,
+                    connect_timeout,
+                    conc,
+                )
+                .await;
+                for l in &mut lines {
+                    if l.proto == "udp" && l.state == "open" {
+                        if let Some(v) = vmap_u.get(&(l.host, l.port)) {
                             l.version_info = Some(v.clone());
                         }
                     }

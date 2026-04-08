@@ -152,6 +152,51 @@ pub fn write_normal_files(
     Ok(())
 }
 
+/// `-sn` ping scan: host up line and optional `OS guess:` line (mirrors stdout to output files).
+pub fn write_sn_host_files(
+    mut normal: Option<&mut File>,
+    mut skiddie: Option<&mut File>,
+    mut grep: Option<&mut File>,
+    mut xml: Option<&mut File>,
+    host: IpAddr,
+    os_guess_line: Option<&str>,
+) -> Result<()> {
+    let report = format!("Nmap scan report for {host} - Host is up");
+    if let Some(f) = normal.as_mut() {
+        writeln!(f, "{}", report)?;
+    }
+    if let Some(sf) = skiddie.as_mut() {
+        writeln!(sf, "{}", crate::skiddie::skid_line(&report))?;
+    }
+    if let Some(gf) = grep.as_mut() {
+        writeln!(gf, "Host: {host} ()\tStatus: Up")?;
+    }
+    if let Some(xf) = xml.as_mut() {
+        let ty = if host.is_ipv4() { "ipv4" } else { "ipv6" };
+        writeln!(
+            xf,
+            r#"  <host><status state="up"/><address addr="{host}" addrtype="{ty}"/></host>"#
+        )?;
+    }
+    if let Some(line) = os_guess_line {
+        if let Some(f) = normal.as_mut() {
+            writeln!(f, "{}", line)?;
+        }
+        if let Some(sf) = skiddie.as_mut() {
+            writeln!(sf, "{}", crate::skiddie::skid_line(line))?;
+        }
+    }
+    if normal.is_some() || skiddie.is_some() {
+        if let Some(f) = normal.as_mut() {
+            writeln!(f)?;
+        }
+        if let Some(sf) = skiddie.as_mut() {
+            writeln!(sf)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn write_grep(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> {
     for l in lines {
         writeln!(

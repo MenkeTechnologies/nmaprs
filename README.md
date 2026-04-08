@@ -7,7 +7,7 @@
 
 # nmaprs
 
-**nmaprs** is a Rust-native network scanner that speaks **nmap’s CLI dialect** (see `nmap --help`) and runs **highly parallel** scan engines (`tokio` + `futures::stream` + bounded concurrency). Multiple `-iL` lines and CLI targets resolve **in parallel** (order preserved) with the same **`--max-parallelism` / `--min-parallelism` / timing template** cap as port probes. It is **not** a byte-for-byte reimplementation of Nmap: the full **NSE Lua runtime** and **Nmap’s TCP/IP OS probe suite** are not implemented. With Nmap’s **`nmap-service-probes`** and **`nmap-os-db`** files under `--datadir` (default `./data`), **`-sV`** runs TCP probe/version matching (Rust `regex`, Perl-only patterns skipped) and **`-O`** enriches TTL heuristics with example fingerprint titles from the DB. This tool implements **real** TCP connect, UDP probes, ICMP ping discovery, raw IPv4/IPv6 half-open TCP including SYN / NULL / FIN / Xmas / ACK / Window / Maimon (privileged), target list / random hosts, IPv6, resume checkpoints, traceroute, and **built-in** Rust “scripts” (banner grab) for `--script` / `-sC`.
+**nmaprs** is a Rust-native network scanner that speaks **nmap’s CLI dialect** (see `nmap --help`) and runs **highly parallel** scan engines (`tokio` + `futures::stream` + bounded concurrency). Multiple `-iL` lines and CLI targets resolve **in parallel** (order preserved) with the same **`--max-parallelism` / `--min-parallelism` / timing template** cap as port probes. It is **not** a byte-for-byte reimplementation of Nmap: the full **NSE Lua runtime** and **Nmap’s TCP/IP OS probe suite** (SEQ, OPS, T1–T7, etc.) are **not** implemented. With Nmap’s **`nmap-service-probes`** and **`nmap-os-db`** files under `--datadir` (default `./data`), **`-sV`** runs TCP and UDP probes with `ports` / `sslports` filtering, `tls` (**rustls**) for probe `sslports`, `rarity` vs `--version-intensity`, and `match` / `softmatch` handling (Rust `regex`; Perl-only patterns skipped). **`-O`** enriches ICMP TTL heuristics with example fingerprint titles from the DB. This tool implements **real** TCP connect, UDP probes, ICMP ping discovery, raw IPv4/IPv6 half-open TCP including SYN / NULL / FIN / Xmas / ACK / Window / Maimon (privileged), target list / random hosts, IPv6, resume checkpoints, traceroute, and **built-in** Rust “scripts” (banner grab) for `--script` / `-sC`.
 
 Created by **MenkeTechnologies**.
 
@@ -25,14 +25,14 @@ Created by **MenkeTechnologies**.
 | Raw half-open TCP (`-sS` SYN, `-sN` NULL, `-sF` FIN, `-sX` Xmas, `-sM` Maimon) | **Implemented** — raw IPv4 + **separate** raw IPv6 TCP path via `pnet` — **requires privileges**; RST→`closed`, SYN/ACK→`open` (Maimon sends FIN+ACK); **pipelined** per family: dedicated recv thread + main-thread sends (keys registered **before** each send to avoid races); work is **sharded** across up to **16** concurrent pipelines per family (bounded by `effective_probe_concurrency()`); **mixed v4+v6 targets** run both families **concurrently** (`tokio::join`); falls back to TCP connect per address family on raw failure |
 | TCP ACK scan (`-sA`) | **Implemented** — same raw sharded pipeline; RST→`unfiltered`, no reply→`filtered` (Nmap-style firewall mapping); **no** TCP connect fallback on raw failure (connect would not produce ACK-scan states) |
 | TCP window scan (`-sW`) | **Implemented** — same ACK probes as `-sA`; RST with non-zero TCP window→`open`, RST with zero window→`closed` (typical BSD-derived stacks); no reply→`filtered`; **no** TCP connect fallback on raw failure |
-| Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6` |
+| Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6`; **`-oN` / `-oG` / `-oX` / `-oS`** write host-up lines (and `-oS` skiddie text) like the port-scan path |
 | Host discovery (before port scan) | **Implemented** — skipped with `-Pn` / `--no-ping`. **Default** runs **ICMP echo** in parallel with **raw TCP SYN** to **443** and **80** (same engine as `-sS`); **RST/SYN-ACK** ⇒ up; falls back to **TCP connect** if raw fails. **`-PS`**: raw SYN; **`-PA`**: raw TCP **ACK** probes (RST/SYN-ACK), same sharded pipelines + connect fallback. **`-PU`** (default **40125**): UDP / ICMP-style socket errors. **`-PY`**: SCTP **INIT** (default port **80**), same raw SCTP engines as `-sY`; INIT-ACK/ABORT ⇒ up; **privileged**; IPv4/IPv6 merged independently on partial failure. **`-PO`**: IP protocol ping (default protocols **1,2,4**), same engines as `-sO`; host **up** if any probe is **open** or **closed**; **privileged**; IPv4/IPv6 merged independently on partial failure. **`-PP`** / **`-PM`**: ICMP **timestamp** and **address mask** requests (IPv4 only, **Unix** raw ICMP); **timestamp reply** / **mask reply** ⇒ up; **`connect_timeout`** applies to TCP/UDP/SCTP/IP-proto waits and to these ICMP probes; non-Unix builds skip `-PP`/`-PM` with a warning |
 | IPv6 (`-6`) | **Implemented** — targets + scans (including raw SYN when privileged) |
 | `-iL` / `-iR` | **Implemented** |
 | `--resume` | **Implemented** — JSON checkpoint of completed `(host, port)`; applies to TCP connect, UDP, **raw half-open TCP**, and **IP protocol (`-sO`)** (remaining pairs only after the checkpoint) |
 | `--traceroute` | **Implemented** — system `traceroute` / `tracert`; hosts run **concurrently** up to **`min(effective parallelism, 32)`** subprocesses, stdout/stderr printed in **target order** |
-| `-O` / `-A` OS | **Heuristic** — ICMP TTL bucket guess; with `nmap-os-db` in `--datadir`, example DB titles for the TTL bucket (+ ping after TCP scan when not `-sn`). **Not** full Nmap OS fingerprint matching |
-| `-sV` / `--version-scan` | **Partial** — TCP probes + `match` lines from `nmap-service-probes` (see Data); **Perl-only** regex features omitted; parallel per open TCP port |
+| `-O` / `-A` OS | **Heuristic** — ICMP TTL bucket guess; with `nmap-os-db` in `--datadir`, example DB titles for the TTL bucket (+ ping after TCP scan when not `-sn`). **Does not** run Nmap’s TCP/IP OS fingerprint probes (SEQ/OPS/T1–T7) or classifier matching |
+| `-sV` / `--version-scan` | **Partial** — loads `nmap-service-probes`: **TCP** + **UDP** `Probe` blocks, **`ports`** / **`sslports`** (TLS via **rustls** when the port matches the probe’s `sslports`), **`rarity`** vs `--version-intensity`, **`match`** / **`softmatch`**; **Perl-only** regex features omitted; parallel per open port |
 | `--script` / `-sC` | **Partial** — `default` / `banner` builtins; Lua NSE **not** embedded |
 | `--iflist` | **Implemented** — lists interfaces via `if-addrs` |
 | `--host-timeout` | **Implemented** — per-host wall clock from first probe; remaining ports marked `filtered` with reason `host-timeout` (TCP connect, UDP, raw half-open TCP, **IP protocol scan**; mixed v4+v6 share one per-`IpAddr` clock) |
@@ -44,7 +44,7 @@ Created by **MenkeTechnologies**.
 | `--min-hostgroup` / `--max-hostgroup` | **Implemented** — splits the resolved host list into batches before port work is built; omitting both scans all hosts in one batch. If only one is set, the other defaults to **1** or **1024** (Nmap-style). When both differ, batch sizes are uniform random in `[min, max]` (last batch may be smaller). `--resume` still filters per batch and merges once at the end |
 | `--scanflags` | **Implemented** — custom TCP flag set for **raw** TCP scans (`-sS` / `-sN` / `-sF` / `-sX` / `-sM` / `-sA` / `-sW`); names `SYN` `ACK` `FIN` `RST` `PSH` `URG` `ECE` `CWR` (space, comma, pipe, or glued e.g. `SYNACK`); sequence/ack numbers follow Nmap-style rules for SYN vs ACK probes; recv classification still follows the selected scan type; **ignored** (with warning) if the scan type is not raw TCP |
 | Port specs (`-p`, `-F`, `--top-ports`, …) | **Implemented** — embedded TCP frequency list |
-| Output (`-oN`, `-oG`, `-oX`, `-oA`, `-oS`) | **Implemented** — XML minimal; **`-oS`** writes script-kiddie text mirroring `-oN` lines (stdout stays normal) |
+| Output (`-oN`, `-oG`, `-oX`, `-oA`, `-oS`) | **Implemented** — XML minimal; **`-oS`** writes script-kiddie text mirroring `-oN` lines (stdout stays normal); works for **`-sn`** as well as port scans |
 
 If you need **authoritative** Nmap NSE/OS DB behavior, use **[Nmap](https://nmap.org/)**.
 
@@ -115,6 +115,10 @@ cargo bench --bench scan
 `bash scripts/fetch_nmap_data.sh`
 
 Those files are **not** committed; without them, **`-sV`** logs a warning and **`-O`** uses TTL-only heuristics.
+
+### OS fingerprint probes (not implemented)
+
+Full Nmap **`-O`** classification uses **dedicated TCP/IP probes** (IP ID, TCP option layout, ICMP, etc.) and **matches** `nmap-os-db` **test fingerprints**. That probe suite is **not** implemented here; **`nmap-os-db`** is used only for **illustrative** titles aligned with the TTL bucket.
 
 ## License
 
