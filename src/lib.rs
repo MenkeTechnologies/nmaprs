@@ -160,27 +160,42 @@ pub async fn run(args: Args) -> Result<i32> {
                 let notes: UdpIcmpNotes = Arc::new(DashMap::new());
                 let stop = Arc::new(AtomicBool::new(false));
                 let mut listeners = Vec::new();
-                if has_v4 {
+                #[cfg(unix)]
+                let icmp_dual_stack = has_v4 && has_v6;
+                #[cfg(not(unix))]
+                let icmp_dual_stack = false;
+
+                if icmp_dual_stack {
                     let notes_bg = notes.clone();
                     let stop_bg = stop.clone();
                     listeners.push(std::thread::spawn(move || {
-                        if let Err(e) =
-                            crate::icmp_listen::run_ipv4_port_unreachable_listener(notes_bg, stop_bg)
-                        {
-                            warn!(error = %e, "IPv4 ICMP listener exited");
+                        if let Err(e) = crate::icmp_listen::run_udp_icmp_dual_stack(notes_bg, stop_bg) {
+                            warn!(error = %e, "ICMP dual-stack listener exited");
                         }
                     }));
-                }
-                if has_v6 {
-                    let notes_bg = notes.clone();
-                    let stop_bg = stop.clone();
-                    listeners.push(std::thread::spawn(move || {
-                        if let Err(e) =
-                            crate::icmp_listen::run_ipv6_port_unreachable_listener(notes_bg, stop_bg)
-                        {
-                            warn!(error = %e, "ICMPv6 listener exited");
-                        }
-                    }));
+                } else {
+                    if has_v4 {
+                        let notes_bg = notes.clone();
+                        let stop_bg = stop.clone();
+                        listeners.push(std::thread::spawn(move || {
+                            if let Err(e) =
+                                crate::icmp_listen::run_ipv4_port_unreachable_listener(notes_bg, stop_bg)
+                            {
+                                warn!(error = %e, "IPv4 ICMP listener exited");
+                            }
+                        }));
+                    }
+                    if has_v6 {
+                        let notes_bg = notes.clone();
+                        let stop_bg = stop.clone();
+                        listeners.push(std::thread::spawn(move || {
+                            if let Err(e) =
+                                crate::icmp_listen::run_ipv6_port_unreachable_listener(notes_bg, stop_bg)
+                            {
+                                warn!(error = %e, "ICMPv6 listener exited");
+                            }
+                        }));
+                    }
                 }
                 let lines = udp_scan(work, plan.clone(), Some(notes)).await;
                 stop.store(true, Ordering::SeqCst);

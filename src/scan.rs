@@ -13,6 +13,9 @@ use tokio::sync::Semaphore;
 
 use crate::config::ScanPlan;
 
+/// Extra wait after UDP recv timeout so raw ICMP listeners can deliver matching errors (ms).
+const UDP_ICMP_DRAIN_MS: u64 = 2;
+
 /// Outcome of an ICMP error that references our UDP probe (embedded IP header + UDP).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UdpIcmpOutcome {
@@ -178,7 +181,7 @@ pub async fn udp_scan(
                     },
                     Err(_) => {
                         if let Some(ref notes) = icmp_notes {
-                            tokio::time::sleep(Duration::from_millis(5)).await;
+                            tokio::time::sleep(Duration::from_millis(UDP_ICMP_DRAIN_MS)).await;
                             if let Some(out) = notes.get(&(host, port)).as_deref().copied() {
                                 return Some(match out {
                                     UdpIcmpOutcome::Closed => PortLine {
