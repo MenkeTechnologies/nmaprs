@@ -202,6 +202,11 @@ pub enum PortReason {
     SctpCookieAck,
     /// SCTP ABORT (closed / reset path).
     SctpAbort,
+    /// Idle scan: IP-ID delta suggests open (spoof path).
+    IdleIpIdOpen,
+    IdleIpIdClosed,
+    /// Idle scan: could not read zombie IP-ID (probe port / privileges / network).
+    IdleProbeFailed,
 }
 
 #[derive(Debug, Clone)]

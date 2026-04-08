@@ -1,6 +1,6 @@
 //! Resolve [`crate::cli::Args`] into an executable [`ScanPlan`].
 
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -37,7 +37,7 @@ pub fn parse_ftp_bounce(spec: &str) -> Result<FtpBounceTarget> {
         Some((u, p)) => (u.to_string(), p.to_string()),
         None => (user_part.to_string(), String::new()),
     };
-    let (host, port) = parse_ftp_bounce_host_port(host_part)?;
+    let (host, port) = parse_host_colon_port(host_part, 21)?;
     let server = (host.as_str(), port)
         .to_socket_addrs()
         .with_context(|| format!("FTP bounce: resolve {host}:{port}"))?
@@ -46,26 +46,52 @@ pub fn parse_ftp_bounce(spec: &str) -> Result<FtpBounceTarget> {
     Ok(FtpBounceTarget { user, pass, server })
 }
 
-fn parse_ftp_bounce_host_port(s: &str) -> Result<(String, u16)> {
+/// `host`, `host:port`, or `[ipv6]:port` — `default_port` when omitted.
+fn parse_host_colon_port(s: &str, default_port: u16) -> Result<(String, u16)> {
     let s = s.trim();
     if s.starts_with('[') {
         if let Some(end) = s.find(']') {
             let inner = &s[1..end];
             let rest = &s[end + 1..];
             let port = if let Some(p) = rest.strip_prefix(':') {
-                p.parse().with_context(|| "FTP bounce: bad port after ]")?
+                p.parse().with_context(|| "bad port after ]")?
             } else {
-                21u16
+                default_port
             };
             return Ok((format!("[{inner}]"), port));
         }
     }
     if let Some((host, port)) = s.rsplit_once(':') {
         if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) {
-            return Ok((host.to_string(), port.parse().with_context(|| "FTP bounce: port")?));
+            return Ok((host.to_string(), port.parse().with_context(|| "port")?));
         }
     }
-    Ok((s.to_string(), 21))
+    Ok((s.to_string(), default_port))
+}
+
+/// `-sI zombie[:probeport]` — IPv4 zombie only; `probeport` should be **closed** on the zombie (default **65535**).
+#[derive(Debug, Clone)]
+pub struct IdleScanTarget {
+    pub zombie: Ipv4Addr,
+    pub probe_port: u16,
+}
+
+/// Resolve zombie host to IPv4 for idle scan.
+pub fn parse_idle_scan(spec: &str) -> Result<IdleScanTarget> {
+    let (host, probe_port) = parse_host_colon_port(spec.trim(), 65535)?;
+    let server = format!("{}:{}", host, probe_port);
+    let zombie = server
+        .to_socket_addrs()
+        .with_context(|| format!("idle (-sI): resolve {host}"))?
+        .find_map(|a| match a {
+            SocketAddr::V4(v) => Some(*v.ip()),
+            _ => None,
+        })
+        .ok_or_else(|| anyhow!("idle (-sI): no IPv4 address for {host}"))?;
+    Ok(IdleScanTarget {
+        zombie,
+        probe_port,
+    })
 }
 
 /// Resolved scan configuration after validating nmap-style flags.
@@ -119,6 +145,8 @@ pub struct ScanPlan {
     pub unimplemented: Vec<String>,
     /// `-b user:pass@host:port` — FTP bounce TCP scan (IPv4 targets only).
     pub ftp_bounce: Option<FtpBounceTarget>,
+    /// `-sI zombie[:probeport]` — idle (IP ID) scan (IPv4 only).
+    pub idle_scan: Option<IdleScanTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +164,8 @@ pub enum ScanKind {
     /// SCTP INIT / COOKIE-ECHO (`-sY` / `-sZ`) — IPv4 raw only in nmaprs.
     SctpInit,
     SctpCookieEcho,
+    /// TCP idle scan (`-sI zombie`) — spoofed SYN, IP-ID delta on zombie (IPv4 only).
+    Idle,
     Udp,
     Other(char),
 }
@@ -191,10 +221,6 @@ impl ScanPlan {
 
         if args.ping_only && args.list_scan {
             bail!("-sn and -sL together are ambiguous");
-        }
-
-        if args.idle_scan.is_some() {
-            bail!("-sI idle scan is not implemented");
         }
 
         if let Some(n) = args.max_rate {
@@ -259,8 +285,26 @@ impl ScanPlan {
             scan_kind = ScanKind::IpProto;
         }
 
+        let mut idle_scan = None;
+        if let Some(ref s) = args.idle_scan {
+            if args.scan_type.is_some() {
+                bail!("-sI idle scan cannot be combined with --scan-type");
+            }
+            if args.ip_proto_scan {
+                bail!("-sI cannot be combined with -sO");
+            }
+            if args.ftp_bounce.is_some() {
+                bail!("-sI cannot be combined with -b");
+            }
+            idle_scan = Some(parse_idle_scan(s)?);
+            scan_kind = ScanKind::Idle;
+        }
+
         let mut ftp_bounce = None;
         if let Some(ref s) = args.ftp_bounce {
+            if args.idle_scan.is_some() {
+                bail!("-b cannot be combined with -sI");
+            }
             if args.ip_proto_scan {
                 bail!("-b (FTP bounce) cannot be combined with -sO");
             }
@@ -442,6 +486,7 @@ impl ScanPlan {
             hostgroup_max: args.max_hostgroup,
             unimplemented,
             ftp_bounce,
+            idle_scan,
         };
 
         for msg in &plan.unimplemented {
@@ -498,7 +543,7 @@ mod rate_validation_tests {
 
     use crate::cli::Args;
 
-    use super::{parse_ftp_bounce, ScanPlan};
+    use super::{parse_ftp_bounce, parse_idle_scan, ScanPlan};
 
     #[test]
     fn max_rate_below_min_rate_errors() {
@@ -663,6 +708,36 @@ mod rate_validation_tests {
         let t = parse_ftp_bounce("user:@example.com:21").expect("parse");
         assert_eq!(t.user, "user");
         assert_eq!(t.pass, "");
+    }
+
+    #[test]
+    fn parses_idle_scan_target() {
+        use std::net::Ipv4Addr;
+
+        let t = parse_idle_scan("192.0.2.1").expect("parse");
+        assert_eq!(t.zombie, Ipv4Addr::new(192, 0, 2, 1));
+        assert_eq!(t.probe_port, 65535);
+        let t2 = parse_idle_scan("192.0.2.1:1234").expect("parse");
+        assert_eq!(t2.zombie, Ipv4Addr::new(192, 0, 2, 1));
+        assert_eq!(t2.probe_port, 1234);
+    }
+
+    #[test]
+    fn idle_scan_sets_kind_and_probe_port() {
+        use super::ScanKind;
+
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--sI",
+            "192.0.2.1:443",
+            "-p",
+            "80",
+            "10.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.scan_kind, ScanKind::Idle);
+        assert_eq!(plan.idle_scan.expect("idle").probe_port, 443);
     }
 
     #[test]

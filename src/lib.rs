@@ -5,6 +5,7 @@ pub mod cli;
 pub mod config;
 pub mod discovery;
 pub mod ftp_bounce;
+pub mod idle;
 pub mod icmp_listen;
 pub mod ip_proto;
 pub mod ipv6_l4;
@@ -323,6 +324,29 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
             }
 
             collected
+        }
+        ScanKind::Idle => {
+            let (work_v4, work_v6) = split_syn_work(&work);
+            if !work_v6.is_empty() {
+                warn!(
+                    "Idle scan (-sI): skipping {} IPv6 target(s) (IPv4 only)",
+                    work_v6.len()
+                );
+            }
+            if work_v4.is_empty() {
+                return Ok(vec![]);
+            }
+            let idle = plan
+                .idle_scan
+                .clone()
+                .expect("idle scan requires idle_scan target");
+            let plan_bg = plan.clone();
+            let res = tokio::task::spawn_blocking(move || {
+                crate::idle::idle_scan_ipv4(work_v4, idle, plan_bg)
+            })
+            .await
+            .map_err(|e| anyhow!("idle scan join: {e}"))?;
+            res.map_err(|e| anyhow!("idle scan: {e}"))?
         }
         ScanKind::SctpInit | ScanKind::SctpCookieEcho => {
             let probe = match plan.scan_kind {

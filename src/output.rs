@@ -97,6 +97,9 @@ fn reason_str(l: &PortLine) -> &'static str {
         SctpInitAck => "sctp-init-ack",
         SctpCookieAck => "sctp-cookie-ack",
         SctpAbort => "sctp-abort",
+        IdleIpIdOpen => "idle-ipid-open",
+        IdleIpIdClosed => "idle-ipid-closed",
+        IdleProbeFailed => "idle-probe-failed",
     }
 }
 
