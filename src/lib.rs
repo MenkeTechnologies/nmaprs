@@ -140,7 +140,7 @@ pub async fn run(args: Args) -> Result<i32> {
                 tokens.push(line);
             }
         }
-        let ips = expand_specs_ordered(tokens, opts, plan.concurrency)
+        let ips = expand_specs_ordered(tokens, opts, plan.effective_probe_concurrency())
             .await
             .context("expand targets for list scan")?;
         for ip in ips {
@@ -149,7 +149,7 @@ pub async fn run(args: Args) -> Result<i32> {
         return Ok(0);
     }
 
-    let mut hosts = collect_hosts(&args, plan.concurrency)
+    let mut hosts = collect_hosts(&args, plan.effective_probe_concurrency())
         .await
         .context("collect targets")?;
 
@@ -169,7 +169,7 @@ pub async fn run(args: Args) -> Result<i32> {
     }
 
     if plan.ping_only {
-        let outs = crate::ping::ping_hosts(&hosts, plan.concurrency).await;
+        let outs = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
         for o in &outs {
             if o.up {
                 println!("Nmap scan report for {} - Host is up", o.host);
@@ -188,7 +188,7 @@ pub async fn run(args: Args) -> Result<i32> {
         info!(
             hosts = hosts.len(),
             ports = plan.ports.len(),
-            concurrency = plan.concurrency,
+            concurrency = plan.effective_probe_concurrency(),
             "starting scan"
         );
     }
@@ -380,7 +380,7 @@ pub async fn run(args: Args) -> Result<i32> {
     outs.write_footer()?;
 
     if plan.os_detect_requested && !plan.ping_only {
-        let ping_out = crate::ping::ping_hosts(&hosts, plan.concurrency).await;
+        let ping_out = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
         for o in ping_out {
             if o.up {
                 println!(

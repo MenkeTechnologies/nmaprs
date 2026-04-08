@@ -201,7 +201,8 @@ pub struct PortLine {
 
 /// TCP connect scan with `buffer_unordered(concurrency)`.
 pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Vec<PortLine> {
-    let sem = Arc::new(Semaphore::new(plan.concurrency.max(1)));
+    let conc = plan.effective_probe_concurrency();
+    let sem = Arc::new(Semaphore::new(conc));
     let timeout = plan.connect_timeout;
     let no_ping = plan.no_ping;
     let connect_retries = plan.connect_retries;
@@ -291,7 +292,7 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
                 }
             }
         })
-        .buffer_unordered(plan.concurrency.max(1))
+        .buffer_unordered(conc)
         .filter_map(|x| async move { x })
         .collect()
         .await
@@ -306,7 +307,8 @@ pub async fn udp_scan(
     plan: Arc<ScanPlan>,
     icmp_notes: Option<UdpIcmpNotes>,
 ) -> Vec<PortLine> {
-    let sem = Arc::new(Semaphore::new(plan.concurrency.max(1)));
+    let conc = plan.effective_probe_concurrency();
+    let sem = Arc::new(Semaphore::new(conc));
     let timeout = plan.connect_timeout;
     let pacer = ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate);
     let host_deadline = plan.host_timeout.map(|_| Arc::new(DashMap::new()));
@@ -413,7 +415,7 @@ pub async fn udp_scan(
                 })
             }
         })
-        .buffer_unordered(plan.concurrency.max(1))
+        .buffer_unordered(conc)
         .filter_map(|x| async move { x })
         .collect()
         .await

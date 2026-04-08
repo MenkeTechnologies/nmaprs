@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use rand::seq::SliceRandom;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::cli::Args;
 use crate::ports::{
@@ -17,7 +17,10 @@ use crate::ports::{
 #[derive(Debug, Clone)]
 pub struct ScanPlan {
     pub ports: Vec<u16>,
+    /// Resolved parallelism (timing template + `--min-parallelism` / `--max-parallelism`).
     pub concurrency: usize,
+    /// `true` when the user set `--max-parallelism` (caps probe concurrency even with `--min-rate`).
+    pub max_parallelism_explicit: bool,
     pub connect_timeout: Duration,
     pub no_ping: bool,
     pub scan_kind: ScanKind,
@@ -64,6 +67,23 @@ pub enum ScanKind {
 }
 
 impl ScanPlan {
+    /// Parallel slots for TCP connect, UDP, ping, and target expansion (`buffer_unordered` / semaphores).
+    ///
+    /// When `--min-rate` is set and `--max-parallelism` was **not** used, raises the floor toward
+    /// `min(min_rate, 65_535)` so Nmap-style minimum probe throughput is not capped by default `-T`
+    /// limits alone.
+    pub fn effective_probe_concurrency(&self) -> usize {
+        let base = self.concurrency.max(1);
+        let Some(mr) = self.min_probe_rate else {
+            return base;
+        };
+        if self.max_parallelism_explicit {
+            return base;
+        }
+        let floor = (mr as usize).clamp(1, 65_535);
+        base.max(floor)
+    }
+
     pub fn from_args(args: &Args) -> Result<Self> {
         let mut unimplemented: Vec<String> = Vec::new();
 
@@ -180,6 +200,7 @@ impl ScanPlan {
         };
 
         let mut concurrency = base_conc as usize;
+        let max_parallelism_explicit = args.max_parallelism.is_some();
         if let Some(n) = args.max_parallelism {
             concurrency = n.min(65_535) as usize;
         }
@@ -233,6 +254,7 @@ impl ScanPlan {
         let plan = ScanPlan {
             ports,
             concurrency,
+            max_parallelism_explicit,
             connect_timeout,
             no_ping: args.no_ping,
             scan_kind,
@@ -266,6 +288,24 @@ impl ScanPlan {
 
         for msg in &plan.unimplemented {
             warn!("{msg}");
+        }
+
+        if let Some(mr) = plan.min_probe_rate {
+            let base = plan.concurrency.max(1);
+            if plan.max_parallelism_explicit {
+                if (mr as usize) > base {
+                    warn!(
+                        "--min-rate ({mr}) is higher than --max-parallelism ({base}); min-rate may not be achievable"
+                    );
+                }
+            } else {
+                let eff = plan.effective_probe_concurrency();
+                if eff > base {
+                    info!(
+                        "--min-rate ({mr}) raised probe parallelism from {base} to {eff} (omit --max-parallelism to allow this automatic floor)"
+                    );
+                }
+            }
         }
 
         Ok(plan)
@@ -318,5 +358,41 @@ mod rate_validation_tests {
             err.to_string().contains("max-rate") && err.to_string().contains("min-rate"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn min_rate_raises_effective_probe_concurrency_without_explicit_cap() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--min-rate",
+            "1000",
+            "-p",
+            "80",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.concurrency, 256);
+        assert!(!plan.max_parallelism_explicit);
+        assert_eq!(plan.effective_probe_concurrency(), 1000);
+    }
+
+    #[test]
+    fn effective_probe_concurrency_respects_explicit_max_parallelism() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--min-rate",
+            "1000",
+            "--max-parallelism",
+            "64",
+            "-p",
+            "80",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.concurrency, 64);
+        assert!(plan.max_parallelism_explicit);
+        assert_eq!(plan.effective_probe_concurrency(), 64);
     }
 }

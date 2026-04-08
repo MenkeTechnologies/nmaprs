@@ -17,6 +17,7 @@ fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
     let plan = Arc::new(ScanPlan {
         ports: vec![65533, 65534, 65535],
         concurrency: 256,
+        max_parallelism_explicit: false,
         connect_timeout: Duration::from_millis(50),
         no_ping: true,
         scan_kind: ScanKind::TcpConnect,
