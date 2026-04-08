@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
 use dashmap::DashMap;
+use futures::stream::{self, StreamExt};
 use tracing::{info, warn};
 
 use crate::cli::Args;
@@ -54,22 +55,51 @@ fn split_syn_work(work: &[(IpAddr, u16)]) -> (Vec<SynProbeV4>, Vec<SynProbeV6>) 
     (v4, v6)
 }
 
-async fn collect_hosts(args: &Args) -> Result<Vec<IpAddr>> {
+/// Expand many target tokens (hostnames, CIDRs, …) **in parallel** while preserving input order.
+async fn expand_specs_ordered(
+    specs: Vec<String>,
+    opts: ExpandOpts,
+    concurrency: usize,
+) -> Result<Vec<IpAddr>> {
+    if specs.is_empty() {
+        return Ok(vec![]);
+    }
+    let c = concurrency.max(1);
+    let results: Vec<Result<(usize, Vec<IpAddr>), anyhow::Error>> = stream::iter(specs.into_iter().enumerate())
+        .map(|(i, token)| async move {
+                let ips = expand_target(&token, &opts)
+                    .await
+                    .map_err(|e| anyhow!("expand target {token}: {e}"))?;
+                Ok((i, ips))
+        })
+        .buffer_unordered(c)
+        .collect()
+        .await;
+    let mut indexed: Vec<(usize, Vec<IpAddr>)> = Vec::with_capacity(results.len());
+    for r in results {
+        indexed.push(r?);
+    }
+    indexed.sort_by_key(|(i, _)| *i);
+    Ok(indexed.into_iter().flat_map(|(_, ips)| ips).collect())
+}
+
+async fn collect_hosts(args: &Args, concurrency: usize) -> Result<Vec<IpAddr>> {
     let opts = ExpandOpts {
         ipv6: args.ipv6,
         no_dns: args.no_dns,
     };
     let mut hosts = Vec::new();
     if let Some(path) = &args.input_list {
-        for line in read_input_list(path)? {
-            hosts.extend(expand_target(&line, &opts).await?);
-        }
+        let lines = read_input_list(path)?;
+        hosts.extend(expand_specs_ordered(lines, opts, concurrency).await?);
     }
     if let Some(n) = args.random_targets {
         hosts.extend(random_addresses(n, args.ipv6));
     }
-    for t in &args.targets {
-        hosts.extend(expand_target(t, &opts).await?);
+    if !args.targets.is_empty() {
+        hosts.extend(
+            expand_specs_ordered(args.targets.clone(), opts, concurrency).await?,
+        );
     }
     Ok(hosts)
 }
@@ -109,18 +139,18 @@ pub async fn run(args: Args) -> Result<i32> {
                 tokens.push(line);
             }
         }
-        for t in tokens {
-            let ips = expand_target(&t, &opts)
-                .await
-                .with_context(|| format!("expand target {t}"))?;
-            for ip in ips {
-                println!("{ip}");
-            }
+        let ips = expand_specs_ordered(tokens, opts, plan.concurrency)
+            .await
+            .context("expand targets for list scan")?;
+        for ip in ips {
+            println!("{ip}");
         }
         return Ok(0);
     }
 
-    let mut hosts = collect_hosts(&args).await.context("collect targets")?;
+    let mut hosts = collect_hosts(&args, plan.concurrency)
+        .await
+        .context("collect targets")?;
 
     hosts = apply_exclude(
         hosts,
@@ -342,6 +372,42 @@ pub async fn run(args: Args) -> Result<i32> {
     }
 
     Ok(0)
+}
+
+#[cfg(test)]
+mod expand_specs_tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use crate::target::ExpandOpts;
+
+    use super::expand_specs_ordered;
+
+    #[tokio::test]
+    async fn expand_specs_ordered_empty() {
+        let opts = ExpandOpts {
+            ipv6: false,
+            no_dns: true,
+        };
+        let v = expand_specs_ordered(vec![], opts, 4).await.unwrap();
+        assert!(v.is_empty());
+    }
+
+    #[tokio::test]
+    async fn expand_specs_ordered_preserves_spec_order() {
+        let opts = ExpandOpts {
+            ipv6: false,
+            no_dns: true,
+        };
+        let specs = vec!["127.0.0.2".to_string(), "127.0.0.1".to_string()];
+        let v = expand_specs_ordered(specs, opts, 8).await.unwrap();
+        assert_eq!(
+            v,
+            vec![
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            ]
+        );
+    }
 }
 
 #[cfg(test)]
