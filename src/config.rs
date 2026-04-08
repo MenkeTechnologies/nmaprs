@@ -56,6 +56,9 @@ pub struct ScanPlan {
     /// Minimum delay before each probe (`--scan-delay`); with `--max-scan-delay`, delay is uniform in `[min, max]`.
     pub scan_delay: Option<Duration>,
     pub max_scan_delay: Option<Duration>,
+    /// `--min-hostgroup` / `--max-hostgroup` (Nmap-style host batches). `None` for both = scan all hosts in one batch.
+    pub hostgroup_min: Option<u32>,
+    pub hostgroup_max: Option<u32>,
     pub unimplemented: Vec<String>,
 }
 
@@ -127,6 +130,12 @@ impl ScanPlan {
         if let (Some(mx), Some(mn)) = (args.max_rate, args.min_rate) {
             if mx < mn {
                 bail!("--max-rate must be >= --min-rate (both are probe starts per second)");
+            }
+        }
+
+        if let (Some(lo), Some(hi)) = (args.min_hostgroup, args.max_hostgroup) {
+            if hi < lo {
+                bail!("--max-hostgroup must be >= --min-hostgroup");
             }
         }
 
@@ -280,6 +289,8 @@ impl ScanPlan {
             connect_retries: args.max_retries.unwrap_or(0),
             scan_delay,
             max_scan_delay,
+            hostgroup_min: args.min_hostgroup,
+            hostgroup_max: args.max_hostgroup,
             unimplemented,
         };
 
@@ -391,5 +402,44 @@ mod rate_validation_tests {
         assert_eq!(plan.concurrency, 64);
         assert!(plan.max_parallelism_explicit);
         assert_eq!(plan.effective_probe_concurrency(), 64);
+    }
+
+    #[test]
+    fn max_hostgroup_below_min_errors() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--min-hostgroup",
+            "10",
+            "--max-hostgroup",
+            "5",
+            "-p",
+            "80",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.contains("max-hostgroup") && s.contains("min-hostgroup"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn hostgroup_flags_round_trip() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--min-hostgroup",
+            "8",
+            "--max-hostgroup",
+            "32",
+            "-p",
+            "443",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.hostgroup_min, Some(8));
+        assert_eq!(plan.hostgroup_max, Some(32));
     }
 }

@@ -46,6 +46,8 @@ fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
         connect_retries: 0,
         scan_delay: None,
         max_scan_delay: None,
+        hostgroup_min: None,
+        hostgroup_max: None,
         unimplemented: vec![],
     });
 

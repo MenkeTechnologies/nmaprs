@@ -32,6 +32,7 @@ Created by **MenkeTechnologies**.
 | `--scan-delay` / `--max-scan-delay` | **Implemented** — per-probe delay before send/connect: fixed `scan-delay`, or uniform random in `[scan-delay, max-scan-delay]` when both set; TCP (first attempt), UDP, raw SYN; `max` must be `>=` `min` |
 | `--max-rate` | **Implemented** — global cap on probe **starts** per second (TCP connect, UDP, raw SYN; mixed IPv4+IPv6 SYN share one limiter) |
 | `--min-rate` | **Implemented** — must be ≤ `--max-rate` when both are set (probe starts/sec); `--max-rate` still caps probe starts via the global pacer. Without `--max-parallelism`, TCP/UDP/ping/target expansion parallelism is raised toward `min(min-rate, 65535)` when that exceeds the timing template so the floor is reachable; with `--max-parallelism`, that cap wins and a warning is emitted if min-rate is still higher |
+| `--min-hostgroup` / `--max-hostgroup` | **Implemented** — splits the resolved host list into batches before port work is built; omitting both scans all hosts in one batch. If only one is set, the other defaults to **1** or **1024** (Nmap-style). When both differ, batch sizes are uniform random in `[min, max]` (last batch may be smaller). `--resume` still filters per batch and merges once at the end |
 | Port specs (`-p`, `-F`, `--top-ports`, …) | **Implemented** — embedded TCP frequency list |
 | Output (`-oN`, `-oG`, `-oX`, `-oA`) | **Implemented** — XML minimal; `-oS` ignored with warning |
 
@@ -85,7 +86,7 @@ cargo bench --bench scan
 1. **Argv expansion** (`src/argv_expand.rs`) normalizes glued nmap tokens before `clap`.
 2. **Plan** (`src/config.rs`) → `ScanPlan`.
 3. **Targets** (`src/target.rs`, `src/lib.rs` `expand_specs_ordered`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`; **parallel** `expand_target` with stable ordering.
-4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 SYN (recv thread pipelined with sends; optional multi-shard parallel pipelines per family).
+4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — optional `--min-hostgroup` / `--max-hostgroup` batching in `src/lib.rs` (`host_batches`); TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 SYN (recv thread pipelined with sends; optional multi-shard parallel pipelines per family).
 5. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
 6. **Output** (`src/output.rs`).
 

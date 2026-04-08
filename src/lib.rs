@@ -25,6 +25,7 @@ use std::time::Instant;
 use anyhow::{anyhow, bail, Context, Result};
 use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
+use rand::Rng;
 use tracing::{info, warn};
 
 use crate::cli::Args;
@@ -56,150 +57,53 @@ fn split_syn_work(work: &[(IpAddr, u16)]) -> (Vec<SynProbeV4>, Vec<SynProbeV6>) 
     (v4, v6)
 }
 
-/// Expand many target tokens (hostnames, CIDRs, …) **in parallel** while preserving input order.
-async fn expand_specs_ordered(
-    specs: Vec<String>,
-    opts: ExpandOpts,
-    concurrency: usize,
-) -> Result<Vec<IpAddr>> {
-    if specs.is_empty() {
-        return Ok(vec![]);
+/// Default upper bound when only `--min-hostgroup` is set (Nmap-style).
+const DEFAULT_HOSTGROUP_MAX: u32 = 1024;
+
+fn host_batches(hosts: &[IpAddr], plan: &ScanPlan) -> Vec<Vec<IpAddr>> {
+    if plan.hostgroup_min.is_none() && plan.hostgroup_max.is_none() {
+        return vec![hosts.to_vec()];
     }
-    let c = concurrency.max(1);
-    let results: Vec<Result<(usize, Vec<IpAddr>), anyhow::Error>> = stream::iter(specs.into_iter().enumerate())
-        .map(|(i, token)| async move {
-                let ips = expand_target(&token, &opts)
-                    .await
-                    .map_err(|e| anyhow!("expand target {token}: {e}"))?;
-                Ok((i, ips))
-        })
-        .buffer_unordered(c)
-        .collect()
-        .await;
-    let mut indexed: Vec<(usize, Vec<IpAddr>)> = Vec::with_capacity(results.len());
-    for r in results {
-        indexed.push(r?);
-    }
-    indexed.sort_by_key(|(i, _)| *i);
-    Ok(indexed.into_iter().flat_map(|(_, ips)| ips).collect())
+    let min_g = plan.hostgroup_min.unwrap_or(1);
+    let max_g = plan.hostgroup_max.unwrap_or(DEFAULT_HOSTGROUP_MAX);
+    batch_hosts_slice(hosts, min_g, max_g)
 }
 
-async fn collect_hosts(args: &Args, concurrency: usize) -> Result<Vec<IpAddr>> {
-    let opts = ExpandOpts {
-        ipv6: args.ipv6,
-        no_dns: args.no_dns,
-    };
-    let mut hosts = Vec::new();
-    if let Some(path) = &args.input_list {
-        let lines = read_input_list(path)?;
-        hosts.extend(expand_specs_ordered(lines, opts, concurrency).await?);
-    }
-    if let Some(n) = args.random_targets {
-        hosts.extend(random_addresses(n, args.ipv6));
-    }
-    if !args.targets.is_empty() {
-        hosts.extend(
-            expand_specs_ordered(args.targets.clone(), opts, concurrency).await?,
-        );
-    }
-    Ok(hosts)
+fn batch_hosts_slice(hosts: &[IpAddr], min_g: u32, max_g: u32) -> Vec<Vec<IpAddr>> {
+    batch_hosts_slice_with_rng(hosts, min_g, max_g, &mut rand::thread_rng())
 }
 
-/// Run the full pipeline: parse → plan → expand targets → scan → emit output.
-pub async fn run(args: Args) -> Result<i32> {
-    if args.output_script_kiddie.is_some() {
-        warn!("-oS (script kiddie) output is not implemented; ignoring");
-    }
-
-    if args.iflist {
-        for iface in if_addrs::get_if_addrs()? {
-            println!("{}: {:?}", iface.name, iface.addr);
-        }
-        return Ok(0);
-    }
-
-    let plan = ScanPlan::from_args(&args)?;
-    let plan = Arc::new(plan);
-
-    if args.targets.is_empty()
-        && args.input_list.is_none()
-        && args.random_targets.is_none()
-        && !args.list_scan
-    {
-        bail!("no targets specified (see -h)");
-    }
-
-    if args.list_scan {
-        let opts = ExpandOpts {
-            ipv6: args.ipv6,
-            no_dns: args.no_dns,
-        };
-        let mut tokens: Vec<String> = args.targets.clone();
-        if let Some(path) = &args.input_list {
-            for line in read_input_list(path)? {
-                tokens.push(line);
-            }
-        }
-        let ips = expand_specs_ordered(tokens, opts, plan.effective_probe_concurrency())
-            .await
-            .context("expand targets for list scan")?;
-        for ip in ips {
-            println!("{ip}");
-        }
-        return Ok(0);
-    }
-
-    let mut hosts = collect_hosts(&args, plan.effective_probe_concurrency())
-        .await
-        .context("collect targets")?;
-
-    hosts = apply_exclude(
-        hosts,
-        args.exclude.as_deref(),
-        args.exclude_file.as_deref(),
-        &ExpandOpts {
-            ipv6: args.ipv6,
-            no_dns: args.no_dns,
-        },
-    )
-    .map_err(|e| anyhow!("{e}"))?;
-
+fn batch_hosts_slice_with_rng<R: Rng + ?Sized>(
+    hosts: &[IpAddr],
+    min_g: u32,
+    max_g: u32,
+    rng: &mut R,
+) -> Vec<Vec<IpAddr>> {
     if hosts.is_empty() {
-        bail!("no hosts to scan after exclusions");
+        return vec![];
     }
-
-    if plan.ping_only {
-        let outs = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
-        for o in &outs {
-            if o.up {
-                println!("Nmap scan report for {} - Host is up", o.host);
-                if plan.os_detect_requested {
-                    println!("OS guess: {}", crate::os_detect::guess_from_ttl(o.ttl));
-                }
-            }
-        }
-        if plan.traceroute {
-            crate::trace::run_traceroute(&hosts).await?;
-        }
-        return Ok(0);
+    let min_g = min_g.max(1);
+    let max_g = max_g.max(min_g);
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < hosts.len() {
+        let remaining = hosts.len() - i;
+        let chunk_upper = remaining.min(max_g as usize);
+        let chunk_lower = (min_g as usize).min(chunk_upper);
+        let chunk_size = if min_g == max_g {
+            chunk_upper.min(min_g as usize)
+        } else {
+            rng.gen_range(chunk_lower..=chunk_upper)
+        };
+        let end = i + chunk_size;
+        out.push(hosts[i..end].to_vec());
+        i = end;
     }
+    out
+}
 
-    if plan.verbosity >= 1 {
-        info!(
-            hosts = hosts.len(),
-            ports = plan.ports.len(),
-            concurrency = plan.effective_probe_concurrency(),
-            "starting scan"
-        );
-    }
-
-    let mut work = build_work(&hosts, &plan.ports);
-    if let Some(path) = &plan.resume_path {
-        let st = crate::resume::ResumeState::load(path).unwrap_or_default();
-        work.retain(|(h, p)| !st.is_done(*h, *p));
-    }
-
-    let lines: Vec<PortLine> = match plan.scan_kind {
+async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<PortLine>> {
+    let out = match plan.scan_kind {
         ScanKind::Udp => {
             let has_v4 = work.iter().any(|(h, _)| h.is_ipv4());
             let has_v6 = work.iter().any(|(h, _)| h.is_ipv6());
@@ -348,12 +252,169 @@ pub async fn run(args: Args) -> Result<i32> {
         }
         ScanKind::TcpConnect | ScanKind::Other(_) => tcp_connect_scan(work, plan.clone()).await,
     };
+    Ok(out)
+}
+
+/// Expand many target tokens (hostnames, CIDRs, …) **in parallel** while preserving input order.
+async fn expand_specs_ordered(
+    specs: Vec<String>,
+    opts: ExpandOpts,
+    concurrency: usize,
+) -> Result<Vec<IpAddr>> {
+    if specs.is_empty() {
+        return Ok(vec![]);
+    }
+    let c = concurrency.max(1);
+    let results: Vec<Result<(usize, Vec<IpAddr>), anyhow::Error>> = stream::iter(specs.into_iter().enumerate())
+        .map(|(i, token)| async move {
+                let ips = expand_target(&token, &opts)
+                    .await
+                    .map_err(|e| anyhow!("expand target {token}: {e}"))?;
+                Ok((i, ips))
+        })
+        .buffer_unordered(c)
+        .collect()
+        .await;
+    let mut indexed: Vec<(usize, Vec<IpAddr>)> = Vec::with_capacity(results.len());
+    for r in results {
+        indexed.push(r?);
+    }
+    indexed.sort_by_key(|(i, _)| *i);
+    Ok(indexed.into_iter().flat_map(|(_, ips)| ips).collect())
+}
+
+async fn collect_hosts(args: &Args, concurrency: usize) -> Result<Vec<IpAddr>> {
+    let opts = ExpandOpts {
+        ipv6: args.ipv6,
+        no_dns: args.no_dns,
+    };
+    let mut hosts = Vec::new();
+    if let Some(path) = &args.input_list {
+        let lines = read_input_list(path)?;
+        hosts.extend(expand_specs_ordered(lines, opts, concurrency).await?);
+    }
+    if let Some(n) = args.random_targets {
+        hosts.extend(random_addresses(n, args.ipv6));
+    }
+    if !args.targets.is_empty() {
+        hosts.extend(
+            expand_specs_ordered(args.targets.clone(), opts, concurrency).await?,
+        );
+    }
+    Ok(hosts)
+}
+
+/// Run the full pipeline: parse → plan → expand targets → scan → emit output.
+pub async fn run(args: Args) -> Result<i32> {
+    if args.output_script_kiddie.is_some() {
+        warn!("-oS (script kiddie) output is not implemented; ignoring");
+    }
+
+    if args.iflist {
+        for iface in if_addrs::get_if_addrs()? {
+            println!("{}: {:?}", iface.name, iface.addr);
+        }
+        return Ok(0);
+    }
+
+    let plan = ScanPlan::from_args(&args)?;
+    let plan = Arc::new(plan);
+
+    if args.targets.is_empty()
+        && args.input_list.is_none()
+        && args.random_targets.is_none()
+        && !args.list_scan
+    {
+        bail!("no targets specified (see -h)");
+    }
+
+    if args.list_scan {
+        let opts = ExpandOpts {
+            ipv6: args.ipv6,
+            no_dns: args.no_dns,
+        };
+        let mut tokens: Vec<String> = args.targets.clone();
+        if let Some(path) = &args.input_list {
+            for line in read_input_list(path)? {
+                tokens.push(line);
+            }
+        }
+        let ips = expand_specs_ordered(tokens, opts, plan.effective_probe_concurrency())
+            .await
+            .context("expand targets for list scan")?;
+        for ip in ips {
+            println!("{ip}");
+        }
+        return Ok(0);
+    }
+
+    let mut hosts = collect_hosts(&args, plan.effective_probe_concurrency())
+        .await
+        .context("collect targets")?;
+
+    hosts = apply_exclude(
+        hosts,
+        args.exclude.as_deref(),
+        args.exclude_file.as_deref(),
+        &ExpandOpts {
+            ipv6: args.ipv6,
+            no_dns: args.no_dns,
+        },
+    )
+    .map_err(|e| anyhow!("{e}"))?;
+
+    if hosts.is_empty() {
+        bail!("no hosts to scan after exclusions");
+    }
+
+    if plan.ping_only {
+        let outs = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
+        for o in &outs {
+            if o.up {
+                println!("Nmap scan report for {} - Host is up", o.host);
+                if plan.os_detect_requested {
+                    println!("OS guess: {}", crate::os_detect::guess_from_ttl(o.ttl));
+                }
+            }
+        }
+        if plan.traceroute {
+            crate::trace::run_traceroute(&hosts).await?;
+        }
+        return Ok(0);
+    }
+
+    if plan.verbosity >= 1 {
+        info!(
+            hosts = hosts.len(),
+            ports = plan.ports.len(),
+            concurrency = plan.effective_probe_concurrency(),
+            "starting scan"
+        );
+    }
+
+    let mut resume_st = plan
+        .resume_path
+        .as_ref()
+        .map(|p| crate::resume::ResumeState::load(p).unwrap_or_default());
+
+    let mut lines: Vec<PortLine> = Vec::new();
+    for batch_hosts in host_batches(&hosts, &plan) {
+        let mut work = build_work(&batch_hosts, &plan.ports);
+        if let Some(ref st) = resume_st {
+            work.retain(|(h, p)| !st.is_done(*h, *p));
+        }
+        if work.is_empty() {
+            continue;
+        }
+        lines.extend(port_scan(work, plan.clone()).await?);
+    }
 
     if let Some(path) = &plan.resume_path {
-        let mut st = crate::resume::ResumeState::load(path).unwrap_or_default();
         let pairs: Vec<_> = lines.iter().map(|l| (l.host, l.port)).collect();
-        st.merge_from_scan(&pairs);
-        st.save(path)?;
+        if let Some(ref mut st) = resume_st {
+            st.merge_from_scan(&pairs);
+            st.save(path)?;
+        }
     }
 
     let mut by_host: HashMap<IpAddr, Vec<PortLine>> = HashMap::new();
@@ -474,5 +535,85 @@ mod syn_work_tests {
             ]
         );
         assert_eq!(v6, vec![(Ipv6Addr::LOCALHOST, 443)]);
+    }
+}
+
+#[cfg(test)]
+mod host_batch_tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use clap::Parser;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    use crate::cli::Args;
+    use crate::config::ScanPlan;
+
+    use super::{batch_hosts_slice_with_rng, host_batches};
+
+    fn ipv4(last: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, last))
+    }
+
+    #[test]
+    fn batch_hosts_fixed_width_splits_and_preserves_order() {
+        let hosts: Vec<_> = (1..=5).map(ipv4).collect();
+        let mut rng = StdRng::seed_from_u64(0);
+        let b = batch_hosts_slice_with_rng(&hosts, 2, 2, &mut rng);
+        assert_eq!(b.len(), 3);
+        assert_eq!(b[0].len(), 2);
+        assert_eq!(b[1].len(), 2);
+        assert_eq!(b[2].len(), 1);
+        let flat: Vec<_> = b.iter().flatten().copied().collect();
+        assert_eq!(flat, hosts);
+    }
+
+    #[test]
+    fn batch_hosts_empty_yields_empty() {
+        let hosts: Vec<IpAddr> = vec![];
+        let mut rng = StdRng::seed_from_u64(1);
+        let b = batch_hosts_slice_with_rng(&hosts, 1, 10, &mut rng);
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn host_batches_unset_is_single_pass() {
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "127.0.0.1", "127.0.0.2"]).unwrap();
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        let hosts = vec![
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+        ];
+        let b = host_batches(&hosts, &plan);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0], hosts);
+    }
+
+    #[test]
+    fn host_batches_min_max_one_splits_each_host() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--min-hostgroup",
+            "1",
+            "--max-hostgroup",
+            "1",
+            "-p",
+            "80",
+            "127.0.0.1",
+            "127.0.0.2",
+            "127.0.0.3",
+        ])
+        .unwrap();
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        let hosts = vec![
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3)),
+        ];
+        let b = host_batches(&hosts, &plan);
+        assert_eq!(b.len(), 3);
+        for chunk in &b {
+            assert_eq!(chunk.len(), 1);
+        }
     }
 }
