@@ -366,9 +366,14 @@ pub async fn run(args: Args) -> Result<i32> {
     }
 
     if !plan.ping_only && !plan.no_ping {
-        hosts = crate::discovery::hosts_after_discovery(hosts, &args, plan.effective_probe_concurrency())
-            .await
-            .context("host discovery")?;
+        hosts = crate::discovery::hosts_after_discovery(
+            hosts,
+            &args,
+            plan.effective_probe_concurrency(),
+            plan.connect_timeout,
+        )
+        .await
+        .context("host discovery")?;
     }
 
     if plan.ping_only {
