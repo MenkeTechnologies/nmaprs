@@ -121,51 +121,51 @@ All runs on **127.0.0.1**, TCP connect (`-sT`), `-n -Pn`, `--min-rtt-timeout 50m
 
 | Test | nmap | nmaprs | Speedup |
 |------|------|--------|---------|
-| 2 ports (`-p 80,443`) | 12.3 ms | 2.9 ms | **4.3× faster** |
-| 3 closed high ports (65533–65535) | 13.1 ms | 2.5 ms | **5.2× faster** |
-| `-F` (fast, ~100 ports) | 18.5 ms | 7.3 ms | **2.5× faster** |
-| `--top-ports 100` | 16.8 ms | 5.5 ms | **3.0× faster** |
-| `--top-ports 1000` | 38.9 ms | 33.6 ms | **1.2× faster** |
-| `-p-` (all 65535) | 2.05 s | 2.50 s | nmap 1.2× faster |
+| 2 ports (`-p 80,443`) | 13.2 ms | 2.5 ms | **5.3× faster** |
+| 3 closed high ports (65533–65535) | 12.9 ms | 2.6 ms | **5.0× faster** |
+| `-F` (fast, ~100 ports) | 15.9 ms | 5.2 ms | **3.0× faster** |
+| `--top-ports 100` | 16.5 ms | 5.5 ms | **3.0× faster** |
+| `--top-ports 1000` | 40.7 ms | 22.9 ms | **1.8× faster** |
+| `-p-` (all 65535) | 2.13 s | 1.27 s | **1.7× faster** |
 
 #### By parallelism (`--top-ports 1000`)
 
 | Parallelism | nmap | nmaprs | Speedup |
 |-------------|------|--------|---------|
-| M=64 | 39.2 ms | 30.3 ms | **1.3× faster** |
-| M=256 | 38.9 ms | 33.6 ms | **1.2× faster** |
+| M=64 | 41.0 ms | 19.5 ms | **2.1× faster** |
+| M=256 | 40.7 ms | 22.9 ms | **1.8× faster** |
 
 #### By parallelism (`-p-`, all 65535)
 
 | Parallelism | nmap | nmaprs | Speedup |
 |-------------|------|--------|---------|
-| M=256 | 2.05 s | 2.50 s | nmap 1.2× faster |
-| M=1024 | 1.90 s | 2.06 s | nmap 1.1× faster |
+| M=256 | 2.13 s | 1.27 s | **1.7× faster** |
+| M=1024 | 1.99 s | 1.38 s | **1.4× faster** |
 
 #### By output format (`--top-ports 100`, M=256)
 
 | Output | nmap | nmaprs | Speedup |
 |--------|------|--------|---------|
-| `-oN` | 16.8 ms | 5.5 ms | **3.0× faster** |
-| `-oG` | 16.1 ms | 6.4 ms | **2.5× faster** |
-| `-oX` | 17.2 ms | 6.4 ms | **2.7× faster** |
+| `-oN` | 16.5 ms | 5.5 ms | **3.0× faster** |
+| `-oG` | 16.7 ms | 5.8 ms | **2.9× faster** |
+| `-oX` | 16.4 ms | 5.7 ms | **2.9× faster** |
 
 #### Ping scan (`-sn`, no `-Pn`)
 
 | Test | nmap | nmaprs | Speedup |
 |------|------|--------|---------|
-| `-sn 127.0.0.1` | 4.8 ms | 4.6 ms | **~1× (parity)** |
+| `-sn 127.0.0.1` | 5.0 ms | 4.5 ms | **~1× (parity)** |
 
 #### Analysis
 
-nmaprs is **2–5× faster** on small-to-medium port counts where **startup overhead dominates** — nmap loads Lua/NSE, libpcap, and service databases before the first probe. As port count grows toward 65535 the gap closes and nmap's mature C `connect()` loop pulls slightly ahead (~1.2×) at full-sweep scale. Ping scan is at parity since both hit the same ICMP syscall floor. Output format has negligible impact on either tool.
+nmaprs is **1.4–5.3× faster** across all port counts. Small scans (2–100 ports) see the largest gains (**3–5×**) because nmap's startup overhead (Lua/NSE, libpcap, service databases) dominates. Full 65535-port sweeps still show **1.4–1.7×** speedup thanks to `tokio::spawn` per probe with work-stealing across all CPU cores (vs `buffer_unordered` single-task polling). Ping scan is at parity since both hit the same ICMP syscall floor. Output format has negligible impact on either tool.
 
 ### Criterion (Rust internals)
 
 TCP connect scan to three closed localhost ports — measures pure scan-loop overhead:
 
 ```
-tcp_connect_scan_localhost_3_ports  time: [212.76 µs 246.24 µs 281.57 µs]
+tcp_connect_scan_localhost_3_ports  time: [81.0 µs 84.4 µs 88.6 µs]
 ```
 
 ### Running benchmarks

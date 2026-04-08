@@ -11,6 +11,7 @@ use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
 use rand::Rng;
 use tokio::net::{TcpStream, UdpSocket};
+use tokio::sync::Semaphore;
 
 use crate::config::ScanPlan;
 
@@ -242,7 +243,8 @@ impl PortLine {
     }
 }
 
-/// TCP connect scan with `buffer_unordered(concurrency)` (no extra semaphore: same cap).
+/// TCP connect scan: each probe is `tokio::spawn`ed for multi-core work-stealing;
+/// an `Arc<Semaphore>` caps in-flight connects to `effective_probe_concurrency()`.
 pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Vec<PortLine> {
     let conc = plan.effective_probe_concurrency();
     let timeout = plan.connect_timeout;
@@ -254,88 +256,99 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
     let scan_delay = plan.scan_delay;
     let max_scan_delay = plan.max_scan_delay;
 
-    stream::iter(work)
-        .map(|(host, port)| {
-            let pacer = pacer.clone();
-            let host_deadline = host_deadline.clone();
-            async move {
-                let addr = SocketAddr::new(host, port);
-                let overall_start = Instant::now();
-                let max_tries = 1u32.saturating_add(connect_retries);
-                let mut timeouts = 0u32;
+    let sem = Arc::new(Semaphore::new(conc));
+    let n = work.len();
+    let mut handles = Vec::with_capacity(n);
 
-                loop {
-                    if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
-                        if host_over_deadline(hs.as_ref(), host, limit) {
-                            return Some(PortLine::new(
+    for (host, port) in work {
+        let sem = sem.clone();
+        let pacer = pacer.clone();
+        let host_deadline = host_deadline.clone();
+
+        handles.push(tokio::spawn(async move {
+            let addr = SocketAddr::new(host, port);
+            let overall_start = Instant::now();
+            let max_tries = 1u32.saturating_add(connect_retries);
+            let mut timeouts = 0u32;
+
+            loop {
+                if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
+                    if host_over_deadline(hs.as_ref(), host, limit) {
+                        return PortLine::new(
+                            host,
+                            port,
+                            "tcp",
+                            "filtered",
+                            PortReason::HostTimeout,
+                            None,
+                        );
+                    }
+                }
+                if timeouts == 0 {
+                    sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
+                    if let Some(p) = pacer.as_ref() {
+                        p.wait_turn().await;
+                    }
+                }
+
+                let _permit = sem.acquire().await.expect("semaphore closed");
+                let fut = TcpStream::connect(addr);
+                let res = tokio::time::timeout(timeout, fut).await;
+                drop(_permit);
+
+                let elapsed = overall_start.elapsed().as_millis();
+                match res {
+                    Ok(Ok(stream)) => {
+                        drop(stream);
+                        return PortLine::new(
+                            host,
+                            port,
+                            "tcp",
+                            "open",
+                            PortReason::SynAck,
+                            Some(elapsed),
+                        );
+                    }
+                    Ok(Err(e)) => {
+                        let kind = e.kind();
+                        let (state, reason): (&'static str, PortReason) =
+                            if kind == io::ErrorKind::ConnectionRefused {
+                                ("closed", PortReason::ConnRefused)
+                            } else {
+                                ("filtered", PortReason::Error)
+                            };
+                        return PortLine::new(
+                            host,
+                            port,
+                            "tcp",
+                            state,
+                            reason,
+                            Some(elapsed),
+                        );
+                    }
+                    Err(_) => {
+                        timeouts += 1;
+                        if timeouts >= max_tries {
+                            return PortLine::new(
                                 host,
                                 port,
                                 "tcp",
-                                "filtered",
-                                PortReason::HostTimeout,
+                                if no_ping { "open|filtered" } else { "filtered" },
+                                PortReason::Timeout,
                                 None,
-                            ));
-                        }
-                    }
-                    if timeouts == 0 {
-                        sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
-                        if let Some(p) = pacer.as_ref() {
-                            p.wait_turn().await;
-                        }
-                    }
-                    let fut = TcpStream::connect(addr);
-                    let res = tokio::time::timeout(timeout, fut).await;
-                    let elapsed = overall_start.elapsed().as_millis();
-                    match res {
-                        Ok(Ok(stream)) => {
-                            drop(stream);
-                            return Some(PortLine::new(
-                                host,
-                                port,
-                                "tcp",
-                                "open",
-                                PortReason::SynAck,
-                                Some(elapsed),
-                            ));
-                        }
-                        Ok(Err(e)) => {
-                            let kind = e.kind();
-                            let (state, reason): (&'static str, PortReason) =
-                                if kind == io::ErrorKind::ConnectionRefused {
-                                    ("closed", PortReason::ConnRefused)
-                                } else {
-                                    ("filtered", PortReason::Error)
-                                };
-                            return Some(PortLine::new(
-                                host,
-                                port,
-                                "tcp",
-                                state,
-                                reason,
-                                Some(elapsed),
-                            ));
-                        }
-                        Err(_) => {
-                            timeouts += 1;
-                            if timeouts >= max_tries {
-                                return Some(PortLine::new(
-                                    host,
-                                    port,
-                                    "tcp",
-                                    if no_ping { "open|filtered" } else { "filtered" },
-                                    PortReason::Timeout,
-                                    None,
-                                ));
-                            }
+                            );
                         }
                     }
                 }
             }
-        })
-        .buffer_unordered(conc)
-        .filter_map(|x| async move { x })
-        .collect()
-        .await
+        }));
+    }
+
+    let mut results = Vec::with_capacity(n);
+    for handle in handles {
+        results.push(handle.await.expect("probe task panicked"));
+    }
+    results
 }
 
 /// UDP scan: send a minimal datagram and treat any UDP reply as `open`; timeout → `open|filtered`.
