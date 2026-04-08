@@ -1,4 +1,4 @@
-//! Raw half-open TCP scans (SYN / NULL / FIN / Xmas) via `pnet` (requires elevated privileges on most OSes).
+//! Raw half-open TCP scans (SYN / NULL / FIN / Xmas / ACK / Window / Maimon) via `pnet` (requires elevated privileges on most OSes).
 //!
 //! **Batched + pipelined**: a receiver thread drains TCP replies while the main thread sends probes,
 //! overlapping RTT with the send phase. Large scans **shard** work across multiple independent
@@ -111,6 +111,8 @@ enum SynOutcome {
     Closed,
     /// RST on TCP ACK port scan (`-sA`) — Nmap `unfiltered`.
     Unfiltered,
+    /// RST with non-zero window on TCP window scan (`-sW`) — Nmap `open` on common BSD stacks.
+    WindowOpen,
     HostTimeout,
 }
 
@@ -124,6 +126,7 @@ fn port_line_from_syn_outcome(
     let (state, reason) = match (kind, outcome) {
         (_, Some(SynOutcome::Open)) => ("open", PortReason::SynAck),
         (_, Some(SynOutcome::Unfiltered)) => ("unfiltered", PortReason::TcpRst),
+        (_, Some(SynOutcome::WindowOpen)) => ("open", PortReason::TcpWindowRst),
         (_, Some(SynOutcome::Closed)) => ("closed", PortReason::ConnRefused),
         (_, Some(SynOutcome::HostTimeout)) => ("filtered", PortReason::HostTimeout),
         (_, None) => ("filtered", PortReason::Timeout),
@@ -138,8 +141,7 @@ fn port_line_from_syn_outcome(
     }
 }
 
-/// Raw TCP packet for port scans (`Syn`, `Null`, `Fin`, `Xmas`, `AckPortScan`) vs Nmap-style **TCP ACK ping**
-/// (`AckPing`) for `-PA` discovery.
+/// Raw TCP packet for port scans vs Nmap-style **TCP ACK ping** (`AckPing`) for `-PA` discovery.
 #[derive(Clone, Copy)]
 enum RawTcpProbeKind {
     Syn,
@@ -149,8 +151,12 @@ enum RawTcpProbeKind {
     Fin,
     /// `-sX`: FIN \| PSH \| URG (Christmas tree).
     Xmas,
+    /// `-sM`: FIN+ACK (Maimon) — same recv classification as SYN-style (RST/`closed`, SYN/ACK/`open`).
+    Maimon,
     /// `-sA`: ACK scan — RST ⇒ `unfiltered`, no reply ⇒ `filtered` (not TCP `closed`/`open`).
     AckPortScan,
+    /// `-sW`: window scan — same ACK probe as `-sA`; RST non-zero window ⇒ `open`, RST zero window ⇒ `closed`.
+    WindowScan,
     AckPing,
 }
 
@@ -161,15 +167,21 @@ pub enum TcpPortScanKind {
     Null,
     Fin,
     Xmas,
+    Maimon,
     /// TCP ACK scan (`-sA`); no TCP connect fallback on raw failure (semantics differ).
     Ack,
+    /// TCP window scan (`-sW`); same as ACK for fallback policy.
+    Window,
 }
 
 impl TcpPortScanKind {
     /// Whether a failed raw socket setup should fall back to TCP connect (same as Nmap for half-open scans).
     #[must_use]
     pub fn tcp_connect_fallback_on_raw_error(self) -> bool {
-        !matches!(self, Self::Ack)
+        matches!(
+            self,
+            Self::Syn | Self::Null | Self::Fin | Self::Xmas | Self::Maimon
+        )
     }
 }
 
@@ -180,7 +192,9 @@ impl From<TcpPortScanKind> for RawTcpProbeKind {
             TcpPortScanKind::Null => RawTcpProbeKind::Null,
             TcpPortScanKind::Fin => RawTcpProbeKind::Fin,
             TcpPortScanKind::Xmas => RawTcpProbeKind::Xmas,
+            TcpPortScanKind::Maimon => RawTcpProbeKind::Maimon,
             TcpPortScanKind::Ack => RawTcpProbeKind::AckPortScan,
+            TcpPortScanKind::Window => RawTcpProbeKind::WindowScan,
         }
     }
 }
@@ -192,7 +206,9 @@ impl fmt::Display for TcpPortScanKind {
             TcpPortScanKind::Null => "NULL",
             TcpPortScanKind::Fin => "FIN",
             TcpPortScanKind::Xmas => "Xmas",
+            TcpPortScanKind::Maimon => "Maimon",
             TcpPortScanKind::Ack => "ACK",
+            TcpPortScanKind::Window => "Window",
         })
     }
 }
@@ -267,10 +283,16 @@ fn tcp_ipv4_one_round(
                     };
                     let f = pkt.get_flags();
                     if f & TcpFlags::RST != 0 {
-                        let o = if matches!(recv_pk, RawTcpProbeKind::AckPortScan) {
-                            SynOutcome::Unfiltered
-                        } else {
-                            SynOutcome::Closed
+                        let o = match recv_pk {
+                            RawTcpProbeKind::AckPortScan => SynOutcome::Unfiltered,
+                            RawTcpProbeKind::WindowScan => {
+                                if pkt.get_window() != 0 {
+                                    SynOutcome::WindowOpen
+                                } else {
+                                    SynOutcome::Closed
+                                }
+                            }
+                            _ => SynOutcome::Closed,
                         };
                         results_r.lock().expect("results")[gidx] = Some(o);
                         pending_r.remove(&key);
@@ -321,7 +343,8 @@ fn tcp_ipv4_one_round(
             RawTcpProbeKind::Null => (0u32, 0),
             RawTcpProbeKind::Fin => (0u32, TcpFlags::FIN),
             RawTcpProbeKind::Xmas => (0u32, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG),
-            RawTcpProbeKind::AckPortScan | RawTcpProbeKind::AckPing => {
+            RawTcpProbeKind::Maimon => (0u32, TcpFlags::FIN | TcpFlags::ACK),
+            RawTcpProbeKind::AckPortScan | RawTcpProbeKind::WindowScan | RawTcpProbeKind::AckPing => {
                 let a = rng.gen::<u32>() | 1;
                 (a, TcpFlags::ACK)
             }
@@ -572,10 +595,16 @@ fn tcp_ipv6_one_round(
                     };
                     let f = pkt.get_flags();
                     if f & TcpFlags::RST != 0 {
-                        let o = if matches!(recv_pk, RawTcpProbeKind::AckPortScan) {
-                            SynOutcome::Unfiltered
-                        } else {
-                            SynOutcome::Closed
+                        let o = match recv_pk {
+                            RawTcpProbeKind::AckPortScan => SynOutcome::Unfiltered,
+                            RawTcpProbeKind::WindowScan => {
+                                if pkt.get_window() != 0 {
+                                    SynOutcome::WindowOpen
+                                } else {
+                                    SynOutcome::Closed
+                                }
+                            }
+                            _ => SynOutcome::Closed,
                         };
                         results_r.lock().expect("results")[gidx] = Some(o);
                         pending_r.remove(&key);
@@ -626,7 +655,8 @@ fn tcp_ipv6_one_round(
             RawTcpProbeKind::Null => (0u32, 0),
             RawTcpProbeKind::Fin => (0u32, TcpFlags::FIN),
             RawTcpProbeKind::Xmas => (0u32, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG),
-            RawTcpProbeKind::AckPortScan | RawTcpProbeKind::AckPing => {
+            RawTcpProbeKind::Maimon => (0u32, TcpFlags::FIN | TcpFlags::ACK),
+            RawTcpProbeKind::AckPortScan | RawTcpProbeKind::WindowScan | RawTcpProbeKind::AckPing => {
                 let a = rng.gen::<u32>() | 1;
                 (a, TcpFlags::ACK)
             }

@@ -182,6 +182,8 @@ pub enum PortReason {
     ConnRefused,
     /// RST on raw TCP ACK scan (`-sA`) — reported as `unfiltered`.
     TcpRst,
+    /// RST with non-zero window on TCP window scan (`-sW`) — reported as `open` (BSD-style stacks).
+    TcpWindowRst,
     Timeout,
     HostTimeout,
     Error,

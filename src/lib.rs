@@ -160,7 +160,9 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
         | ScanKind::TcpNull
         | ScanKind::TcpFin
         | ScanKind::TcpXmas
-        | ScanKind::TcpAck => {
+        | ScanKind::TcpMaimon
+        | ScanKind::TcpAck
+        | ScanKind::TcpWindow => {
             let kind = plan
                 .scan_kind
                 .tcp_port_raw_kind()
@@ -251,7 +253,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                         collected.extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone()).await);
                     } else {
                         warn!(
-                            "{kind} scan failed ({e}); skipping TCP connect fallback (ACK scan semantics differ)"
+                            "{kind} scan failed ({e}); skipping TCP connect fallback (raw scan semantics differ from connect)"
                         );
                     }
                 }
@@ -266,7 +268,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                         collected.extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone()).await);
                     } else {
                         warn!(
-                            "IPv6 {kind} scan failed ({e}); skipping TCP connect fallback (ACK scan semantics differ)"
+                            "IPv6 {kind} scan failed ({e}); skipping TCP connect fallback (raw scan semantics differ from connect)"
                         );
                     }
                 }
