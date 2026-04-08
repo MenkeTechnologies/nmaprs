@@ -21,7 +21,7 @@ Created by **MenkeTechnologies**.
 | Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6` |
 | IPv6 (`-6`) | **Implemented** — targets + scans (including raw SYN when privileged) |
 | `-iL` / `-iR` | **Implemented** |
-| `--resume` | **Implemented** — JSON checkpoint of completed `(host, port)` |
+| `--resume` | **Implemented** — JSON checkpoint of completed `(host, port)`; applies to TCP connect, UDP, and **raw SYN** (SYN scans only the remaining pairs after the checkpoint) |
 | `--traceroute` | **Implemented** — system `traceroute` / `tracert` |
 | `-O` / `-A` OS | **Heuristic** — ICMP TTL bucket guess (+ ping after TCP scan when not `-sn`) |
 | `--script` / `-sC` | **Partial** — `default` / `banner` builtins; Lua NSE **not** embedded |

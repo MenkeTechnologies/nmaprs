@@ -38,6 +38,22 @@ fn build_work(hosts: &[IpAddr], ports: &[u16]) -> Vec<(IpAddr, u16)> {
         .collect()
 }
 
+type SynProbeV4 = (Ipv4Addr, u16);
+type SynProbeV6 = (Ipv6Addr, u16);
+
+/// Split `(host, port)` work for raw SYN: same ordering as TCP connect / UDP (`--resume` applies).
+fn split_syn_work(work: &[(IpAddr, u16)]) -> (Vec<SynProbeV4>, Vec<SynProbeV6>) {
+    let mut v4 = Vec::new();
+    let mut v6 = Vec::new();
+    for &(h, p) in work {
+        match h {
+            IpAddr::V4(a) => v4.push((a, p)),
+            IpAddr::V6(a) => v6.push((a, p)),
+        }
+    }
+    (v4, v6)
+}
+
 async fn collect_hosts(args: &Args) -> Result<Vec<IpAddr>> {
     let opts = ExpandOpts {
         ipv6: args.ipv6,
@@ -208,44 +224,24 @@ pub async fn run(args: Args) -> Result<i32> {
             }
         }
         ScanKind::TcpSyn => {
-            let v4: Vec<Ipv4Addr> = hosts
-                .iter()
-                .filter_map(|h| match h {
-                    IpAddr::V4(a) => Some(*a),
-                    _ => None,
-                })
-                .collect();
-            let v6: Vec<Ipv6Addr> = hosts
-                .iter()
-                .filter_map(|h| match h {
-                    IpAddr::V6(a) => Some(*a),
-                    _ => None,
-                })
-                .collect();
-            let v4_hosts: Vec<IpAddr> = hosts.iter().filter(|h| h.is_ipv4()).copied().collect();
-            let v6_hosts: Vec<IpAddr> = hosts.iter().filter(|h| h.is_ipv6()).copied().collect();
-
-            let ports_v4 = plan.ports.clone();
-            let ports_v6 = plan.ports.clone();
+            let (work_v4, work_v6) = split_syn_work(&work);
             let to = plan.connect_timeout;
 
             let v4_fut = async {
-                if v4.is_empty() {
+                if work_v4.is_empty() {
                     return Ok(Ok(vec![]));
                 }
-                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv4(v4, &ports_v4, to))
-                    .await
+                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv4(work_v4, to)).await
                 {
                     Ok(r) => Ok(r),
                     Err(e) => Err(anyhow!("SYN join v4: {e}")),
                 }
             };
             let v6_fut = async {
-                if v6.is_empty() {
+                if work_v6.is_empty() {
                     return Ok(Ok(vec![]));
                 }
-                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv6(v6, &ports_v6, to))
-                    .await
+                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv6(work_v6, to)).await
                 {
                     Ok(r) => Ok(r),
                     Err(e) => Err(anyhow!("SYN join v6: {e}")),
@@ -256,20 +252,23 @@ pub async fn run(args: Args) -> Result<i32> {
 
             let mut collected = Vec::new();
 
+            let work_tcp_fallback_v4: Vec<(IpAddr, u16)> =
+                work.iter().filter(|(h, _)| h.is_ipv4()).copied().collect();
+            let work_tcp_fallback_v6: Vec<(IpAddr, u16)> =
+                work.iter().filter(|(h, _)| h.is_ipv6()).copied().collect();
+
             match v4_out? {
                 Ok(mut lines) => collected.append(&mut lines),
                 Err(e) => {
                     warn!("SYN scan failed ({e}); falling back to TCP connect for IPv4");
-                    let w = build_work(&v4_hosts, &plan.ports);
-                    collected.extend(tcp_connect_scan(w, plan.clone()).await);
+                    collected.extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone()).await);
                 }
             }
             match v6_out? {
                 Ok(mut lines) => collected.append(&mut lines),
                 Err(e) => {
                     warn!("IPv6 SYN scan failed ({e}); falling back to TCP connect for IPv6");
-                    let w = build_work(&v6_hosts, &plan.ports);
-                    collected.extend(tcp_connect_scan(w, plan.clone()).await);
+                    collected.extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone()).await);
                 }
             }
 
@@ -343,4 +342,29 @@ pub async fn run(args: Args) -> Result<i32> {
     }
 
     Ok(0)
+}
+
+#[cfg(test)]
+mod syn_work_tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use super::split_syn_work;
+
+    #[test]
+    fn split_syn_work_partitions_by_family() {
+        let work = vec![
+            (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 22),
+            (IpAddr::V6(Ipv6Addr::LOCALHOST), 443),
+            (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)), 80),
+        ];
+        let (v4, v6) = split_syn_work(&work);
+        assert_eq!(
+            v4,
+            vec![
+                (Ipv4Addr::new(10, 0, 0, 1), 22),
+                (Ipv4Addr::new(10, 0, 0, 2), 80),
+            ]
+        );
+        assert_eq!(v6, vec![(Ipv6Addr::LOCALHOST, 443)]);
+    }
 }

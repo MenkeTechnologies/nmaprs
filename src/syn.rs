@@ -78,8 +78,7 @@ enum SynOutcome {
 
 /// Half-open SYN scan for IPv4: receiver thread + main-thread send pipeline.
 pub fn syn_scan_ipv4(
-    hosts: Vec<Ipv4Addr>,
-    ports: &[u16],
+    order: Vec<(Ipv4Addr, u16)>,
     per_probe_timeout: Duration,
 ) -> io::Result<Vec<PortLine>> {
     let (mut tx, mut rx) = transport_channel(
@@ -96,12 +95,6 @@ pub fn syn_scan_ipv4(
         sport: u16,
     }
 
-    let mut order: Vec<(Ipv4Addr, u16)> = Vec::new();
-    for dst_ip in &hosts {
-        for &port in ports {
-            order.push((*dst_ip, port));
-        }
-    }
     let total = order.len();
     if total == 0 {
         return Ok(vec![]);
@@ -160,6 +153,9 @@ pub fn syn_scan_ipv4(
         Ok(())
     });
 
+    let tcp_len = MutableTcpPacket::minimum_packet_size();
+    let mut pkt_buf = vec![0u8; tcp_len];
+    let mut ge_max = Instant::now();
     for (idx, (dst_ip, port)) in order.iter().enumerate() {
         let sport = loop {
             let s: u16 = rng.gen_range(32768..65535);
@@ -174,6 +170,7 @@ pub fn syn_scan_ipv4(
         };
         let seq: u32 = rng.gen();
         let deadline = Instant::now() + per_probe_timeout;
+        ge_max = ge_max.max(deadline);
         pending.insert(
             Key {
                 dst: *dst_ip,
@@ -182,10 +179,9 @@ pub fn syn_scan_ipv4(
             },
             (deadline, idx),
         );
-        let tcp_len = MutableTcpPacket::minimum_packet_size();
-        let mut buf = vec![0u8; tcp_len];
         {
-            let mut tcp = MutableTcpPacket::new(&mut buf).expect("tcp buffer");
+            let buf = &mut pkt_buf[..];
+            let mut tcp = MutableTcpPacket::new(buf).expect("tcp buffer");
             tcp.set_source(sport);
             tcp.set_destination(*port);
             tcp.set_sequence(seq);
@@ -202,10 +198,6 @@ pub fn syn_scan_ipv4(
         }
     }
 
-    let mut ge_max = Instant::now();
-    for e in pending.iter() {
-        ge_max = ge_max.max(e.value().0);
-    }
     *global_end.lock().expect("global_end") = Some(ge_max);
 
     let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
@@ -234,8 +226,7 @@ pub fn syn_scan_ipv4(
 
 /// Half-open SYN scan for IPv6 (separate raw path from IPv4).
 pub fn syn_scan_ipv6(
-    hosts: Vec<Ipv6Addr>,
-    ports: &[u16],
+    order: Vec<(Ipv6Addr, u16)>,
     per_probe_timeout: Duration,
 ) -> io::Result<Vec<PortLine>> {
     let (mut tx, mut rx) = transport_channel(
@@ -252,12 +243,6 @@ pub fn syn_scan_ipv6(
         sport: u16,
     }
 
-    let mut order: Vec<(Ipv6Addr, u16)> = Vec::new();
-    for dst_ip in &hosts {
-        for &port in ports {
-            order.push((*dst_ip, port));
-        }
-    }
     let total = order.len();
     if total == 0 {
         return Ok(vec![]);
@@ -315,6 +300,9 @@ pub fn syn_scan_ipv6(
         Ok(())
     });
 
+    let tcp_len = MutableTcpPacket::minimum_packet_size();
+    let mut pkt_buf = vec![0u8; tcp_len];
+    let mut ge_max = Instant::now();
     for (idx, (dst_ip, port)) in order.iter().enumerate() {
         let sport = loop {
             let s: u16 = rng.gen_range(32768..65535);
@@ -329,6 +317,7 @@ pub fn syn_scan_ipv6(
         };
         let seq: u32 = rng.gen();
         let deadline = Instant::now() + per_probe_timeout;
+        ge_max = ge_max.max(deadline);
         pending.insert(
             Key {
                 dst: *dst_ip,
@@ -337,10 +326,9 @@ pub fn syn_scan_ipv6(
             },
             (deadline, idx),
         );
-        let tcp_len = MutableTcpPacket::minimum_packet_size();
-        let mut buf = vec![0u8; tcp_len];
         {
-            let mut tcp = MutableTcpPacket::new(&mut buf).expect("tcp buffer");
+            let buf = &mut pkt_buf[..];
+            let mut tcp = MutableTcpPacket::new(buf).expect("tcp buffer");
             tcp.set_source(sport);
             tcp.set_destination(*port);
             tcp.set_sequence(seq);
@@ -357,10 +345,6 @@ pub fn syn_scan_ipv6(
         }
     }
 
-    let mut ge_max = Instant::now();
-    for e in pending.iter() {
-        ge_max = ge_max.max(e.value().0);
-    }
     *global_end.lock().expect("global_end") = Some(ge_max);
 
     let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
