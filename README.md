@@ -7,7 +7,7 @@
 
 # nmaprs
 
-**nmaprs** is a Rust-native network scanner that speaks **nmap’s CLI dialect** (see `nmap --help`) and runs **highly parallel** scan engines (`tokio` + `futures::stream` + bounded concurrency). It is **not** a byte-for-byte reimplementation of Nmap: the full **NSE Lua runtime**, **Nmap OS fingerprint database**, and **every** obscure probe path are not embedded. This tool implements **real** TCP connect, UDP probes, ICMP ping discovery, raw IPv4 SYN (privileged), target list / random hosts, IPv6, resume checkpoints, traceroute, TTL-based OS **heuristics**, and **built-in** Rust “scripts” (banner grab) for `--script` / `-sC`.
+**nmaprs** is a Rust-native network scanner that speaks **nmap’s CLI dialect** (see `nmap --help`) and runs **highly parallel** scan engines (`tokio` + `futures::stream` + bounded concurrency). It is **not** a byte-for-byte reimplementation of Nmap: the full **NSE Lua runtime**, **Nmap OS fingerprint database**, and **every** obscure probe path are not embedded. This tool implements **real** TCP connect, UDP probes, ICMP ping discovery, raw IPv4/IPv6 SYN (privileged), target list / random hosts, IPv6, resume checkpoints, traceroute, TTL-based OS **heuristics**, and **built-in** Rust “scripts” (banner grab) for `--script` / `-sC`.
 
 Created by **MenkeTechnologies**.
 
@@ -16,10 +16,10 @@ Created by **MenkeTechnologies**.
 | Area | Status |
 |------|--------|
 | TCP connect (`-sT`, default) | **Implemented** — async, parallel, timeout-bound |
-| UDP (`-sU`) | **Implemented** — reply → `open`; else `open|filtered` (userspace limits vs ICMP) |
-| SYN (`-sS`, IPv4) | **Implemented** via `pnet` raw TCP — **requires privileges**; IPv6 falls back to connect |
+| UDP (`-sU`) | **Implemented** — reply → `open`; timeout → `open|filtered`; on **IPv4**, ICMP type 3 code 3 (port unreachable) refines to `closed` when privileged ICMP capture works |
+| SYN (`-sS`) | **Implemented** — raw IPv4 + **separate** raw IPv6 TCP path via `pnet` — **requires privileges**; falls back to TCP connect per address family on failure |
 | Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6` |
-| IPv6 (`-6`) | **Implemented** — targets + scans (SYN IPv6 not raw) |
+| IPv6 (`-6`) | **Implemented** — targets + scans (including raw SYN when privileged) |
 | `-iL` / `-iR` | **Implemented** |
 | `--resume` | **Implemented** — JSON checkpoint of completed `(host, port)` |
 | `--traceroute` | **Implemented** — system `traceroute` / `tracert` |
@@ -79,7 +79,7 @@ cargo bench --bench scan
 1. **Argv expansion** (`src/argv_expand.rs`) normalizes glued nmap tokens before `clap`.
 2. **Plan** (`src/config.rs`) → `ScanPlan`.
 3. **Targets** (`src/target.rs`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`.
-4. **Scan** (`src/scan.rs`, `src/syn.rs`) — TCP connect / UDP / raw IPv4 SYN.
+4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`) — TCP connect / UDP (+ optional IPv4 ICMP port-unreachable) / raw IPv4 + IPv6 SYN.
 5. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
 6. **Output** (`src/output.rs`).
 

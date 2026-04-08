@@ -642,6 +642,7 @@ dependencies = [
  "if-addrs",
  "ipnet",
  "pnet",
+ "pnet_sys",
  "predicates",
  "rand",
  "serde",

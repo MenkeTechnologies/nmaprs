@@ -3,6 +3,7 @@
 pub mod argv_expand;
 pub mod cli;
 pub mod config;
+pub mod icmp_listen;
 pub mod nse;
 pub mod os_detect;
 pub mod output;
@@ -14,9 +15,10 @@ pub mod syn;
 pub mod target;
 pub mod trace;
 
-use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Context, Result};
 use tracing::{info, warn};
@@ -24,7 +26,7 @@ use tracing::{info, warn};
 use crate::cli::Args;
 use crate::config::{ScanKind, ScanPlan};
 use crate::output::{print_stdout, OutputSet};
-use crate::scan::{tcp_connect_scan, udp_scan, PortLine};
+use crate::scan::{tcp_connect_scan, udp_scan, PortLine, UdpIcmpClosedSet};
 use crate::target::{apply_exclude, expand_target, random_addresses, read_input_list, ExpandOpts};
 
 fn build_work(hosts: &[IpAddr], ports: &[u16]) -> Vec<(IpAddr, u16)> {
@@ -149,13 +151,41 @@ pub async fn run(args: Args) -> Result<i32> {
     }
 
     let lines: Vec<PortLine> = match plan.scan_kind {
-        ScanKind::Udp => udp_scan(work, plan.clone()).await,
+        ScanKind::Udp => {
+            let has_v4 = work.iter().any(|(h, _)| h.is_ipv4());
+            if has_v4 {
+                let closed: UdpIcmpClosedSet = Arc::new(Mutex::new(HashSet::new()));
+                let stop = Arc::new(AtomicBool::new(false));
+                let closed_bg = closed.clone();
+                let stop_bg = stop.clone();
+                let listener = std::thread::spawn(move || {
+                    if let Err(e) =
+                        crate::icmp_listen::run_ipv4_port_unreachable_listener(closed_bg, stop_bg)
+                    {
+                        warn!(error = %e, "IPv4 ICMP port-unreachable listener exited");
+                    }
+                });
+                let lines = udp_scan(work, plan.clone(), Some(closed)).await;
+                stop.store(true, Ordering::SeqCst);
+                let _ = listener.join();
+                lines
+            } else {
+                udp_scan(work, plan.clone(), None).await
+            }
+        }
         ScanKind::TcpSyn => {
             let mut collected = Vec::new();
             let v4: Vec<Ipv4Addr> = hosts
                 .iter()
                 .filter_map(|h| match h {
                     IpAddr::V4(a) => Some(*a),
+                    _ => None,
+                })
+                .collect();
+            let v6: Vec<Ipv6Addr> = hosts
+                .iter()
+                .filter_map(|h| match h {
+                    IpAddr::V6(a) => Some(*a),
                     _ => None,
                 })
                 .collect();
@@ -182,10 +212,21 @@ pub async fn run(args: Args) -> Result<i32> {
                     Err(e) => bail!("SYN join: {e}"),
                 }
             }
-            if !v6_hosts.is_empty() {
-                warn!("IPv6 SYN scan not implemented; using TCP connect");
-                let w = build_work(&v6_hosts, &plan.ports);
-                collected.extend(tcp_connect_scan(w, plan.clone()).await);
+            if !v6.is_empty() {
+                let ports = plan.ports.clone();
+                let to = plan.connect_timeout;
+                let plan_clone = plan.clone();
+                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv6(v6, &ports, to))
+                    .await
+                {
+                    Ok(Ok(mut s)) => collected.append(&mut s),
+                    Ok(Err(e)) => {
+                        warn!("IPv6 SYN scan failed ({e}); falling back to TCP connect for IPv6");
+                        let w = build_work(&v6_hosts, &plan.ports);
+                        collected.extend(tcp_connect_scan(w, plan_clone).await);
+                    }
+                    Err(e) => bail!("IPv6 SYN join: {e}"),
+                }
             }
             collected
         }

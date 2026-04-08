@@ -1,0 +1,111 @@
+//! IPv4 ICMP “port unreachable” listener to refine UDP scan (`closed` vs `open|filtered`).
+
+use std::collections::HashSet;
+use std::io;
+use std::net::IpAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use pnet::packet::icmp::IcmpTypes;
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::Packet;
+use pnet::transport::{
+    icmp_packet_iter, transport_channel, TransportChannelType, TransportProtocol,
+};
+
+/// Background loop: parse ICMP dest-unreachable / port-unreachable and record `(target_ip, udp_dst_port)`.
+pub fn run_ipv4_port_unreachable_listener(
+    closed: Arc<Mutex<HashSet<(IpAddr, u16)>>>,
+    stop: Arc<AtomicBool>,
+) -> io::Result<()> {
+    let (mut _tx, mut rx) = transport_channel(
+        4096,
+        TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp)),
+    )?;
+    let mut iter = icmp_packet_iter(&mut rx);
+    while !stop.load(Ordering::Relaxed) {
+        match iter.next_with_timeout(Duration::from_millis(150)) {
+            Ok(Some((pkt, _from))) => {
+                if pkt.get_icmp_type() != IcmpTypes::DestinationUnreachable {
+                    continue;
+                }
+                if pkt.get_icmp_code().0 != 3 {
+                    continue;
+                }
+                let payload = pkt.payload();
+                if let Some((dst, dport)) = parse_embedded_udp_ipv4(payload) {
+                    closed
+                        .lock()
+                        .expect("closed set lock")
+                        .insert((IpAddr::V4(dst), dport));
+                }
+            }
+            Ok(None) => {}
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+/// `icmp_payload` = bytes after ICMP type/code/checksum: 4-byte unused field + embedded IPv4.
+fn parse_embedded_udp_ipv4(icmp_payload: &[u8]) -> Option<(std::net::Ipv4Addr, u16)> {
+    let payload = icmp_payload.get(4..)?;
+    let ip = Ipv4Packet::new(payload)?;
+    if ip.get_next_level_protocol() != IpNextHeaderProtocols::Udp {
+        return None;
+    }
+    let hlen = ip.get_header_length() as usize * 4;
+    if payload.len() < hlen + 8 {
+        return None;
+    }
+    let udp = &payload[hlen..hlen + 8];
+    let dst_port = u16::from_be_bytes([udp[2], udp[3]]);
+    Some((ip.get_destination(), dst_port))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_embedded_udp_ipv4;
+    use pnet::packet::ip::IpNextHeaderProtocols;
+    use pnet::packet::ipv4::{checksum, MutableIpv4Packet};
+    use pnet::packet::udp::MutableUdpPacket;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn port_unreachable_embedded_udp_dest_port() {
+        let mut buf = vec![0u8; 28];
+        {
+            let mut ip = MutableIpv4Packet::new(&mut buf[..20]).unwrap();
+            ip.set_version(4);
+            ip.set_header_length(5);
+            ip.set_dscp(0);
+            ip.set_ecn(0);
+            ip.set_total_length(28);
+            ip.set_identification(0);
+            ip.set_flags(0);
+            ip.set_fragment_offset(0);
+            ip.set_ttl(64);
+            ip.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+            ip.set_source(Ipv4Addr::new(192, 0, 2, 100));
+            ip.set_destination(Ipv4Addr::new(192, 0, 2, 1));
+            ip.set_checksum(0);
+            ip.set_checksum(checksum(&ip.to_immutable()));
+        }
+        {
+            let mut udp = MutableUdpPacket::new(&mut buf[20..]).unwrap();
+            udp.set_source(50000);
+            udp.set_destination(53);
+            udp.set_length(8);
+            udp.set_checksum(0);
+        }
+        let mut icmp_payload = vec![0u8; 4];
+        icmp_payload.extend_from_slice(&buf);
+        let (dst, dport) = parse_embedded_udp_ipv4(&icmp_payload).unwrap();
+        assert_eq!(dst, Ipv4Addr::new(192, 0, 2, 1));
+        assert_eq!(dport, 53);
+    }
+}
