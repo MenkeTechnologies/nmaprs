@@ -1,11 +1,12 @@
-//! Raw TCP SYN scan via `pnet` (requires elevated privileges on most OSes).
+//! Raw half-open TCP scans (SYN / NULL / FIN / Xmas) via `pnet` (requires elevated privileges on most OSes).
 //!
-//! **Batched + pipelined**: a receiver thread drains TCP replies while the main thread sends SYNs,
+//! **Batched + pipelined**: a receiver thread drains TCP replies while the main thread sends probes,
 //! overlapping RTT with the send phase. Large scans **shard** work across multiple independent
 //! pipelines (see [`MAX_SYN_PARALLEL_SHARDS`]). `--max-retries` runs additional full rounds (new raw
 //! socket each round) for probes still unresolved, omitting scan-delay / rate pacing on later rounds
 //! (TCP connect parity).
 
+use std::fmt;
 use std::io;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
@@ -111,11 +112,49 @@ enum SynOutcome {
     HostTimeout,
 }
 
-/// Raw TCP packet for port scans (`Syn`) vs Nmap-style **TCP ACK ping** (`AckPing`) for `-PA` discovery.
+/// Raw TCP packet for port scans (`Syn`, `Null`, `Fin`, `Xmas`) vs Nmap-style **TCP ACK ping**
+/// (`AckPing`) for `-PA` discovery.
 #[derive(Clone, Copy)]
 enum RawTcpProbeKind {
     Syn,
+    /// `-sN`: no flags.
+    Null,
+    /// `-sF`: FIN only.
+    Fin,
+    /// `-sX`: FIN \| PSH \| URG (Christmas tree).
+    Xmas,
     AckPing,
+}
+
+/// User-facing TCP scan using the raw half-open pipeline (same recv classification as SYN).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TcpPortScanKind {
+    Syn,
+    Null,
+    Fin,
+    Xmas,
+}
+
+impl From<TcpPortScanKind> for RawTcpProbeKind {
+    fn from(k: TcpPortScanKind) -> Self {
+        match k {
+            TcpPortScanKind::Syn => RawTcpProbeKind::Syn,
+            TcpPortScanKind::Null => RawTcpProbeKind::Null,
+            TcpPortScanKind::Fin => RawTcpProbeKind::Fin,
+            TcpPortScanKind::Xmas => RawTcpProbeKind::Xmas,
+        }
+    }
+}
+
+impl fmt::Display for TcpPortScanKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            TcpPortScanKind::Syn => "SYN",
+            TcpPortScanKind::Null => "NULL",
+            TcpPortScanKind::Fin => "FIN",
+            TcpPortScanKind::Xmas => "Xmas",
+        })
+    }
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy)]
@@ -233,6 +272,9 @@ fn tcp_ipv4_one_round(
         let seq: u32 = rng.gen();
         let (ack_num, flags) = match probe_kind {
             RawTcpProbeKind::Syn => (0u32, TcpFlags::SYN),
+            RawTcpProbeKind::Null => (0u32, 0),
+            RawTcpProbeKind::Fin => (0u32, TcpFlags::FIN),
+            RawTcpProbeKind::Xmas => (0u32, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG),
             RawTcpProbeKind::AckPing => {
                 let a = rng.gen::<u32>() | 1;
                 (a, TcpFlags::ACK)
@@ -348,6 +390,32 @@ fn tcp_scan_ipv4_with_kind(
     Ok(out)
 }
 
+/// Raw TCP port scan (SYN / NULL / FIN / Xmas): same pipeline as [`syn_scan_ipv4`].
+#[allow(clippy::too_many_arguments)]
+pub fn tcp_port_scan_ipv4(
+    kind: TcpPortScanKind,
+    order: Vec<(Ipv4Addr, u16)>,
+    per_probe_timeout: Duration,
+    pacer: Option<Arc<ProbeRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+    connect_retries: u32,
+) -> io::Result<Vec<PortLine>> {
+    tcp_scan_ipv4_with_kind(
+        order,
+        kind.into(),
+        per_probe_timeout,
+        pacer,
+        host_timeout,
+        host_start,
+        scan_delay,
+        max_scan_delay,
+        connect_retries,
+    )
+}
+
 /// Half-open SYN scan for IPv4: receiver thread + main-thread send pipeline; optional `--max-retries` rounds.
 #[allow(clippy::too_many_arguments)]
 pub fn syn_scan_ipv4(
@@ -360,9 +428,9 @@ pub fn syn_scan_ipv4(
     max_scan_delay: Option<Duration>,
     connect_retries: u32,
 ) -> io::Result<Vec<PortLine>> {
-    tcp_scan_ipv4_with_kind(
+    tcp_port_scan_ipv4(
+        TcpPortScanKind::Syn,
         order,
-        RawTcpProbeKind::Syn,
         per_probe_timeout,
         pacer,
         host_timeout,
@@ -511,6 +579,9 @@ fn tcp_ipv6_one_round(
         let seq: u32 = rng.gen();
         let (ack_num, flags) = match probe_kind {
             RawTcpProbeKind::Syn => (0u32, TcpFlags::SYN),
+            RawTcpProbeKind::Null => (0u32, 0),
+            RawTcpProbeKind::Fin => (0u32, TcpFlags::FIN),
+            RawTcpProbeKind::Xmas => (0u32, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG),
             RawTcpProbeKind::AckPing => {
                 let a = rng.gen::<u32>() | 1;
                 (a, TcpFlags::ACK)
@@ -626,6 +697,32 @@ fn tcp_scan_ipv6_with_kind(
     Ok(out)
 }
 
+/// Raw TCP port scan (SYN / NULL / FIN / Xmas), IPv6.
+#[allow(clippy::too_many_arguments)]
+pub fn tcp_port_scan_ipv6(
+    kind: TcpPortScanKind,
+    order: Vec<(Ipv6Addr, u16)>,
+    per_probe_timeout: Duration,
+    pacer: Option<Arc<ProbeRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+    connect_retries: u32,
+) -> io::Result<Vec<PortLine>> {
+    tcp_scan_ipv6_with_kind(
+        order,
+        kind.into(),
+        per_probe_timeout,
+        pacer,
+        host_timeout,
+        host_start,
+        scan_delay,
+        max_scan_delay,
+        connect_retries,
+    )
+}
+
 /// Half-open SYN scan for IPv6 (separate raw path from IPv4); optional `--max-retries` rounds.
 #[allow(clippy::too_many_arguments)]
 pub fn syn_scan_ipv6(
@@ -638,9 +735,9 @@ pub fn syn_scan_ipv6(
     max_scan_delay: Option<Duration>,
     connect_retries: u32,
 ) -> io::Result<Vec<PortLine>> {
-    tcp_scan_ipv6_with_kind(
+    tcp_port_scan_ipv6(
+        TcpPortScanKind::Syn,
         order,
-        RawTcpProbeKind::Syn,
         per_probe_timeout,
         pacer,
         host_timeout,
@@ -676,9 +773,10 @@ pub fn ack_ping_scan_ipv6(
     )
 }
 
-/// Run several independent IPv4 SYN pipelines in parallel (one raw socket + recv thread per shard).
+/// Run several independent IPv4 raw TCP port pipelines in parallel (one raw socket + recv thread per shard).
 #[allow(clippy::too_many_arguments)]
-pub fn parallel_syn_scan_ipv4(
+pub fn parallel_tcp_port_scan_ipv4(
+    kind: TcpPortScanKind,
     order: Vec<(Ipv4Addr, u16)>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
@@ -695,7 +793,8 @@ pub fn parallel_syn_scan_ipv4(
     }
     let shards = max_shards.clamp(1, MAX_SYN_PARALLEL_SHARDS).min(total);
     if shards <= 1 {
-        return syn_scan_ipv4(
+        return tcp_port_scan_ipv4(
+            kind,
             order,
             per_probe_timeout,
             pacer,
@@ -715,7 +814,8 @@ pub fn parallel_syn_scan_ipv4(
             let pacer = pacer.clone();
             let host_start = host_start.clone();
             handles.push(s.spawn(move || {
-                syn_scan_ipv4(
+                tcp_port_scan_ipv4(
+                    kind,
                     chunk,
                     per_probe_timeout,
                     pacer,
@@ -735,7 +835,102 @@ pub fn parallel_syn_scan_ipv4(
         match r {
             Ok(Ok(lines)) => merged.extend(lines),
             Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(io::Error::other(format!("SYN shard join: {e:?}"))),
+            Err(e) => return Err(io::Error::other(format!("raw TCP port scan shard join: {e:?}"))),
+        }
+    }
+    Ok(merged)
+}
+
+/// Run several independent IPv4 SYN pipelines in parallel (one raw socket + recv thread per shard).
+#[allow(clippy::too_many_arguments)]
+pub fn parallel_syn_scan_ipv4(
+    order: Vec<(Ipv4Addr, u16)>,
+    per_probe_timeout: Duration,
+    pacer: Option<Arc<ProbeRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+    connect_retries: u32,
+    max_shards: usize,
+) -> io::Result<Vec<PortLine>> {
+    parallel_tcp_port_scan_ipv4(
+        TcpPortScanKind::Syn,
+        order,
+        per_probe_timeout,
+        pacer,
+        host_timeout,
+        host_start,
+        scan_delay,
+        max_scan_delay,
+        connect_retries,
+        max_shards,
+    )
+}
+
+/// Run several independent IPv6 raw TCP port pipelines in parallel.
+#[allow(clippy::too_many_arguments)]
+pub fn parallel_tcp_port_scan_ipv6(
+    kind: TcpPortScanKind,
+    order: Vec<(Ipv6Addr, u16)>,
+    per_probe_timeout: Duration,
+    pacer: Option<Arc<ProbeRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+    connect_retries: u32,
+    max_shards: usize,
+) -> io::Result<Vec<PortLine>> {
+    let total = order.len();
+    if total == 0 {
+        return Ok(vec![]);
+    }
+    let shards = max_shards.clamp(1, MAX_SYN_PARALLEL_SHARDS).min(total);
+    if shards <= 1 {
+        return tcp_port_scan_ipv6(
+            kind,
+            order,
+            per_probe_timeout,
+            pacer,
+            host_timeout,
+            host_start,
+            scan_delay,
+            max_scan_delay,
+            connect_retries,
+        );
+    }
+    let chunks = split_into_syn_chunks(order, shards);
+    let mut merged: Vec<PortLine> = Vec::with_capacity(total);
+    let mut shard_results = Vec::new();
+    thread::scope(|s| {
+        let mut handles = Vec::with_capacity(chunks.len());
+        for chunk in chunks {
+            let pacer = pacer.clone();
+            let host_start = host_start.clone();
+            handles.push(s.spawn(move || {
+                tcp_port_scan_ipv6(
+                    kind,
+                    chunk,
+                    per_probe_timeout,
+                    pacer,
+                    host_timeout,
+                    host_start,
+                    scan_delay,
+                    max_scan_delay,
+                    connect_retries,
+                )
+            }));
+        }
+        for h in handles {
+            shard_results.push(h.join());
+        }
+    });
+    for r in shard_results {
+        match r {
+            Ok(Ok(lines)) => merged.extend(lines),
+            Ok(Err(e)) => return Err(e),
+            Err(e) => return Err(io::Error::other(format!("raw TCP port scan shard join: {e:?}"))),
         }
     }
     Ok(merged)
@@ -754,56 +949,18 @@ pub fn parallel_syn_scan_ipv6(
     connect_retries: u32,
     max_shards: usize,
 ) -> io::Result<Vec<PortLine>> {
-    let total = order.len();
-    if total == 0 {
-        return Ok(vec![]);
-    }
-    let shards = max_shards.clamp(1, MAX_SYN_PARALLEL_SHARDS).min(total);
-    if shards <= 1 {
-        return syn_scan_ipv6(
-            order,
-            per_probe_timeout,
-            pacer,
-            host_timeout,
-            host_start,
-            scan_delay,
-            max_scan_delay,
-            connect_retries,
-        );
-    }
-    let chunks = split_into_syn_chunks(order, shards);
-    let mut merged: Vec<PortLine> = Vec::with_capacity(total);
-    let mut shard_results = Vec::new();
-    thread::scope(|s| {
-        let mut handles = Vec::with_capacity(chunks.len());
-        for chunk in chunks {
-            let pacer = pacer.clone();
-            let host_start = host_start.clone();
-            handles.push(s.spawn(move || {
-                syn_scan_ipv6(
-                    chunk,
-                    per_probe_timeout,
-                    pacer,
-                    host_timeout,
-                    host_start,
-                    scan_delay,
-                    max_scan_delay,
-                    connect_retries,
-                )
-            }));
-        }
-        for h in handles {
-            shard_results.push(h.join());
-        }
-    });
-    for r in shard_results {
-        match r {
-            Ok(Ok(lines)) => merged.extend(lines),
-            Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(io::Error::other(format!("SYN shard join: {e:?}"))),
-        }
-    }
-    Ok(merged)
+    parallel_tcp_port_scan_ipv6(
+        TcpPortScanKind::Syn,
+        order,
+        per_probe_timeout,
+        pacer,
+        host_timeout,
+        host_start,
+        scan_delay,
+        max_scan_delay,
+        connect_retries,
+        max_shards,
+    )
 }
 
 /// Parallel raw TCP ACK ping (`-PA` discovery), IPv4.

@@ -66,8 +66,24 @@ pub struct ScanPlan {
 pub enum ScanKind {
     TcpConnect,
     TcpSyn,
+    TcpNull,
+    TcpFin,
+    TcpXmas,
     Udp,
     Other(char),
+}
+
+impl ScanKind {
+    /// Raw half-open TCP scan (`-sS` / `-sN` / `-sF` / `-sX`), if applicable.
+    pub fn tcp_port_raw_kind(self) -> Option<crate::syn::TcpPortScanKind> {
+        match self {
+            ScanKind::TcpSyn => Some(crate::syn::TcpPortScanKind::Syn),
+            ScanKind::TcpNull => Some(crate::syn::TcpPortScanKind::Null),
+            ScanKind::TcpFin => Some(crate::syn::TcpPortScanKind::Fin),
+            ScanKind::TcpXmas => Some(crate::syn::TcpPortScanKind::Xmas),
+            _ => None,
+        }
+    }
 }
 
 impl ScanPlan {
@@ -154,7 +170,10 @@ impl ScanPlan {
                 'T' | 't' => scan_kind = ScanKind::TcpConnect,
                 'S' | 's' => scan_kind = ScanKind::TcpSyn,
                 'U' | 'u' => scan_kind = ScanKind::Udp,
-                'N' | 'F' | 'X' | 'A' | 'W' | 'M' | 'Y' | 'Z' | 'O' | 'I' => {
+                'N' | 'n' => scan_kind = ScanKind::TcpNull,
+                'F' | 'f' => scan_kind = ScanKind::TcpFin,
+                'X' | 'x' => scan_kind = ScanKind::TcpXmas,
+                'A' | 'W' | 'M' | 'Y' | 'Z' | 'O' | 'I' | 'a' | 'w' | 'm' | 'y' | 'z' | 'o' | 'i' => {
                     scan_kind = ScanKind::Other(ch);
                     unimplemented.push(format!(
                         "scan type -s{ch} is not implemented in nmaprs (use nmap for exotic TCP flags)"
@@ -470,5 +489,23 @@ mod rate_validation_tests {
             s.contains("max-rtt-timeout") && s.contains("min-rtt-timeout"),
             "{s}"
         );
+    }
+
+    #[test]
+    fn scan_type_null_fin_xmas_sets_scan_kind() {
+        use crate::syn::TcpPortScanKind;
+
+        use super::ScanKind;
+        let cases = [
+            ("--scan-type", "N", ScanKind::TcpNull, TcpPortScanKind::Null),
+            ("--scan-type", "F", ScanKind::TcpFin, TcpPortScanKind::Fin),
+            ("--scan-type", "X", ScanKind::TcpXmas, TcpPortScanKind::Xmas),
+        ];
+        for (opt, ch, kind, raw) in cases {
+            let args = Args::try_parse_from(["nmaprs", opt, ch, "-p", "22", "127.0.0.1"]).expect("parse");
+            let plan = ScanPlan::from_args(&args).expect("plan");
+            assert_eq!(plan.scan_kind, kind, "{opt} {ch}");
+            assert_eq!(plan.scan_kind.tcp_port_raw_kind(), Some(raw));
+        }
     }
 }

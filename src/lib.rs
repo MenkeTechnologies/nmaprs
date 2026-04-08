@@ -156,7 +156,11 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
         ScanKind::Udp => {
             unreachable!("UDP scans use shared ICMP listeners in run(); do not call port_scan")
         }
-        ScanKind::TcpSyn => {
+        ScanKind::TcpSyn | ScanKind::TcpNull | ScanKind::TcpFin | ScanKind::TcpXmas => {
+            let kind = plan
+                .scan_kind
+                .tcp_port_raw_kind()
+                .expect("raw TCP scan kinds only");
             let (work_v4, work_v6) = split_syn_work(&work);
             let to = plan.connect_timeout;
             let syn_pacer = ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate);
@@ -178,7 +182,8 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 let pacer = syn_pacer.clone();
                 let host_start = syn_host_start.clone();
                 match tokio::task::spawn_blocking(move || {
-                    crate::syn::parallel_syn_scan_ipv4(
+                    crate::syn::parallel_tcp_port_scan_ipv4(
+                        kind,
                         work_v4,
                         to,
                         pacer,
@@ -193,7 +198,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 .await
                 {
                     Ok(r) => Ok(r),
-                    Err(e) => Err(anyhow!("SYN join v4: {e}")),
+                    Err(e) => Err(anyhow!("raw TCP ({kind}) join v4: {e}")),
                 }
             };
             let v6_fut = async {
@@ -203,7 +208,8 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 let pacer = syn_pacer.clone();
                 let host_start = syn_host_start.clone();
                 match tokio::task::spawn_blocking(move || {
-                    crate::syn::parallel_syn_scan_ipv6(
+                    crate::syn::parallel_tcp_port_scan_ipv6(
+                        kind,
                         work_v6,
                         to,
                         pacer,
@@ -218,7 +224,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 .await
                 {
                     Ok(r) => Ok(r),
-                    Err(e) => Err(anyhow!("SYN join v6: {e}")),
+                    Err(e) => Err(anyhow!("raw TCP ({kind}) join v6: {e}")),
                 }
             };
 
@@ -234,14 +240,18 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
             match v4_out? {
                 Ok(mut lines) => collected.append(&mut lines),
                 Err(e) => {
-                    warn!("SYN scan failed ({e}); falling back to TCP connect for IPv4");
+                    warn!(
+                        "{kind} scan failed ({e}); falling back to TCP connect for IPv4"
+                    );
                     collected.extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone()).await);
                 }
             }
             match v6_out? {
                 Ok(mut lines) => collected.append(&mut lines),
                 Err(e) => {
-                    warn!("IPv6 SYN scan failed ({e}); falling back to TCP connect for IPv6");
+                    warn!(
+                        "IPv6 {kind} scan failed ({e}); falling back to TCP connect for IPv6"
+                    );
                     collected.extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone()).await);
                 }
             }
