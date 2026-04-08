@@ -18,7 +18,7 @@ const HELP_TEMPLATE: &str = r#"{before-help}{name} {version}
     version,
     author = "MenkeTechnologies",
     about = "NMAPRS // GRID SCANNER — rust-native parallel port probe",
-    long_about = "TCP connect, UDP probes, ICMP ping scan (-sn), IPv6 (-6), -iL/-iR, resume, SYN (-sS) via raw IPv4 (privileged), traceroute, TTL OS guess, and built-in banner scripts. Full Nmap NSE/Lua and OS DB are not embedded.",
+    long_about = "TCP connect, UDP probes, ICMP ping scan (-sn), IPv6 (-6), -iL/-iR, resume, SYN (-sS) via raw IPv4 (privileged), `-A` (like Nmap: -O, -sV, default scripts, --traceroute), `-O` / `-sV` with optional `nmap-os-db` / `nmap-service-probes` under `--datadir`, and built-in scripts (not full Nmap NSE/Lua).",
     disable_help_flag = true,
     disable_version_flag = true,
     help_template = HELP_TEMPLATE,
@@ -318,6 +318,7 @@ pub struct Args {
     #[arg(short = '6')]
     pub ipv6: bool,
 
+    /// Aggressive scan (Nmap `-A`): enables `-O`, `-sV`, default scripts (`-sC`), and `--traceroute`.
     #[arg(short = 'A')]
     pub aggressive: bool,
 

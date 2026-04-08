@@ -130,6 +130,7 @@ pub struct ScanPlan {
     pub version_intensity: u8,
     pub os_detect_requested: bool,
     pub script_requested: bool,
+    /// `--traceroute` or implied by **`-A`** (Nmap aggressive scan).
     pub traceroute: bool,
     pub resume_path: Option<PathBuf>,
     /// Cap on probe **starts** per second (`--max-rate`). `None` = no limit.
@@ -218,13 +219,7 @@ impl ScanPlan {
     }
 
     pub fn from_args(args: &Args) -> Result<Self> {
-        let mut unimplemented: Vec<String> = Vec::new();
-
-        if args.aggressive {
-            unimplemented.push(
-                "-A: NSE coverage is not full Nmap parity; OS detection uses TTL + nmap-os-db hints when the DB file is present; version detection uses nmap-service-probes when present".into(),
-            );
-        }
+        let unimplemented: Vec<String> = Vec::new();
 
         if args.ping_only && args.list_scan {
             bail!("-sn and -sL together are ambiguous");
@@ -495,7 +490,7 @@ impl ScanPlan {
             version_intensity,
             os_detect_requested: args.os_detect || args.aggressive,
             script_requested: args.script_default || args.script.is_some() || args.aggressive,
-            traceroute: args.traceroute,
+            traceroute: args.traceroute || args.aggressive,
             resume_path: args.resume.clone(),
             max_probe_rate: args.max_rate,
             min_probe_rate: args.min_rate,
@@ -657,6 +652,35 @@ mod rate_validation_tests {
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.hostgroup_min, Some(8));
         assert_eq!(plan.hostgroup_max, Some(32));
+    }
+
+    #[test]
+    fn aggressive_enables_os_version_scripts_traceroute() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-A",
+            "-p",
+            "80",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert!(plan.aggressive);
+        assert!(plan.os_detect_requested);
+        assert!(plan.version_scan_requested);
+        assert!(plan.script_requested);
+        assert!(plan.traceroute);
+    }
+
+    #[test]
+    fn dash_o_enables_os_detection_only() {
+        let args =
+            Args::try_parse_from(["nmaprs", "-O", "-p", "22", "127.0.0.1"]).expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert!(plan.os_detect_requested);
+        assert!(!plan.version_scan_requested);
+        assert!(!plan.traceroute);
+        assert!(!plan.aggressive);
     }
 
     #[test]

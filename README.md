@@ -31,7 +31,8 @@ Created by **MenkeTechnologies**.
 | `-iL` / `-iR` | **Implemented** |
 | `--resume` | **Implemented** — JSON checkpoint of completed `(host, port)`; applies to TCP connect, UDP, **raw half-open TCP**, and **IP protocol (`-sO`)** (remaining pairs only after the checkpoint) |
 | `--traceroute` | **Implemented** — system `traceroute` / `tracert`; hosts run **concurrently** up to **`min(effective parallelism, 32)`** subprocesses, stdout/stderr printed in **target order** |
-| `-O` / `-A` OS | **Heuristic** — ICMP TTL bucket guess; with `nmap-os-db` in `--datadir`, example DB titles for the TTL bucket (+ ping after TCP scan when not `-sn`). **Does not** run Nmap’s TCP/IP OS fingerprint probes (SEQ/OPS/T1–T7) or classifier matching |
+| `-O` | **Heuristic** — ICMP TTL bucket guess; with `nmap-os-db` in `--datadir`, example DB titles for the TTL bucket (+ ping after TCP scan when not `-sn`). **Does not** run Nmap’s TCP/IP OS fingerprint probes (SEQ/OPS/T1–T7) or classifier matching |
+| `-A` | **Implemented** — Nmap-style bundle: **`-O`** + **`-sV`** + default **`-sC`** scripts + **`--traceroute`**; not full Nmap NSE/Lua |
 | `-sV` / `--version-scan` | **Partial** — loads `nmap-service-probes`: **TCP** + **UDP** `Probe` blocks, **`ports`** / **`sslports`** (TLS via **rustls** when the port matches the probe’s `sslports`), **`rarity`** vs `--version-intensity`, **`match`** / **`softmatch`**; **Perl-only** regex features omitted; parallel per open port |
 | `--script` / `-sC` | **Partial** — `default` / `banner` builtins; Lua NSE **not** embedded |
 | `--iflist` | **Implemented** — lists interfaces via `if-addrs` |
