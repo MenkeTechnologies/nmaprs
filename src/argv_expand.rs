@@ -58,7 +58,7 @@ where
         // -oN / -oX / -oS / -oG / -oA
         if a.len() == 3 && a.starts_with("-o") {
             let k = a.as_bytes()[2] as char;
-            if matches!(k, 'N' | 'X' | 'S' | 'G' | 'A') {
+            if matches!(k, 'N' | 'X' | 'S' | 'G' | 'A' | 'M' | 'H') {
                 out.push(format!("--o{k}"));
                 i += 1;
                 continue;

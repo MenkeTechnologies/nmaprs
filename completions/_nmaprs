@@ -90,6 +90,8 @@ _arguments -s -S : \
   '-oA[output basename]:base:_files' \
   '-oM[machine-parseable output file]:file:_files' \
   '-oH[hex output file]:file:_files' \
+  '-v[increase verbosity]' \
+  '-d[increase debug level]' \
   '--verbosity[verbosity level]:N:' \
   '--debug[debug level]:N:' \
   '--reason[show port state reason]' \
@@ -144,6 +146,8 @@ _arguments -s -S : \
   '-PU+[UDP discovery]:ports:' \
   '-PY+[SCTP discovery]:ports:' \
   '-T+[timing template]:template:(0 1 2 3 4 5)' \
+  '-iL+[input host list]:file:_files' \
+  '-iR+[random targets count]:count:' \
   '-sS[TCP SYN scan]' \
   '-sT[TCP connect scan]' \
   '-sU[UDP scan]' \
