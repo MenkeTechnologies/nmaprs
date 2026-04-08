@@ -31,7 +31,7 @@ Created by **MenkeTechnologies**.
 | `--min-rtt-timeout` | **Implemented** — lower bound on per-probe wait (`connect_timeout = max(..., min)`); applies to TCP connect, UDP, and SYN probe timeout |
 | `--scan-delay` / `--max-scan-delay` | **Implemented** — per-probe delay before send/connect: fixed `scan-delay`, or uniform random in `[scan-delay, max-scan-delay]` when both set; TCP (first attempt), UDP, raw SYN; `max` must be `>=` `min` |
 | `--max-rate` | **Implemented** — global cap on probe **starts** per second (TCP connect, UDP, raw SYN; mixed IPv4+IPv6 SYN share one limiter) |
-| `--min-rate` | **Not implemented** — ignored with a warning |
+| `--min-rate` | **Implemented** — must be ≤ `--max-rate` when both are set (probe starts/sec); min-only does not add a rate limiter (floor without ceiling, matching Nmap’s lack of extra throttling) |
 | Port specs (`-p`, `-F`, `--top-ports`, …) | **Implemented** — embedded TCP frequency list |
 | Output (`-oN`, `-oG`, `-oX`, `-oA`) | **Implemented** — XML minimal; `-oS` ignored with warning |
 

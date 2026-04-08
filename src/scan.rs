@@ -85,15 +85,23 @@ pub fn sleep_inter_probe_delay_sync(
     }
 }
 
-/// Global cap on how fast probe tasks may **start** (matches `--max-rate` in Nmap terms).
+/// Global cap on how fast probe tasks may **start** (`--max-rate`, probes/sec minimum spacing).
 ///
-/// Shared across threads (e.g. concurrent IPv4 + IPv6 SYN senders) via [`Arc`].
-pub struct MaxRatePacer {
+/// When `--min-rate` is set without `--max-rate`, no pacer is installed (Nmap-style floor without a
+/// ceiling does not add mutex overhead here). Shared across threads (e.g. concurrent IPv4 + IPv6 SYN
+/// senders) via [`Arc`].
+pub struct ProbeRatePacer {
     next_slot: Mutex<Instant>,
     interval: Duration,
 }
 
-impl MaxRatePacer {
+impl ProbeRatePacer {
+    /// Returns a shared pacer only when `--max-rate` is set. `--min-rate` is validated in
+    /// [`crate::config::ScanPlan::from_args`] against `--max-rate` when both are present.
+    pub fn maybe_new(max_rate: Option<u64>, _min_rate: Option<u64>) -> Option<Arc<Self>> {
+        max_rate.map(|n| Arc::new(Self::new(n as f64)))
+    }
+
     pub fn new(probes_per_second: f64) -> Self {
         assert!(probes_per_second > 0.0 && probes_per_second.is_finite());
         Self {
@@ -105,7 +113,7 @@ impl MaxRatePacer {
     /// Async probes (TCP connect, UDP): call before acquiring the scan semaphore.
     pub async fn wait_turn(&self) {
         let sleep_for = {
-            let mut next = self.next_slot.lock().expect("max-rate pacer");
+            let mut next = self.next_slot.lock().expect("probe rate pacer");
             let now = Instant::now();
             let start = *next;
             if start > now {
@@ -125,7 +133,7 @@ impl MaxRatePacer {
     /// Raw SYN send loop (blocking thread): call at the start of each probe iteration.
     pub fn wait_turn_sync(&self) {
         let sleep_for = {
-            let mut next = self.next_slot.lock().expect("max-rate pacer");
+            let mut next = self.next_slot.lock().expect("probe rate pacer");
             let now = Instant::now();
             let start = *next;
             if start > now {
@@ -197,9 +205,7 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
     let timeout = plan.connect_timeout;
     let no_ping = plan.no_ping;
     let connect_retries = plan.connect_retries;
-    let pacer = plan
-        .max_probe_rate
-        .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
+    let pacer = ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate);
     let host_deadline = plan.host_timeout.map(|_| Arc::new(DashMap::new()));
     let host_limit = plan.host_timeout;
     let scan_delay = plan.scan_delay;
@@ -302,9 +308,7 @@ pub async fn udp_scan(
 ) -> Vec<PortLine> {
     let sem = Arc::new(Semaphore::new(plan.concurrency.max(1)));
     let timeout = plan.connect_timeout;
-    let pacer = plan
-        .max_probe_rate
-        .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
+    let pacer = ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate);
     let host_deadline = plan.host_timeout.map(|_| Arc::new(DashMap::new()));
     let host_limit = plan.host_timeout;
     let scan_delay = plan.scan_delay;
@@ -453,15 +457,20 @@ mod host_deadline_tests {
 mod pacer_tests {
     use std::time::{Duration, Instant};
 
-    use super::MaxRatePacer;
+    use super::ProbeRatePacer;
 
     #[test]
-    fn max_rate_pacer_high_rate_allows_back_to_back_sync() {
-        let p = MaxRatePacer::new(1_000_000.0);
+    fn probe_rate_pacer_high_rate_allows_back_to_back_sync() {
+        let p = ProbeRatePacer::new(1_000_000.0);
         let t0 = Instant::now();
         p.wait_turn_sync();
         p.wait_turn_sync();
         assert!(t0.elapsed() < Duration::from_millis(5));
+    }
+
+    #[test]
+    fn maybe_new_none_without_max_rate() {
+        assert!(ProbeRatePacer::maybe_new(None, Some(100)).is_none());
     }
 }
 

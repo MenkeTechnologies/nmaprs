@@ -30,7 +30,7 @@ use tracing::{info, warn};
 use crate::cli::Args;
 use crate::config::{ScanKind, ScanPlan};
 use crate::output::{print_stdout, OutputSet};
-use crate::scan::{tcp_connect_scan, udp_scan, MaxRatePacer, PortLine, UdpIcmpNotes};
+use crate::scan::{tcp_connect_scan, udp_scan, PortLine, ProbeRatePacer, UdpIcmpNotes};
 use crate::target::{apply_exclude, expand_target, random_addresses, read_input_list, ExpandOpts};
 
 fn build_work(hosts: &[IpAddr], ports: &[u16]) -> Vec<(IpAddr, u16)> {
@@ -257,9 +257,7 @@ pub async fn run(args: Args) -> Result<i32> {
         ScanKind::TcpSyn => {
             let (work_v4, work_v6) = split_syn_work(&work);
             let to = plan.connect_timeout;
-            let syn_pacer = plan
-                .max_probe_rate
-                .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
+            let syn_pacer = ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate);
             let syn_host_start = plan
                 .host_timeout
                 .map(|_| Arc::new(DashMap::<IpAddr, Instant>::new()));

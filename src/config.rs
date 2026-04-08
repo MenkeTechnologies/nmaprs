@@ -42,6 +42,9 @@ pub struct ScanPlan {
     pub resume_path: Option<PathBuf>,
     /// Cap on probe **starts** per second (`--max-rate`). `None` = no limit.
     pub max_probe_rate: Option<u64>,
+    /// Minimum desired probe **starts** per second (`--min-rate`). Validated against `--max-rate`
+    /// when both are set; does not install a pacer by itself (see [`crate::scan::ProbeRatePacer`]).
+    pub min_probe_rate: Option<u64>,
     /// Max wall-clock time per host for the port scan phase (`--host-timeout`).
     pub host_timeout: Option<Duration>,
     /// Extra TCP connect attempts after timeout (`--max-retries`); total tries = `1 + connect_retries`.
@@ -95,8 +98,15 @@ impl ScanPlan {
                 bail!("--max-rate must be > 0");
             }
         }
-        if args.min_rate.is_some() {
-            warn!("--min-rate is not implemented; ignoring");
+        if let Some(n) = args.min_rate {
+            if n == 0 {
+                bail!("--min-rate must be > 0");
+            }
+        }
+        if let (Some(mx), Some(mn)) = (args.max_rate, args.min_rate) {
+            if mx < mn {
+                bail!("--max-rate must be >= --min-rate (both are probe starts per second)");
+            }
         }
 
         // --- Scan kind ---
@@ -246,6 +256,7 @@ impl ScanPlan {
             traceroute: args.traceroute,
             resume_path: args.resume.clone(),
             max_probe_rate: args.max_rate,
+            min_probe_rate: args.min_rate,
             host_timeout,
             connect_retries: args.max_retries.unwrap_or(0),
             scan_delay,
@@ -281,4 +292,31 @@ fn parse_duration(s: &str) -> Result<Duration> {
     }
     let v: f64 = s.parse().context("parse duration")?;
     Ok(Duration::from_secs_f64(v))
+}
+
+#[cfg(test)]
+mod rate_validation_tests {
+    use clap::Parser;
+
+    use crate::cli::Args;
+
+    use super::ScanPlan;
+
+    #[test]
+    fn max_rate_below_min_rate_errors() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--max-rate",
+            "50",
+            "--min-rate",
+            "100",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        assert!(
+            err.to_string().contains("max-rate") && err.to_string().contains("min-rate"),
+            "{err}"
+        );
+    }
 }

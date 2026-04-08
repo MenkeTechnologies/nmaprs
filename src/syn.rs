@@ -22,7 +22,7 @@ use rand::Rng;
 
 use crate::ipv6_l4;
 use crate::scan::{
-    host_over_deadline, sleep_inter_probe_delay_sync, MaxRatePacer, PortLine, PortReason,
+    host_over_deadline, sleep_inter_probe_delay_sync, PortLine, PortReason, ProbeRatePacer,
 };
 
 const RECV_SLICE: Duration = Duration::from_millis(50);
@@ -83,7 +83,7 @@ enum SynOutcome {
 pub fn syn_scan_ipv4(
     order: Vec<(Ipv4Addr, u16)>,
     per_probe_timeout: Duration,
-    pacer: Option<Arc<MaxRatePacer>>,
+    pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
     host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
     scan_delay: Option<Duration>,
@@ -248,7 +248,7 @@ pub fn syn_scan_ipv4(
 pub fn syn_scan_ipv6(
     order: Vec<(Ipv6Addr, u16)>,
     per_probe_timeout: Duration,
-    pacer: Option<Arc<MaxRatePacer>>,
+    pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
     host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
     scan_delay: Option<Duration>,
