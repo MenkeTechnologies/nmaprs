@@ -1,4 +1,4 @@
-//! Port list resolution: `-p`, `-F`, `--top-ports`, exclusions.
+//! Port list resolution: `-p`, `-F`, `--top-ports`, exclusions, and `-sO -F` IP protocol subsets.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -14,6 +14,7 @@ pub enum PortParseError {
 }
 
 static TOP_PORTS: OnceLock<Vec<u16>> = OnceLock::new();
+static FAST_IP_PROTOCOLS_NMAP: OnceLock<Vec<u16>> = OnceLock::new();
 
 fn load_top_ports() -> &'static [u16] {
     TOP_PORTS.get_or_init(|| {
@@ -42,6 +43,29 @@ pub fn default_tcp_ports() -> Vec<u16> {
 /// Fast scan (`-F`): top 100 TCP ports (nmap semantics).
 pub fn fast_tcp_ports() -> Vec<u16> {
     top_ports(100)
+}
+
+fn load_fast_ip_protocols_nmap() -> &'static [u16] {
+    FAST_IP_PROTOCOLS_NMAP.get_or_init(|| {
+        include_str!("../data/nmap_ip_protocols_fast.txt")
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .filter_map(|l| {
+                let t = l.trim();
+                if t.is_empty() {
+                    return None;
+                }
+                t.parse::<u16>().ok().filter(|&n| n <= 255)
+            })
+            .collect()
+    })
+}
+
+/// IP protocol numbers listed in Nmap’s `nmap-protocols` database (embedded copy in
+/// `data/nmap_ip_protocols_fast.txt`). Used for **`-sO -F`**, matching Nmap’s nested `[P:0-]`
+/// selection (only protocols with a registered name).
+pub fn fast_ip_protocols_nmap() -> Vec<u16> {
+    load_fast_ip_protocols_nmap().to_vec()
 }
 
 fn parse_single_range(token: &str, out: &mut Vec<u16>) -> Result<(), PortParseError> {
@@ -123,5 +147,15 @@ mod tests {
     #[test]
     fn top_100_non_empty() {
         assert_eq!(fast_tcp_ports().len(), 100);
+    }
+
+    #[test]
+    fn fast_ip_protocols_sorted_unique_in_range() {
+        let v = fast_ip_protocols_nmap();
+        assert!(v.len() > 1, "embedded nmap IP protocol list must not be empty");
+        for w in v.windows(2) {
+            assert!(w[0] < w[1], "expected sorted unique list");
+        }
+        assert!(v.iter().all(|&p| p <= 255));
     }
 }
