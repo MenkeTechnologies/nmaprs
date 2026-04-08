@@ -13,6 +13,7 @@ pub mod ping;
 pub mod ports;
 pub mod resume;
 pub mod scan;
+pub mod scanflags;
 pub mod syn;
 pub mod target;
 pub mod trace;
@@ -180,6 +181,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
             let syn_shard_cap = plan
                 .effective_probe_concurrency()
                 .clamp(1, crate::syn::MAX_SYN_PARALLEL_SHARDS);
+            let tcp_scan_flags = plan.tcp_scan_flags;
 
             let v4_fut = async {
                 if work_v4.is_empty() {
@@ -190,6 +192,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 match tokio::task::spawn_blocking(move || {
                     crate::syn::parallel_tcp_port_scan_ipv4(
                         kind,
+                        tcp_scan_flags,
                         work_v4,
                         to,
                         pacer,
@@ -216,6 +219,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 match tokio::task::spawn_blocking(move || {
                     crate::syn::parallel_tcp_port_scan_ipv6(
                         kind,
+                        tcp_scan_flags,
                         work_v6,
                         to,
                         pacer,

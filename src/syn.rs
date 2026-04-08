@@ -61,6 +61,38 @@ fn split_into_syn_chunks<T>(order: Vec<T>, shards: usize) -> Vec<Vec<T>> {
     out
 }
 
+/// Sequence, acknowledgment, and TCP flags for one raw probe (used with optional `--scanflags` override).
+fn tcp_probe_fields(
+    probe_kind: RawTcpProbeKind,
+    send_flags_override: Option<u8>,
+    rng: &mut impl Rng,
+) -> (u32, u32, u8) {
+    if let Some(f) = send_flags_override {
+        let seq = rng.gen::<u32>();
+        let ack = if f & TcpFlags::SYN != 0 {
+            0u32
+        } else if f & TcpFlags::ACK != 0 {
+            rng.gen::<u32>() | 1
+        } else {
+            0u32
+        };
+        return (seq, ack, f);
+    }
+    let seq = rng.gen::<u32>();
+    let (ack_num, flags) = match probe_kind {
+        RawTcpProbeKind::Syn => (0u32, TcpFlags::SYN),
+        RawTcpProbeKind::Null => (0u32, 0),
+        RawTcpProbeKind::Fin => (0u32, TcpFlags::FIN),
+        RawTcpProbeKind::Xmas => (0u32, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG),
+        RawTcpProbeKind::Maimon => (0u32, TcpFlags::FIN | TcpFlags::ACK),
+        RawTcpProbeKind::AckPortScan | RawTcpProbeKind::WindowScan | RawTcpProbeKind::AckPing => {
+            let a = rng.gen::<u32>() | 1;
+            (a, TcpFlags::ACK)
+        }
+    };
+    (seq, ack_num, flags)
+}
+
 fn local_ipv4_for_checksum() -> io::Result<Ipv4Addr> {
     let s = UdpSocket::bind("0.0.0.0:0")?;
     s.connect("8.8.8.8:80")?;
@@ -225,6 +257,7 @@ struct SynKeyV4 {
 fn tcp_ipv4_one_round(
     subset: &[(usize, Ipv4Addr, u16)],
     probe_kind: RawTcpProbeKind,
+    send_flags_override: Option<u8>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
@@ -337,18 +370,8 @@ fn tcp_ipv4_one_round(
                 break s;
             }
         };
-        let seq: u32 = rng.gen();
-        let (ack_num, flags) = match probe_kind {
-            RawTcpProbeKind::Syn => (0u32, TcpFlags::SYN),
-            RawTcpProbeKind::Null => (0u32, 0),
-            RawTcpProbeKind::Fin => (0u32, TcpFlags::FIN),
-            RawTcpProbeKind::Xmas => (0u32, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG),
-            RawTcpProbeKind::Maimon => (0u32, TcpFlags::FIN | TcpFlags::ACK),
-            RawTcpProbeKind::AckPortScan | RawTcpProbeKind::WindowScan | RawTcpProbeKind::AckPing => {
-                let a = rng.gen::<u32>() | 1;
-                (a, TcpFlags::ACK)
-            }
-        };
+        let (seq, ack_num, flags) =
+            tcp_probe_fields(probe_kind, send_flags_override, &mut rng);
         let deadline = Instant::now() + per_probe_timeout;
         ge_max = ge_max.max(deadline);
         pending.insert(
@@ -390,6 +413,7 @@ fn tcp_ipv4_one_round(
 fn tcp_scan_ipv4_with_kind(
     order: Vec<(Ipv4Addr, u16)>,
     kind: RawTcpProbeKind,
+    send_flags_override: Option<u8>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
@@ -426,6 +450,7 @@ fn tcp_scan_ipv4_with_kind(
         tcp_ipv4_one_round(
             &subset,
             kind,
+            send_flags_override,
             per_probe_timeout,
             pacer.clone(),
             host_timeout,
@@ -456,6 +481,7 @@ fn tcp_scan_ipv4_with_kind(
 pub fn tcp_port_scan_ipv4(
     kind: TcpPortScanKind,
     order: Vec<(Ipv4Addr, u16)>,
+    send_flags_override: Option<u8>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
@@ -467,6 +493,7 @@ pub fn tcp_port_scan_ipv4(
     tcp_scan_ipv4_with_kind(
         order,
         kind.into(),
+        send_flags_override,
         per_probe_timeout,
         pacer,
         host_timeout,
@@ -492,6 +519,7 @@ pub fn syn_scan_ipv4(
     tcp_port_scan_ipv4(
         TcpPortScanKind::Syn,
         order,
+        None,
         per_probe_timeout,
         pacer,
         host_timeout,
@@ -517,6 +545,7 @@ pub fn ack_ping_scan_ipv4(
     tcp_scan_ipv4_with_kind(
         order,
         RawTcpProbeKind::AckPing,
+        None,
         per_probe_timeout,
         pacer,
         host_timeout,
@@ -538,6 +567,7 @@ struct SynKeyV6 {
 fn tcp_ipv6_one_round(
     subset: &[(usize, Ipv6Addr, u16)],
     probe_kind: RawTcpProbeKind,
+    send_flags_override: Option<u8>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
@@ -649,18 +679,8 @@ fn tcp_ipv6_one_round(
                 break s;
             }
         };
-        let seq: u32 = rng.gen();
-        let (ack_num, flags) = match probe_kind {
-            RawTcpProbeKind::Syn => (0u32, TcpFlags::SYN),
-            RawTcpProbeKind::Null => (0u32, 0),
-            RawTcpProbeKind::Fin => (0u32, TcpFlags::FIN),
-            RawTcpProbeKind::Xmas => (0u32, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG),
-            RawTcpProbeKind::Maimon => (0u32, TcpFlags::FIN | TcpFlags::ACK),
-            RawTcpProbeKind::AckPortScan | RawTcpProbeKind::WindowScan | RawTcpProbeKind::AckPing => {
-                let a = rng.gen::<u32>() | 1;
-                (a, TcpFlags::ACK)
-            }
-        };
+        let (seq, ack_num, flags) =
+            tcp_probe_fields(probe_kind, send_flags_override, &mut rng);
         let deadline = Instant::now() + per_probe_timeout;
         ge_max = ge_max.max(deadline);
         pending.insert(
@@ -702,6 +722,7 @@ fn tcp_ipv6_one_round(
 fn tcp_scan_ipv6_with_kind(
     order: Vec<(Ipv6Addr, u16)>,
     kind: RawTcpProbeKind,
+    send_flags_override: Option<u8>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
@@ -738,6 +759,7 @@ fn tcp_scan_ipv6_with_kind(
         tcp_ipv6_one_round(
             &subset,
             kind,
+            send_flags_override,
             per_probe_timeout,
             pacer.clone(),
             host_timeout,
@@ -768,6 +790,7 @@ fn tcp_scan_ipv6_with_kind(
 pub fn tcp_port_scan_ipv6(
     kind: TcpPortScanKind,
     order: Vec<(Ipv6Addr, u16)>,
+    send_flags_override: Option<u8>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
@@ -779,6 +802,7 @@ pub fn tcp_port_scan_ipv6(
     tcp_scan_ipv6_with_kind(
         order,
         kind.into(),
+        send_flags_override,
         per_probe_timeout,
         pacer,
         host_timeout,
@@ -804,6 +828,7 @@ pub fn syn_scan_ipv6(
     tcp_port_scan_ipv6(
         TcpPortScanKind::Syn,
         order,
+        None,
         per_probe_timeout,
         pacer,
         host_timeout,
@@ -829,6 +854,7 @@ pub fn ack_ping_scan_ipv6(
     tcp_scan_ipv6_with_kind(
         order,
         RawTcpProbeKind::AckPing,
+        None,
         per_probe_timeout,
         pacer,
         host_timeout,
@@ -843,6 +869,7 @@ pub fn ack_ping_scan_ipv6(
 #[allow(clippy::too_many_arguments)]
 pub fn parallel_tcp_port_scan_ipv4(
     kind: TcpPortScanKind,
+    send_flags_override: Option<u8>,
     order: Vec<(Ipv4Addr, u16)>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
@@ -862,6 +889,7 @@ pub fn parallel_tcp_port_scan_ipv4(
         return tcp_port_scan_ipv4(
             kind,
             order,
+            send_flags_override,
             per_probe_timeout,
             pacer,
             host_timeout,
@@ -883,6 +911,7 @@ pub fn parallel_tcp_port_scan_ipv4(
                 tcp_port_scan_ipv4(
                     kind,
                     chunk,
+                    send_flags_override,
                     per_probe_timeout,
                     pacer,
                     host_timeout,
@@ -922,6 +951,7 @@ pub fn parallel_syn_scan_ipv4(
 ) -> io::Result<Vec<PortLine>> {
     parallel_tcp_port_scan_ipv4(
         TcpPortScanKind::Syn,
+        None,
         order,
         per_probe_timeout,
         pacer,
@@ -938,6 +968,7 @@ pub fn parallel_syn_scan_ipv4(
 #[allow(clippy::too_many_arguments)]
 pub fn parallel_tcp_port_scan_ipv6(
     kind: TcpPortScanKind,
+    send_flags_override: Option<u8>,
     order: Vec<(Ipv6Addr, u16)>,
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
@@ -957,6 +988,7 @@ pub fn parallel_tcp_port_scan_ipv6(
         return tcp_port_scan_ipv6(
             kind,
             order,
+            send_flags_override,
             per_probe_timeout,
             pacer,
             host_timeout,
@@ -978,6 +1010,7 @@ pub fn parallel_tcp_port_scan_ipv6(
                 tcp_port_scan_ipv6(
                     kind,
                     chunk,
+                    send_flags_override,
                     per_probe_timeout,
                     pacer,
                     host_timeout,
@@ -1017,6 +1050,7 @@ pub fn parallel_syn_scan_ipv6(
 ) -> io::Result<Vec<PortLine>> {
     parallel_tcp_port_scan_ipv6(
         TcpPortScanKind::Syn,
+        None,
         order,
         per_probe_timeout,
         pacer,

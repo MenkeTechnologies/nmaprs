@@ -24,6 +24,8 @@ pub struct ScanPlan {
     pub connect_timeout: Duration,
     pub no_ping: bool,
     pub scan_kind: ScanKind,
+    /// TCP flag byte from `--scanflags` (only with raw `-s*` TCP scans).
+    pub tcp_scan_flags: Option<u8>,
     pub verbosity: u8,
     pub debug: u8,
     pub sequential_ports: bool,
@@ -192,6 +194,17 @@ impl ScanPlan {
             }
         }
 
+        let mut tcp_scan_flags = None;
+        if let Some(ref s) = args.scanflags {
+            tcp_scan_flags = Some(crate::scanflags::parse_scanflags(s)?);
+        }
+        if tcp_scan_flags.is_some() && scan_kind.tcp_port_raw_kind().is_none() {
+            warn!(
+                "--scanflags requires a raw TCP scan type (-sS, -sN, -sF, -sX, -sM, -sA, -sW); ignoring"
+            );
+            tcp_scan_flags = None;
+        }
+
         // --- Ports (skipped for host-discovery-only) ---
         let mut ports: Vec<u16> = if args.ping_only {
             if args.ports.is_some() {
@@ -300,6 +313,7 @@ impl ScanPlan {
             connect_timeout,
             no_ping: args.no_ping,
             scan_kind,
+            tcp_scan_flags,
             verbosity: args.verbosity,
             debug: args.debug,
             sequential_ports: args.sequential_ports,
@@ -519,5 +533,26 @@ mod rate_validation_tests {
             assert_eq!(plan.scan_kind, kind, "{opt} {ch}");
             assert_eq!(plan.scan_kind.tcp_port_raw_kind(), Some(raw));
         }
+    }
+
+    #[test]
+    fn scanflags_sets_tcp_scan_flags_with_raw_syn() {
+        use pnet::packet::tcp::TcpFlags;
+
+        use super::ScanKind;
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--scan-type",
+            "S",
+            "--scanflags",
+            "FIN|ACK",
+            "-p",
+            "22",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.scan_kind, ScanKind::TcpSyn);
+        assert_eq!(plan.tcp_scan_flags, Some(TcpFlags::FIN | TcpFlags::ACK));
     }
 }

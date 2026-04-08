@@ -21,6 +21,7 @@ fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
         connect_timeout: Duration::from_millis(50),
         no_ping: true,
         scan_kind: ScanKind::TcpConnect,
+        tcp_scan_flags: None,
         verbosity: 0,
         debug: 0,
         sequential_ports: true,
