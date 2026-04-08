@@ -102,61 +102,58 @@ fn batch_hosts_slice_with_rng<R: Rng + ?Sized>(
     out
 }
 
+/// Raw ICMP listeners for UDP `closed`/`filtered` classification; shared across host batches.
+fn spawn_udp_icmp_listeners(
+    has_v4: bool,
+    has_v6: bool,
+    notes: UdpIcmpNotes,
+    stop: Arc<AtomicBool>,
+) -> Vec<std::thread::JoinHandle<()>> {
+    let mut listeners = Vec::new();
+    #[cfg(unix)]
+    let icmp_dual_stack = has_v4 && has_v6;
+    #[cfg(not(unix))]
+    let icmp_dual_stack = false;
+
+    if icmp_dual_stack {
+        let notes_bg = notes.clone();
+        let stop_bg = stop.clone();
+        listeners.push(std::thread::spawn(move || {
+            if let Err(e) = crate::icmp_listen::run_udp_icmp_dual_stack(notes_bg, stop_bg) {
+                warn!(error = %e, "ICMP dual-stack listener exited");
+            }
+        }));
+    } else {
+        if has_v4 {
+            let notes_bg = notes.clone();
+            let stop_bg = stop.clone();
+            listeners.push(std::thread::spawn(move || {
+                if let Err(e) =
+                    crate::icmp_listen::run_ipv4_port_unreachable_listener(notes_bg, stop_bg)
+                {
+                    warn!(error = %e, "IPv4 ICMP listener exited");
+                }
+            }));
+        }
+        if has_v6 {
+            let notes_bg = notes.clone();
+            let stop_bg = stop.clone();
+            listeners.push(std::thread::spawn(move || {
+                if let Err(e) =
+                    crate::icmp_listen::run_ipv6_port_unreachable_listener(notes_bg, stop_bg)
+                {
+                    warn!(error = %e, "ICMPv6 listener exited");
+                }
+            }));
+        }
+    }
+    listeners
+}
+
 async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<PortLine>> {
     let out = match plan.scan_kind {
         ScanKind::Udp => {
-            let has_v4 = work.iter().any(|(h, _)| h.is_ipv4());
-            let has_v6 = work.iter().any(|(h, _)| h.is_ipv6());
-            if has_v4 || has_v6 {
-                let notes: UdpIcmpNotes = Arc::new(DashMap::new());
-                let stop = Arc::new(AtomicBool::new(false));
-                let mut listeners = Vec::new();
-                #[cfg(unix)]
-                let icmp_dual_stack = has_v4 && has_v6;
-                #[cfg(not(unix))]
-                let icmp_dual_stack = false;
-
-                if icmp_dual_stack {
-                    let notes_bg = notes.clone();
-                    let stop_bg = stop.clone();
-                    listeners.push(std::thread::spawn(move || {
-                        if let Err(e) = crate::icmp_listen::run_udp_icmp_dual_stack(notes_bg, stop_bg) {
-                            warn!(error = %e, "ICMP dual-stack listener exited");
-                        }
-                    }));
-                } else {
-                    if has_v4 {
-                        let notes_bg = notes.clone();
-                        let stop_bg = stop.clone();
-                        listeners.push(std::thread::spawn(move || {
-                            if let Err(e) =
-                                crate::icmp_listen::run_ipv4_port_unreachable_listener(notes_bg, stop_bg)
-                            {
-                                warn!(error = %e, "IPv4 ICMP listener exited");
-                            }
-                        }));
-                    }
-                    if has_v6 {
-                        let notes_bg = notes.clone();
-                        let stop_bg = stop.clone();
-                        listeners.push(std::thread::spawn(move || {
-                            if let Err(e) =
-                                crate::icmp_listen::run_ipv6_port_unreachable_listener(notes_bg, stop_bg)
-                            {
-                                warn!(error = %e, "ICMPv6 listener exited");
-                            }
-                        }));
-                    }
-                }
-                let lines = udp_scan(work, plan.clone(), Some(notes)).await;
-                stop.store(true, Ordering::SeqCst);
-                for h in listeners {
-                    let _ = h.join();
-                }
-                lines
-            } else {
-                udp_scan(work, plan.clone(), None).await
-            }
+            unreachable!("UDP scans use shared ICMP listeners in run(); do not call port_scan")
         }
         ScanKind::TcpSyn => {
             let (work_v4, work_v6) = split_syn_work(&work);
@@ -398,15 +395,48 @@ pub async fn run(args: Args) -> Result<i32> {
         .map(|p| crate::resume::ResumeState::load(p).unwrap_or_default());
 
     let mut lines: Vec<PortLine> = Vec::new();
-    for batch_hosts in host_batches(&hosts, &plan) {
-        let mut work = build_work(&batch_hosts, &plan.ports);
-        if let Some(ref st) = resume_st {
-            work.retain(|(h, p)| !st.is_done(*h, *p));
+
+    if plan.scan_kind == ScanKind::Udp {
+        let has_v4 = hosts.iter().any(|h| h.is_ipv4());
+        let has_v6 = hosts.iter().any(|h| h.is_ipv6());
+        let mut icmp_session: Option<(UdpIcmpNotes, Arc<AtomicBool>, Vec<std::thread::JoinHandle<()>>)> =
+            None;
+
+        for batch_hosts in host_batches(&hosts, &plan) {
+            let mut work = build_work(&batch_hosts, &plan.ports);
+            if let Some(ref st) = resume_st {
+                work.retain(|(h, p)| !st.is_done(*h, *p));
+            }
+            if work.is_empty() {
+                continue;
+            }
+            if icmp_session.is_none() && (has_v4 || has_v6) {
+                let notes: UdpIcmpNotes = Arc::new(DashMap::new());
+                let stop = Arc::new(AtomicBool::new(false));
+                let handles = spawn_udp_icmp_listeners(has_v4, has_v6, notes.clone(), stop.clone());
+                icmp_session = Some((notes, stop, handles));
+            }
+            let icmp_notes = icmp_session.as_ref().map(|(n, _, _)| n.clone());
+            lines.extend(udp_scan(work, plan.clone(), icmp_notes).await);
         }
-        if work.is_empty() {
-            continue;
+
+        if let Some((_, stop, handles)) = icmp_session {
+            stop.store(true, Ordering::SeqCst);
+            for h in handles {
+                let _ = h.join();
+            }
         }
-        lines.extend(port_scan(work, plan.clone()).await?);
+    } else {
+        for batch_hosts in host_batches(&hosts, &plan) {
+            let mut work = build_work(&batch_hosts, &plan.ports);
+            if let Some(ref st) = resume_st {
+                work.retain(|(h, p)| !st.is_done(*h, *p));
+            }
+            if work.is_empty() {
+                continue;
+            }
+            lines.extend(port_scan(work, plan.clone()).await?);
+        }
     }
 
     if let Some(path) = &plan.resume_path {

@@ -16,7 +16,7 @@ Created by **MenkeTechnologies**.
 | Area | Status |
 |------|--------|
 | TCP connect (`-sT`, default) | **Implemented** — async, parallel, timeout-bound |
-| UDP (`-sU`) | **Implemented** — reply → `open`; short post-timeout window for ICMP; raw listeners (privileged) classify **destination unreachable** probes: **port unreachable** → `closed`; **other unreachable codes** → `filtered` (IPv4 type 3 / ICMPv6 type 1); **Unix** uses one `poll(2)`+burst-recv thread when both IPv4 and IPv6 targets; `closed` wins over `filtered` |
+| UDP (`-sU`) | **Implemented** — reply → `open`; short post-timeout window for ICMP; raw listeners (privileged) classify **destination unreachable** probes: **port unreachable** → `closed`; **other unreachable codes** → `filtered` (IPv4 type 3 / ICMPv6 type 1); **Unix** uses one `poll(2)`+burst-recv thread when both IPv4 and IPv6 targets; `closed` wins over `filtered`. With `--min-hostgroup` / `--max-hostgroup`, ICMP listener threads are started **once** for the whole scan (not per batch) |
 | SYN (`-sS`) | **Implemented** — raw IPv4 + **separate** raw IPv6 TCP path via `pnet` — **requires privileges**; **pipelined** per family: dedicated recv thread + main-thread sends (keys registered **before** each send to avoid races); work is **sharded** across up to **16** concurrent pipelines per family (bounded by `effective_probe_concurrency()`); **mixed v4+v6 targets** run both SYN scans **concurrently** (`tokio::join`); falls back to TCP connect per address family on failure |
 | Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6` |
 | IPv6 (`-6`) | **Implemented** — targets + scans (including raw SYN when privileged) |
@@ -28,7 +28,7 @@ Created by **MenkeTechnologies**.
 | `--iflist` | **Implemented** — lists interfaces via `if-addrs` |
 | `--host-timeout` | **Implemented** — per-host wall clock from first probe; remaining ports marked `filtered` with reason `host-timeout` (TCP connect, UDP, raw SYN; mixed v4+v6 SYN share one per-`IpAddr` clock) |
 | `--max-retries` | **Implemented** — extra attempts after **probe timeout** (total tries = `1 + N`) for TCP connect, UDP, and raw SYN (retry rounds omit scan-delay / rate pacer like TCP retries) |
-| `--min-rtt-timeout` | **Implemented** — lower bound on per-probe wait (`connect_timeout = max(..., min)`); applies to TCP connect, UDP, and SYN probe timeout |
+| `--min-rtt-timeout` | **Implemented** — lower bound on per-probe wait (`connect_timeout = max(..., min)`); applies to TCP connect, UDP, and SYN probe timeout. When both `--max-rtt-timeout` and `--min-rtt-timeout` are set, `max` must be `≥` `min` |
 | `--scan-delay` / `--max-scan-delay` | **Implemented** — per-probe delay before send/connect: fixed `scan-delay`, or uniform random in `[scan-delay, max-scan-delay]` when both set; TCP (first attempt), UDP, raw SYN; `max` must be `>=` `min` |
 | `--max-rate` | **Implemented** — global cap on probe **starts** per second (TCP connect, UDP, raw SYN; mixed IPv4+IPv6 SYN share one limiter) |
 | `--min-rate` | **Implemented** — must be ≤ `--max-rate` when both are set (probe starts/sec); `--max-rate` still caps probe starts via the global pacer. Without `--max-parallelism`, TCP/UDP/ping/target expansion parallelism is raised toward `min(min-rate, 65535)` when that exceeds the timing template so the floor is reachable; with `--max-parallelism`, that cap wins and a warning is emitted if min-rate is still higher |
@@ -86,7 +86,7 @@ cargo bench --bench scan
 1. **Argv expansion** (`src/argv_expand.rs`) normalizes glued nmap tokens before `clap`.
 2. **Plan** (`src/config.rs`) → `ScanPlan`.
 3. **Targets** (`src/target.rs`, `src/lib.rs` `expand_specs_ordered`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`; **parallel** `expand_target` with stable ordering.
-4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — optional `--min-hostgroup` / `--max-hostgroup` batching in `src/lib.rs` (`host_batches`); TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 SYN (recv thread pipelined with sends; optional multi-shard parallel pipelines per family).
+4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — optional `--min-hostgroup` / `--max-hostgroup` batching in `src/lib.rs` (`host_batches`); UDP ICMP listeners are **one session per scan** (shared `DashMap` across batches). TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 SYN (recv thread pipelined with sends; optional multi-shard parallel pipelines per family).
 5. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
 6. **Output** (`src/output.rs`).
 

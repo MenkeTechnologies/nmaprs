@@ -139,6 +139,14 @@ impl ScanPlan {
             }
         }
 
+        if let (Some(smax), Some(smin)) = (&args.max_rtt_timeout, &args.min_rtt_timeout) {
+            let max_d = parse_duration(smax).with_context(|| "max-rtt-timeout")?;
+            let min_d = parse_duration(smin).with_context(|| "min-rtt-timeout")?;
+            if max_d < min_d {
+                bail!("--max-rtt-timeout must be >= --min-rtt-timeout");
+            }
+        }
+
         // --- Scan kind ---
         let mut scan_kind = ScanKind::TcpConnect;
         if let Some(ch) = args.scan_type {
@@ -441,5 +449,26 @@ mod rate_validation_tests {
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.hostgroup_min, Some(8));
         assert_eq!(plan.hostgroup_max, Some(32));
+    }
+
+    #[test]
+    fn max_rtt_below_min_rtt_errors() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--max-rtt-timeout",
+            "50ms",
+            "--min-rtt-timeout",
+            "200ms",
+            "-p",
+            "80",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.contains("max-rtt-timeout") && s.contains("min-rtt-timeout"),
+            "{s}"
+        );
     }
 }
