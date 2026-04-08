@@ -30,7 +30,7 @@ Created by **MenkeTechnologies**.
 | IPv6 (`-6`) | **Implemented** — targets + scans (including raw SYN when privileged) |
 | `-iL` / `-iR` | **Implemented** |
 | `--resume` | **Implemented** — JSON checkpoint of completed `(host, port)`; applies to TCP connect, UDP, **raw half-open TCP**, and **IP protocol (`-sO`)** (remaining pairs only after the checkpoint) |
-| `--traceroute` | **Implemented** — system `traceroute` / `tracert` |
+| `--traceroute` | **Implemented** — system `traceroute` / `tracert`; hosts run **concurrently** up to **`min(effective parallelism, 32)`** subprocesses, stdout/stderr printed in **target order** |
 | `-O` / `-A` OS | **Heuristic** — ICMP TTL bucket guess (+ ping after TCP scan when not `-sn`) |
 | `--script` / `-sC` | **Partial** — `default` / `banner` builtins; Lua NSE **not** embedded |
 | `--iflist` | **Implemented** — lists interfaces via `if-addrs` |
@@ -98,7 +98,7 @@ cargo bench --bench scan
 3. **Targets** (`src/target.rs`, `src/lib.rs` `expand_specs_ordered`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`; **parallel** `expand_target` with stable ordering.
 4. **Discovery** (`src/discovery.rs`, `src/icmp_ping.rs`) — before port scan (unless `-Pn`); default ICMP + raw SYN (`syn.rs`) run concurrently; `-PS` raw SYN, `-PA` connect, `-PU` UDP, `-PY` SCTP, `-PO` IP protocol (`ip_proto.rs`), `-PP`/`-PM` legacy ICMP on Unix (`icmp_ping.rs`); `connect_timeout` from `--min-rtt-timeout` / timing template.
 5. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/sctp.rs`, `src/ip_proto.rs`, `src/ftp_bounce.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — optional `--min-hostgroup` / `--max-hostgroup` batching in `src/lib.rs` (`host_batches`); UDP ICMP listeners are **one session per scan** (shared `DashMap` across batches). TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 half-open TCP + **SCTP** (`-sY`/`-sZ`, CRC32c, IPv4 Layer3 + IPv6 raw SCTP, sharded blocking pool, mixed v4+v6 `tokio::join`) + **IP protocol** (`-sO`: IPv4 ICMP + Unix IPv6 raw + ICMPv6 Parameter Problem, sharded, mixed v4+v6 `tokio::join`) + **FTP bounce** (`-b`, Tokio parallel FTP sessions).
-6. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
+6. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs` — bounded parallel `traceroute` / `tracert`, ordered output), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
 7. **Output** (`src/output.rs`).
 
 ## Data

@@ -608,7 +608,7 @@ pub async fn run(args: Args) -> Result<i32> {
             }
         }
         if plan.traceroute {
-            crate::trace::run_traceroute(&hosts).await?;
+            crate::trace::run_traceroute(&hosts, plan.effective_probe_concurrency()).await?;
         }
         return Ok(0);
     }
@@ -734,7 +734,7 @@ pub async fn run(args: Args) -> Result<i32> {
     }
 
     if plan.traceroute && !plan.ping_only {
-        crate::trace::run_traceroute(&hosts).await?;
+        crate::trace::run_traceroute(&hosts, plan.effective_probe_concurrency()).await?;
     }
 
     Ok(0)
