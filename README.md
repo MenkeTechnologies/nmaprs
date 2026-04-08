@@ -17,7 +17,7 @@ Created by **MenkeTechnologies**.
 |------|--------|
 | TCP connect (`-sT`, default) | **Implemented** — async, parallel, timeout-bound |
 | UDP (`-sU`) | **Implemented** — reply → `open`; short post-timeout window for ICMP; raw listeners (privileged) classify **destination unreachable** probes: **port unreachable** → `closed`; **other unreachable codes** → `filtered` (IPv4 type 3 / ICMPv6 type 1); **Unix** uses one `poll(2)`+burst-recv thread when both IPv4 and IPv6 targets; `closed` wins over `filtered` |
-| SYN (`-sS`) | **Implemented** — raw IPv4 + **separate** raw IPv6 TCP path via `pnet` — **requires privileges**; batched sends + unified receive per family; **mixed v4+v6 targets** run both SYN scans **concurrently** (`tokio::join`); falls back to TCP connect per address family on failure |
+| SYN (`-sS`) | **Implemented** — raw IPv4 + **separate** raw IPv6 TCP path via `pnet` — **requires privileges**; **pipelined** per family: dedicated recv thread + main-thread sends (keys registered **before** each send to avoid races); **mixed v4+v6 targets** run both SYN scans **concurrently** (`tokio::join`); falls back to TCP connect per address family on failure |
 | Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6` |
 | IPv6 (`-6`) | **Implemented** — targets + scans (including raw SYN when privileged) |
 | `-iL` / `-iR` | **Implemented** |
@@ -79,7 +79,7 @@ cargo bench --bench scan
 1. **Argv expansion** (`src/argv_expand.rs`) normalizes glued nmap tokens before `clap`.
 2. **Plan** (`src/config.rs`) → `ScanPlan`.
 3. **Targets** (`src/target.rs`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`.
-4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — TCP connect / UDP (+ parallel ICMP + ICMPv6 listeners for port-unreachable) / raw IPv4 + IPv6 SYN.
+4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — TCP connect / UDP (+ parallel ICMP + ICMPv6 listeners for port-unreachable) / raw IPv4 + IPv6 SYN (recv thread pipelined with sends).
 5. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
 6. **Output** (`src/output.rs`).
 

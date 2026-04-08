@@ -1,14 +1,16 @@
 //! Raw TCP SYN scan via `pnet` (requires elevated privileges on most OSes).
 //!
-//! IPv4/IPv6 use a **batched** model: send all probes first, then drain replies until deadlines
-//! (matches common parallel SYN scanners and avoids serial RTT stacking).
+//! **Batched + pipelined**: a receiver thread drains TCP replies while the main thread sends SYNs,
+//! overlapping RTT with the send phase.
 
-use std::collections::HashMap;
 use std::io;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
+use dashmap::DashMap;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::tcp::{ipv4_checksum, ipv6_checksum, MutableTcpPacket, TcpFlags, TcpPacket};
 use pnet::transport::{
@@ -74,7 +76,7 @@ enum SynOutcome {
     Closed,
 }
 
-/// Half-open SYN scan for IPv4: batch sends, then unified receive until per-probe deadlines.
+/// Half-open SYN scan for IPv4: receiver thread + main-thread send pipeline.
 pub fn syn_scan_ipv4(
     hosts: Vec<Ipv4Addr>,
     ports: &[u16],
@@ -84,7 +86,6 @@ pub fn syn_scan_ipv4(
         RX_BUF,
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Tcp)),
     )?;
-    let mut iter = tcp_packet_iter(&mut rx);
     let src_ip = local_ipv4_for_checksum()?;
     let mut rng = rand::thread_rng();
 
@@ -96,99 +97,121 @@ pub fn syn_scan_ipv4(
     }
 
     let mut order: Vec<(Ipv4Addr, u16)> = Vec::new();
-    // Pending probe: key → (deadline, index in `order` / `results`).
-    let mut pending: HashMap<Key, (Instant, usize)> = HashMap::new();
-
     for dst_ip in &hosts {
         for &port in ports {
-            let idx = order.len();
             order.push((*dst_ip, port));
-            let sport = loop {
-                let s: u16 = rng.gen_range(32768..65535);
-                let k = Key {
-                    dst: *dst_ip,
-                    dport: port,
-                    sport: s,
-                };
-                if !pending.contains_key(&k) {
-                    break s;
-                }
-            };
-            let seq: u32 = rng.gen();
-            let tcp_len = MutableTcpPacket::minimum_packet_size();
-            let mut buf = vec![0u8; tcp_len];
-            {
-                let mut tcp = MutableTcpPacket::new(&mut buf).expect("tcp buffer");
-                tcp.set_source(sport);
-                tcp.set_destination(port);
-                tcp.set_sequence(seq);
-                tcp.set_acknowledgement(0);
-                tcp.set_data_offset(5);
-                tcp.set_reserved(0);
-                tcp.set_flags(TcpFlags::SYN);
-                tcp.set_window(64240);
-                tcp.set_checksum(0);
-                tcp.set_urgent_ptr(0);
-                let cks = ipv4_checksum(&tcp.to_immutable(), &src_ip, dst_ip);
-                tcp.set_checksum(cks);
-                tx.send_to(tcp.to_immutable(), IpAddr::V4(*dst_ip))?;
-            }
-            let deadline = Instant::now() + per_probe_timeout;
-            pending.insert(
-                Key {
-                    dst: *dst_ip,
-                    dport: port,
-                    sport,
-                },
-                (deadline, idx),
-            );
         }
     }
-
     let total = order.len();
-    let mut results: Vec<Option<SynOutcome>> = vec![None; total];
-    let mut global_end = Instant::now();
-    for (t, _) in pending.values() {
-        global_end = global_end.max(*t);
+    if total == 0 {
+        return Ok(vec![]);
     }
 
-    while !pending.is_empty() && Instant::now() < global_end {
-        let now = Instant::now();
-        let remain = global_end.saturating_duration_since(now);
-        if remain.is_zero() {
-            break;
-        }
-        let slice = remain.min(RECV_SLICE);
-        match iter.next_with_timeout(slice) {
-            Ok(Some((pkt, addr))) => {
-                let IpAddr::V4(dst) = addr else {
-                    continue;
-                };
-                let sport = pkt.get_destination();
-                let dport = pkt.get_source();
-                let key = Key {
-                    dst,
-                    dport,
-                    sport,
-                };
-                let Some((_, idx)) = pending.get(&key).copied() else {
-                    continue;
-                };
-                let f = pkt.get_flags();
-                if f & TcpFlags::RST != 0 {
-                    results[idx] = Some(SynOutcome::Closed);
-                    pending.remove(&key);
-                } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
-                    results[idx] = Some(SynOutcome::Open);
-                    pending.remove(&key);
-                }
+    let pending: Arc<DashMap<Key, (Instant, usize)>> = Arc::new(DashMap::new());
+    let results: Arc<Mutex<Vec<Option<SynOutcome>>>> = Arc::new(Mutex::new(vec![None; total]));
+    let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+
+    let pending_r = Arc::clone(&pending);
+    let results_r = Arc::clone(&results);
+    let global_end_r = Arc::clone(&global_end);
+
+    let recv_handle = thread::spawn(move || -> io::Result<()> {
+        let mut iter = tcp_packet_iter(&mut rx);
+        loop {
+            let now = Instant::now();
+            let ge = *global_end_r.lock().expect("global_end");
+            if pending_r.is_empty() && ge.is_some() {
+                break;
             }
-            Ok(None) => {}
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e),
+            if ge.is_some_and(|g| now >= g) {
+                break;
+            }
+            let remain = ge.map(|g| g.saturating_duration_since(now)).unwrap_or(RECV_SLICE);
+            let slice = remain.min(RECV_SLICE);
+            match iter.next_with_timeout(slice) {
+                Ok(Some((pkt, addr))) => {
+                    let IpAddr::V4(dst) = addr else {
+                        continue;
+                    };
+                    let sport = pkt.get_destination();
+                    let dport = pkt.get_source();
+                    let key = Key {
+                        dst,
+                        dport,
+                        sport,
+                    };
+                    let Some((_, idx)) = pending_r.get(&key).map(|e| *e.value()) else {
+                        continue;
+                    };
+                    let f = pkt.get_flags();
+                    if f & TcpFlags::RST != 0 {
+                        results_r.lock().expect("results")[idx] = Some(SynOutcome::Closed);
+                        pending_r.remove(&key);
+                    } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
+                        results_r.lock().expect("results")[idx] = Some(SynOutcome::Open);
+                        pending_r.remove(&key);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    });
+
+    for (idx, (dst_ip, port)) in order.iter().enumerate() {
+        let sport = loop {
+            let s: u16 = rng.gen_range(32768..65535);
+            let k = Key {
+                dst: *dst_ip,
+                dport: *port,
+                sport: s,
+            };
+            if !pending.contains_key(&k) {
+                break s;
+            }
+        };
+        let seq: u32 = rng.gen();
+        let deadline = Instant::now() + per_probe_timeout;
+        pending.insert(
+            Key {
+                dst: *dst_ip,
+                dport: *port,
+                sport,
+            },
+            (deadline, idx),
+        );
+        let tcp_len = MutableTcpPacket::minimum_packet_size();
+        let mut buf = vec![0u8; tcp_len];
+        {
+            let mut tcp = MutableTcpPacket::new(&mut buf).expect("tcp buffer");
+            tcp.set_source(sport);
+            tcp.set_destination(*port);
+            tcp.set_sequence(seq);
+            tcp.set_acknowledgement(0);
+            tcp.set_data_offset(5);
+            tcp.set_reserved(0);
+            tcp.set_flags(TcpFlags::SYN);
+            tcp.set_window(64240);
+            tcp.set_checksum(0);
+            tcp.set_urgent_ptr(0);
+            let cks = ipv4_checksum(&tcp.to_immutable(), &src_ip, dst_ip);
+            tcp.set_checksum(cks);
+            tx.send_to(tcp.to_immutable(), IpAddr::V4(*dst_ip))?;
         }
     }
 
+    let mut ge_max = Instant::now();
+    for e in pending.iter() {
+        ge_max = ge_max.max(e.value().0);
+    }
+    *global_end.lock().expect("global_end") = Some(ge_max);
+
+    let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
+    recv_res?;
+
+    let results = results.lock().expect("results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
         let (state, reason) = match results[i] {
@@ -230,98 +253,120 @@ pub fn syn_scan_ipv6(
     }
 
     let mut order: Vec<(Ipv6Addr, u16)> = Vec::new();
-    let mut pending: HashMap<Key, (Instant, usize)> = HashMap::new();
-
     for dst_ip in &hosts {
         for &port in ports {
-            let idx = order.len();
             order.push((*dst_ip, port));
-            let sport = loop {
-                let s: u16 = rng.gen_range(32768..65535);
-                let k = Key {
-                    dst: *dst_ip,
-                    dport: port,
-                    sport: s,
-                };
-                if !pending.contains_key(&k) {
-                    break s;
-                }
-            };
-            let seq: u32 = rng.gen();
-            let tcp_len = MutableTcpPacket::minimum_packet_size();
-            let mut buf = vec![0u8; tcp_len];
-            {
-                let mut tcp = MutableTcpPacket::new(&mut buf).expect("tcp buffer");
-                tcp.set_source(sport);
-                tcp.set_destination(port);
-                tcp.set_sequence(seq);
-                tcp.set_acknowledgement(0);
-                tcp.set_data_offset(5);
-                tcp.set_reserved(0);
-                tcp.set_flags(TcpFlags::SYN);
-                tcp.set_window(64240);
-                tcp.set_checksum(0);
-                tcp.set_urgent_ptr(0);
-                let cks = ipv6_checksum(&tcp.to_immutable(), &src_ip, dst_ip);
-                tcp.set_checksum(cks);
-                tx.send_to(tcp.to_immutable(), IpAddr::V6(*dst_ip))?;
-            }
-            let deadline = Instant::now() + per_probe_timeout;
-            pending.insert(
-                Key {
-                    dst: *dst_ip,
-                    dport: port,
-                    sport,
-                },
-                (deadline, idx),
-            );
         }
     }
-
     let total = order.len();
-    let mut results: Vec<Option<SynOutcome>> = vec![None; total];
-    let mut global_end = Instant::now();
-    for (t, _) in pending.values() {
-        global_end = global_end.max(*t);
+    if total == 0 {
+        return Ok(vec![]);
     }
 
-    while !pending.is_empty() && Instant::now() < global_end {
-        let now = Instant::now();
-        let remain = global_end.saturating_duration_since(now);
-        if remain.is_zero() {
-            break;
-        }
-        let slice = remain.min(RECV_SLICE);
-        match recv_ipv6_tcp_with_timeout(&mut rx, slice) {
-            Ok(Some((pkt, addr))) => {
-                let IpAddr::V6(dst) = addr else {
-                    continue;
-                };
-                let sport = pkt.get_destination();
-                let dport = pkt.get_source();
-                let key = Key {
-                    dst,
-                    dport,
-                    sport,
-                };
-                let Some((_, idx)) = pending.get(&key).copied() else {
-                    continue;
-                };
-                let f = pkt.get_flags();
-                if f & TcpFlags::RST != 0 {
-                    results[idx] = Some(SynOutcome::Closed);
-                    pending.remove(&key);
-                } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
-                    results[idx] = Some(SynOutcome::Open);
-                    pending.remove(&key);
-                }
+    let pending: Arc<DashMap<Key, (Instant, usize)>> = Arc::new(DashMap::new());
+    let results: Arc<Mutex<Vec<Option<SynOutcome>>>> = Arc::new(Mutex::new(vec![None; total]));
+    let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+
+    let pending_r = Arc::clone(&pending);
+    let results_r = Arc::clone(&results);
+    let global_end_r = Arc::clone(&global_end);
+
+    let recv_handle = thread::spawn(move || -> io::Result<()> {
+        loop {
+            let now = Instant::now();
+            let ge = *global_end_r.lock().expect("global_end");
+            if pending_r.is_empty() && ge.is_some() {
+                break;
             }
-            Ok(None) => {}
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e),
+            if ge.is_some_and(|g| now >= g) {
+                break;
+            }
+            let remain = ge.map(|g| g.saturating_duration_since(now)).unwrap_or(RECV_SLICE);
+            let slice = remain.min(RECV_SLICE);
+            match recv_ipv6_tcp_with_timeout(&mut rx, slice) {
+                Ok(Some((pkt, addr))) => {
+                    let IpAddr::V6(dst) = addr else {
+                        continue;
+                    };
+                    let sport = pkt.get_destination();
+                    let dport = pkt.get_source();
+                    let key = Key {
+                        dst,
+                        dport,
+                        sport,
+                    };
+                    let Some((_, idx)) = pending_r.get(&key).map(|e| *e.value()) else {
+                        continue;
+                    };
+                    let f = pkt.get_flags();
+                    if f & TcpFlags::RST != 0 {
+                        results_r.lock().expect("results")[idx] = Some(SynOutcome::Closed);
+                        pending_r.remove(&key);
+                    } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
+                        results_r.lock().expect("results")[idx] = Some(SynOutcome::Open);
+                        pending_r.remove(&key);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    });
+
+    for (idx, (dst_ip, port)) in order.iter().enumerate() {
+        let sport = loop {
+            let s: u16 = rng.gen_range(32768..65535);
+            let k = Key {
+                dst: *dst_ip,
+                dport: *port,
+                sport: s,
+            };
+            if !pending.contains_key(&k) {
+                break s;
+            }
+        };
+        let seq: u32 = rng.gen();
+        let deadline = Instant::now() + per_probe_timeout;
+        pending.insert(
+            Key {
+                dst: *dst_ip,
+                dport: *port,
+                sport,
+            },
+            (deadline, idx),
+        );
+        let tcp_len = MutableTcpPacket::minimum_packet_size();
+        let mut buf = vec![0u8; tcp_len];
+        {
+            let mut tcp = MutableTcpPacket::new(&mut buf).expect("tcp buffer");
+            tcp.set_source(sport);
+            tcp.set_destination(*port);
+            tcp.set_sequence(seq);
+            tcp.set_acknowledgement(0);
+            tcp.set_data_offset(5);
+            tcp.set_reserved(0);
+            tcp.set_flags(TcpFlags::SYN);
+            tcp.set_window(64240);
+            tcp.set_checksum(0);
+            tcp.set_urgent_ptr(0);
+            let cks = ipv6_checksum(&tcp.to_immutable(), &src_ip, dst_ip);
+            tcp.set_checksum(cks);
+            tx.send_to(tcp.to_immutable(), IpAddr::V6(*dst_ip))?;
         }
     }
 
+    let mut ge_max = Instant::now();
+    for e in pending.iter() {
+        ge_max = ge_max.max(e.value().0);
+    }
+    *global_end.lock().expect("global_end") = Some(ge_max);
+
+    let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
+    recv_res?;
+
+    let results = results.lock().expect("results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
         let (state, reason) = match results[i] {
