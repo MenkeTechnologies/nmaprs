@@ -98,24 +98,6 @@ fn trace_nmap_compat(args: &Args) {
     );
 }
 
-async fn try_load_os_db(plan: &ScanPlan) -> Option<Arc<crate::os_db::OsDb>> {
-    let path = plan.data_file("nmap-os-db");
-    if !path.exists() {
-        return None;
-    }
-    match tokio::task::spawn_blocking(move || crate::os_db::OsDb::load(&path)).await {
-        Ok(Ok(db)) => Some(Arc::new(db)),
-        Ok(Err(e)) => {
-            warn!("nmap-os-db: {e}");
-            None
-        }
-        Err(e) => {
-            warn!("nmap-os-db load: {e}");
-            None
-        }
-    }
-}
-
 async fn try_load_fp_db(plan: &ScanPlan) -> Option<Arc<crate::os_fp_db::FingerprintDb>> {
     let path = plan.data_file("nmap-os-db");
     if !path.exists() {
@@ -124,11 +106,11 @@ async fn try_load_fp_db(plan: &ScanPlan) -> Option<Arc<crate::os_fp_db::Fingerpr
     match tokio::task::spawn_blocking(move || crate::os_fp_db::FingerprintDb::load(&path)).await {
         Ok(Ok(db)) => Some(Arc::new(db)),
         Ok(Err(e)) => {
-            warn!("nmap-os-db (fingerprint DB): {e}");
+            warn!("nmap-os-db: {e}");
             None
         }
         Err(e) => {
-            warn!("nmap-os-db fingerprint load: {e}");
+            warn!("nmap-os-db load: {e}");
             None
         }
     }
@@ -634,11 +616,6 @@ pub async fn run(args: Args) -> Result<i32> {
     let plan = ScanPlan::from_args(&args)?;
     let plan = Arc::new(plan);
 
-    let os_db = if plan.os_detect_requested {
-        try_load_os_db(&plan).await
-    } else {
-        None
-    };
     let fp_db = if plan.os_detect_requested {
         try_load_fp_db(&plan).await
     } else {
@@ -746,10 +723,11 @@ pub async fn run(args: Args) -> Result<i32> {
             }
             println!("Nmap scan report for {} - Host is up", o.host);
             let os_line = if plan.os_detect_requested {
-                let s = format!(
-                    "OS guess: {}",
-                    crate::os_db::format_os_guess(o.ttl, os_db.as_deref(), ex_cap)
-                );
+                let base_guess = match fp_db.as_deref() {
+                    Some(db) => db.format_os_guess(o.ttl, ex_cap),
+                    None => crate::os_detect::guess_from_ttl(o.ttl).to_string(),
+                };
+                let s = format!("OS guess: {}", base_guess);
                 println!("{}", s);
                 Some(s)
             } else {
@@ -990,8 +968,10 @@ pub async fn run(args: Args) -> Result<i32> {
                 if !o.up {
                     continue;
                 }
-                let mut os_line =
-                    crate::os_db::format_os_guess(o.ttl, os_db.as_deref(), ex_cap);
+                let mut os_line = match fp_db.as_deref() {
+                    Some(db) => db.format_os_guess(o.ttl, ex_cap),
+                    None => crate::os_detect::guess_from_ttl(o.ttl).to_string(),
+                };
                 if let (Some(db), std::net::IpAddr::V4(ip)) = (fp_db.as_deref(), o.host) {
                     let open = lines
                         .iter()

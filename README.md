@@ -51,7 +51,7 @@ Created by **MenkeTechnologies**.
 | `--resolve-all` | **Implemented** — forward DNS returns **one** address by default (Nmap “first only”); **`--resolve-all`** scans every resolved address |
 | `--unprivileged` / `--privileged` | **Partial** — **`--unprivileged`** forces **TCP connect** instead of raw half-open TCP; rejects raw-only modes (`-sO`, `-sI`, SCTP). **`--privileged`** is accepted (behavior follows process capabilities) |
 | `--allports` | **Implemented** — ignores **`--exclude-ports`** when set |
-| `--max-os-tries`, `--osscan-limit`, `--osscan-guess` / `--fuzzy` | **Partial** — limits OS DB example titles / skips OS pass when **`--osscan-limit`** and no open TCP ports; full OS probe retries not implemented |
+| `--max-os-tries`, `--osscan-limit`, `--osscan-guess` / `--fuzzy` | **Partial** — limits OS DB example titles / skips OS pass when **`--osscan-limit`** and no open TCP ports; full multi-round OS retry not implemented |
 | `--script-timeout` | **Partial** — applies to built-in script TCP connects |
 | Man-only timing / stats | **`--stats-every`** is parsed into the plan (periodic live stats not wired yet) |
 
@@ -150,7 +150,7 @@ Those files are **not** committed; without them, **`-sV`** logs a warning and **
 
 ### OS fingerprint probes (partial)
 
-**IPv4** loads **`MatchPoints`** and **`Fingerprint`** blocks from **`nmap-os-db`**, sends Nmap-style probes from **`src/os_scan.rs`**, and matches with **`src/os_fp_db.rs`** (weighted attributes + **`src/fp_match.rs`** / **`c/expr_match.cpp`**). Not all Nmap second-generation probes or subject fields are implemented (ECN/T1–T7/IE/U1 completeness and IPID/TS classification vary); **IPv6** OS detection remains TTL-oriented until a v6 probe path exists.
+**IPv4** loads a single **`FingerprintDb`** from **`nmap-os-db`** (`MatchPoints`, `Fingerprint`, `Class`), sends Nmap 2nd-gen probes **SEQ×6, ECN, T2–T7, U1, IE×2** from **`src/os_scan.rs`** (raw IPv4 Layer3 + ICMP), builds **SEQ/OPS/WIN/ECN/T1–T7/U1/IE** subject tests, and scores against all reference entries with **`expr_match`** (C++ FFI in **`c/expr_match.cpp`**). Real IPID classification (Z/I/BI/RI/RD) and TS classification (0/1/7/8/U/hex) are implemented; **CI** comes from T5–T7, **II** from IE echo replies, **SS** detects shared IPID sequence. **IPv6** OS detection remains TTL-oriented until a v6 probe path exists.
 
 ## License
 

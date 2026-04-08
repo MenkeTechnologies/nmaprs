@@ -81,6 +81,7 @@ impl MatchPoints {
 pub struct ReferenceFingerprint {
     pub name: String,
     pub line: usize,
+    pub family: Option<String>,
     pub tests: [Option<HashMap<String, String>>; NUM_FP_TESTS],
 }
 
@@ -136,6 +137,7 @@ impl FingerprintDb {
                 let line_no = i + 1;
                 i += 1;
                 let mut tests: [Option<HashMap<String, String>>; NUM_FP_TESTS] = std::array::from_fn(|_| None);
+                let mut family: Option<String> = None;
                 while i < lines.len() {
                     let row = lines[i].trim();
                     if row.is_empty() || row.starts_with('#') {
@@ -145,7 +147,24 @@ impl FingerprintDb {
                     if row.starts_with("Fingerprint ") {
                         break;
                     }
-                    if row.starts_with("Class ") || row.starts_with("CPE ") {
+                    if row.starts_with("CPE ") {
+                        i += 1;
+                        continue;
+                    }
+                    if family.is_none() {
+                        if let Some(rest) = row.strip_prefix("Class ") {
+                            let mut parts = rest.split('|');
+                            let _vendor = parts.next();
+                            if let Some(fam) = parts.next() {
+                                let fam = fam.trim();
+                                if !fam.is_empty() {
+                                    family = Some(fam.to_string());
+                                }
+                            }
+                            i += 1;
+                            continue;
+                        }
+                    } else if row.starts_with("Class ") {
                         i += 1;
                         continue;
                     }
@@ -169,6 +188,7 @@ impl FingerprintDb {
                 references.push(ReferenceFingerprint {
                     name,
                     line: line_no,
+                    family,
                     tests,
                 });
                 continue;
@@ -199,6 +219,58 @@ impl FingerprintDb {
 #[derive(Debug, Clone, Default)]
 pub struct SubjectFingerprint {
     pub tests: [Option<HashMap<String, String>>; NUM_FP_TESTS],
+}
+
+impl FingerprintDb {
+    /// Example fingerprint titles whose `Class` family fits the TTL bucket (up to `max`).
+    pub fn examples_for_ttl(&self, ttl: Option<u8>, max: usize) -> Vec<&str> {
+        let bucket = ttl_bucket(ttl);
+        let mut out = Vec::new();
+        for r in &self.references {
+            if let Some(fam) = &r.family {
+                if family_matches_bucket(fam, bucket) {
+                    out.push(r.name.as_str());
+                    if out.len() >= max { break; }
+                }
+            }
+        }
+        out
+    }
+
+    /// Human-readable OS line: fingerprint match → TTL + DB example titles fallback.
+    pub fn format_os_guess(&self, ttl: Option<u8>, max_examples: usize) -> String {
+        let base = crate::os_detect::guess_from_ttl(ttl);
+        let cap = max_examples.max(1);
+        let ex = self.examples_for_ttl(ttl, cap);
+        if ex.is_empty() {
+            return format!("{base} (nmap-os-db loaded; no Class examples for this TTL bucket)");
+        }
+        format!("{base} — example DB titles: {}", ex.join("; "))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TtlBucket { LinuxUnix, Windows, Network, Unknown }
+
+fn ttl_bucket(ttl: Option<u8>) -> TtlBucket {
+    match ttl {
+        Some(t) if t <= 64 => TtlBucket::LinuxUnix,
+        Some(t) if t <= 128 => TtlBucket::Windows,
+        Some(_) => TtlBucket::Network,
+        None => TtlBucket::Unknown,
+    }
+}
+
+fn family_matches_bucket(family: &str, bucket: TtlBucket) -> bool {
+    let f = family.to_lowercase();
+    match bucket {
+        TtlBucket::LinuxUnix => f.contains("linux") || f.contains("unix") || f.contains("bsd")
+            || f.contains("solaris") || f.contains("android"),
+        TtlBucket::Windows => f.contains("windows") || f.contains("microsoft"),
+        TtlBucket::Network => f.contains("cisco") || f.contains("router") || f.contains("switch")
+            || f.contains("embedded") || f.contains("vxworks"),
+        TtlBucket::Unknown => false,
+    }
 }
 
 fn parse_paren_line(line: &str) -> Option<(&str, &str)> {
