@@ -4,6 +4,7 @@ pub mod argv_expand;
 pub mod cli;
 pub mod config;
 pub mod discovery;
+pub mod ftp_bounce;
 pub mod icmp_listen;
 pub mod ip_proto;
 pub mod ipv6_l4;
@@ -15,6 +16,7 @@ pub mod ports;
 pub mod resume;
 pub mod scan;
 pub mod scanflags;
+pub mod sctp;
 pub mod syn;
 pub mod target;
 pub mod trace;
@@ -322,7 +324,60 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
 
             collected
         }
-        ScanKind::TcpConnect | ScanKind::Other(_) => tcp_connect_scan(work, plan.clone()).await,
+        ScanKind::SctpInit | ScanKind::SctpCookieEcho => {
+            let probe = match plan.scan_kind {
+                ScanKind::SctpInit => crate::sctp::SctpProbeKind::Init,
+                ScanKind::SctpCookieEcho => crate::sctp::SctpProbeKind::CookieEcho,
+                _ => unreachable!(),
+            };
+            let (work_v4, work_v6) = split_syn_work(&work);
+            if !work_v6.is_empty() {
+                warn!(
+                    "SCTP scan: skipping {} IPv6 target(s) (IPv4 raw SCTP only)",
+                    work_v6.len()
+                );
+            }
+            if work_v4.is_empty() {
+                return Ok(vec![]);
+            }
+            let to = plan.connect_timeout;
+            let pacer = ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate);
+            let host_start = plan
+                .host_timeout
+                .map(|_| Arc::new(DashMap::<IpAddr, Instant>::new()));
+            let host_limit = plan.host_timeout;
+            let scan_delay = plan.scan_delay;
+            let max_scan_delay = plan.max_scan_delay;
+            let connect_retries = plan.connect_retries;
+            let shard_cap = plan
+                .effective_probe_concurrency()
+                .clamp(1, crate::sctp::MAX_SCTP_PARALLEL_SHARDS);
+
+            let res = tokio::task::spawn_blocking(move || {
+                crate::sctp::parallel_sctp_scan_ipv4(
+                    work_v4,
+                    probe,
+                    to,
+                    pacer,
+                    host_limit,
+                    host_start,
+                    scan_delay,
+                    max_scan_delay,
+                    connect_retries,
+                    shard_cap,
+                )
+            })
+            .await
+            .map_err(|e| anyhow!("SCTP scan join: {e}"))?;
+            res.map_err(|e| anyhow!("SCTP scan: {e}"))?
+        }
+        ScanKind::TcpConnect | ScanKind::Other(_) => {
+            if let Some(fb) = plan.ftp_bounce.clone() {
+                crate::ftp_bounce::ftp_bounce_scan(work, plan.clone(), fb).await
+            } else {
+                tcp_connect_scan(work, plan.clone()).await
+            }
+        }
     };
     Ok(out)
 }

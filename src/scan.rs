@@ -192,6 +192,16 @@ pub enum PortReason {
     IcmpUnreachableFiltered,
     /// ICMP type 3 code 2 (protocol unreachable) on `-sO` IP protocol scan.
     IcmpProtoUnreachable,
+    /// FTP bounce (`-b`) data connection opened (e.g. 150).
+    FtpBounceOpen,
+    /// FTP bounce (`-b`) data connection refused (e.g. 425).
+    FtpBounceClosed,
+    /// SCTP INIT-ACK (`-sY`).
+    SctpInitAck,
+    /// SCTP COOKIE-ACK (`-sZ`).
+    SctpCookieAck,
+    /// SCTP ABORT (closed / reset path).
+    SctpAbort,
 }
 
 #[derive(Debug, Clone)]

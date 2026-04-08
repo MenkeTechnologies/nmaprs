@@ -50,6 +50,7 @@ fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
         hostgroup_min: None,
         hostgroup_max: None,
         unimplemented: vec![],
+        ftp_bounce: None,
     });
 
     c.bench_function("tcp_connect_scan_localhost_3_ports", |b| {

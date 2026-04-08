@@ -92,6 +92,11 @@ fn reason_str(l: &PortLine) -> &'static str {
         IcmpPortUnreachable => "icmp-port-unreachable",
         IcmpUnreachableFiltered => "icmp-unreachable",
         IcmpProtoUnreachable => "icmp-proto-unreachable",
+        FtpBounceOpen => "ftp-bounce-open",
+        FtpBounceClosed => "ftp-bounce-closed",
+        SctpInitAck => "sctp-init-ack",
+        SctpCookieAck => "sctp-cookie-ack",
+        SctpAbort => "sctp-abort",
     }
 }
 

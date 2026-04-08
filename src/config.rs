@@ -1,5 +1,6 @@
 //! Resolve [`crate::cli::Args`] into an executable [`ScanPlan`].
 
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -12,6 +13,60 @@ use crate::ports::{
     default_tcp_ports, fast_tcp_ports, parse_exclude_ports, parse_port_spec, top_ports,
     top_ports_len,
 };
+
+/// Parsed `-b user:pass@host:port` FTP relay (classic `PORT` is IPv4-only on the target side).
+#[derive(Debug, Clone)]
+pub struct FtpBounceTarget {
+    pub user: String,
+    pub pass: String,
+    pub server: SocketAddr,
+}
+
+/// Parse Nmap-style `username:password@host:port` (password may be empty: `user:@host:21`).
+pub fn parse_ftp_bounce(spec: &str) -> Result<FtpBounceTarget> {
+    let spec = spec.trim();
+    let at = spec
+        .find('@')
+        .ok_or_else(|| anyhow!("FTP bounce (-b): expected user:pass@host:port"))?;
+    let (user_part, host_part) = spec.split_at(at);
+    let host_part = host_part.trim_start_matches('@');
+    if host_part.is_empty() {
+        bail!("FTP bounce (-b): missing host after @");
+    }
+    let (user, pass) = match user_part.split_once(':') {
+        Some((u, p)) => (u.to_string(), p.to_string()),
+        None => (user_part.to_string(), String::new()),
+    };
+    let (host, port) = parse_ftp_bounce_host_port(host_part)?;
+    let server = (host.as_str(), port)
+        .to_socket_addrs()
+        .with_context(|| format!("FTP bounce: resolve {host}:{port}"))?
+        .next()
+        .ok_or_else(|| anyhow!("FTP bounce: no addresses for {host}:{port}"))?;
+    Ok(FtpBounceTarget { user, pass, server })
+}
+
+fn parse_ftp_bounce_host_port(s: &str) -> Result<(String, u16)> {
+    let s = s.trim();
+    if s.starts_with('[') {
+        if let Some(end) = s.find(']') {
+            let inner = &s[1..end];
+            let rest = &s[end + 1..];
+            let port = if let Some(p) = rest.strip_prefix(':') {
+                p.parse().with_context(|| "FTP bounce: bad port after ]")?
+            } else {
+                21u16
+            };
+            return Ok((format!("[{inner}]"), port));
+        }
+    }
+    if let Some((host, port)) = s.rsplit_once(':') {
+        if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) {
+            return Ok((host.to_string(), port.parse().with_context(|| "FTP bounce: port")?));
+        }
+    }
+    Ok((s.to_string(), 21))
+}
 
 /// Resolved scan configuration after validating nmap-style flags.
 #[derive(Debug, Clone)]
@@ -62,6 +117,8 @@ pub struct ScanPlan {
     pub hostgroup_min: Option<u32>,
     pub hostgroup_max: Option<u32>,
     pub unimplemented: Vec<String>,
+    /// `-b user:pass@host:port` — FTP bounce TCP scan (IPv4 targets only).
+    pub ftp_bounce: Option<FtpBounceTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +133,9 @@ pub enum ScanKind {
     TcpAck,
     TcpWindow,
     TcpMaimon,
+    /// SCTP INIT / COOKIE-ECHO (`-sY` / `-sZ`) — IPv4 raw only in nmaprs.
+    SctpInit,
+    SctpCookieEcho,
     Udp,
     Other(char),
 }
@@ -136,9 +196,6 @@ impl ScanPlan {
         if args.idle_scan.is_some() {
             bail!("-sI idle scan is not implemented");
         }
-        if args.ftp_bounce.is_some() {
-            bail!("-b FTP bounce scan is not implemented");
-        }
 
         if let Some(n) = args.max_rate {
             if n == 0 {
@@ -183,7 +240,9 @@ impl ScanPlan {
                 'A' | 'a' => scan_kind = ScanKind::TcpAck,
                 'W' | 'w' => scan_kind = ScanKind::TcpWindow,
                 'M' | 'm' => scan_kind = ScanKind::TcpMaimon,
-                'Y' | 'Z' | 'O' | 'I' | 'y' | 'z' | 'o' | 'i' => {
+                'Y' | 'y' => scan_kind = ScanKind::SctpInit,
+                'Z' | 'z' => scan_kind = ScanKind::SctpCookieEcho,
+                'O' | 'o' | 'I' | 'i' => {
                     scan_kind = ScanKind::Other(ch);
                     unimplemented.push(format!(
                         "scan type -s{ch} is not implemented in nmaprs (use nmap for exotic TCP flags)"
@@ -198,6 +257,19 @@ impl ScanPlan {
                 bail!("-sO (--sO) cannot be combined with --scan-type or other -sS/-sT/-sU scan flags");
             }
             scan_kind = ScanKind::IpProto;
+        }
+
+        let mut ftp_bounce = None;
+        if let Some(ref s) = args.ftp_bounce {
+            if args.ip_proto_scan {
+                bail!("-b (FTP bounce) cannot be combined with -sO");
+            }
+            if !matches!(scan_kind, ScanKind::TcpConnect) {
+                bail!(
+                    "FTP bounce (-b) only works with TCP connect (-sT); omit -sS/-sU and other scan types"
+                );
+            }
+            ftp_bounce = Some(parse_ftp_bounce(s)?);
         }
 
         let mut tcp_scan_flags = None;
@@ -369,6 +441,7 @@ impl ScanPlan {
             hostgroup_min: args.min_hostgroup,
             hostgroup_max: args.max_hostgroup,
             unimplemented,
+            ftp_bounce,
         };
 
         for msg in &plan.unimplemented {
@@ -425,7 +498,7 @@ mod rate_validation_tests {
 
     use crate::cli::Args;
 
-    use super::ScanPlan;
+    use super::{parse_ftp_bounce, ScanPlan};
 
     #[test]
     fn max_rate_below_min_rate_errors() {
@@ -575,6 +648,31 @@ mod rate_validation_tests {
             seen[p as usize] = true;
         }
         assert!(seen.iter().all(|&x| x));
+    }
+
+    #[test]
+    fn parses_ftp_bounce_target() {
+        let t = parse_ftp_bounce("anonymous:pw@127.0.0.1:2121").expect("parse");
+        assert_eq!(t.user, "anonymous");
+        assert_eq!(t.pass, "pw");
+        assert_eq!(t.server.port(), 2121);
+    }
+
+    #[test]
+    fn parses_ftp_bounce_empty_password() {
+        let t = parse_ftp_bounce("user:@example.com:21").expect("parse");
+        assert_eq!(t.user, "user");
+        assert_eq!(t.pass, "");
+    }
+
+    #[test]
+    fn scan_type_sctp_y_and_z() {
+        use super::ScanKind;
+
+        let y = Args::try_parse_from(["nmaprs", "--scan-type", "Y", "-p", "38412", "127.0.0.1"]).expect("parse");
+        assert_eq!(ScanPlan::from_args(&y).expect("plan").scan_kind, ScanKind::SctpInit);
+        let z = Args::try_parse_from(["nmaprs", "--scan-type", "z", "-p", "38412", "127.0.0.1"]).expect("parse");
+        assert_eq!(ScanPlan::from_args(&z).expect("plan").scan_kind, ScanKind::SctpCookieEcho);
     }
 
     #[test]
