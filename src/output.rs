@@ -91,6 +91,7 @@ fn reason_str(l: &PortLine) -> &'static str {
         UdpResponse => "udp-response",
         IcmpPortUnreachable => "icmp-port-unreachable",
         IcmpUnreachableFiltered => "icmp-unreachable",
+        IcmpProtoUnreachable => "icmp-proto-unreachable",
     }
 }
 

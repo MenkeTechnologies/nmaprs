@@ -25,6 +25,12 @@ where
             i += 1;
             continue;
         }
+        // -sO IP protocol scan (must precede generic -sX → --scan-type)
+        if a.as_str() == "-sO" {
+            out.push("--sO".to_string());
+            i += 1;
+            continue;
+        }
         // -sI <zombie> (idle scan — parsed for CLI parity)
         if a.as_str() == "-sI" {
             out.push("--sI".to_string());
@@ -182,5 +188,11 @@ mod tests {
     fn expands_pn_and_ps_ports() {
         let v = expand_nmap_style_argv(vec!["nmaprs".into(), "-Pn".into(), "-PS80,443".into()]);
         assert_eq!(v, vec!["nmaprs", "--no-ping", "--ping-S", "80,443"]);
+    }
+
+    #[test]
+    fn expands_so_to_long_flag_not_scan_type_o() {
+        let v = expand_nmap_style_argv(vec!["nmaprs".into(), "-sO".into(), "127.0.0.1".into()]);
+        assert_eq!(v, vec!["nmaprs", "--sO", "127.0.0.1"]);
     }
 }

@@ -36,7 +36,7 @@ const RX_BUF: usize = 65536;
 pub const MAX_SYN_PARALLEL_SHARDS: usize = 16;
 
 /// Split `order` into `shards` contiguous chunks (balanced lengths).
-fn split_into_syn_chunks<T>(order: Vec<T>, shards: usize) -> Vec<Vec<T>> {
+pub(crate) fn split_into_syn_chunks<T>(order: Vec<T>, shards: usize) -> Vec<Vec<T>> {
     let n = order.len();
     if n == 0 {
         return vec![];

@@ -190,6 +190,8 @@ pub enum PortReason {
     UdpResponse,
     IcmpPortUnreachable,
     IcmpUnreachableFiltered,
+    /// ICMP type 3 code 2 (protocol unreachable) on `-sO` IP protocol scan.
+    IcmpProtoUnreachable,
 }
 
 #[derive(Debug, Clone)]

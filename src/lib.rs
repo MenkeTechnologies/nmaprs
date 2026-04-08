@@ -5,6 +5,7 @@ pub mod cli;
 pub mod config;
 pub mod discovery;
 pub mod icmp_listen;
+pub mod ip_proto;
 pub mod ipv6_l4;
 pub mod nse;
 pub mod os_detect;
@@ -156,6 +157,47 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
     let out = match plan.scan_kind {
         ScanKind::Udp => {
             unreachable!("UDP scans use shared ICMP listeners in run(); do not call port_scan")
+        }
+        ScanKind::IpProto => {
+            let (work_v4, work_v6) = split_syn_work(&work);
+            if !work_v6.is_empty() {
+                warn!(
+                    "-sO IPv4 IP protocol scan: skipping {} IPv6 target(s)",
+                    work_v6.len()
+                );
+            }
+            if work_v4.is_empty() {
+                return Ok(vec![]);
+            }
+            let to = plan.connect_timeout;
+            let pacer = ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate);
+            let host_start = plan
+                .host_timeout
+                .map(|_| Arc::new(DashMap::<IpAddr, Instant>::new()));
+            let host_limit = plan.host_timeout;
+            let scan_delay = plan.scan_delay;
+            let max_scan_delay = plan.max_scan_delay;
+            let connect_retries = plan.connect_retries;
+            let shard_cap = plan
+                .effective_probe_concurrency()
+                .clamp(1, crate::ip_proto::MAX_IP_PROTO_PARALLEL_SHARDS);
+
+            let res = tokio::task::spawn_blocking(move || {
+                crate::ip_proto::parallel_ip_proto_scan_ipv4(
+                    work_v4,
+                    to,
+                    pacer,
+                    host_limit,
+                    host_start,
+                    scan_delay,
+                    max_scan_delay,
+                    connect_retries,
+                    shard_cap,
+                )
+            })
+            .await
+            .map_err(|e| anyhow!("IP protocol scan join: {e}"))?;
+            res.map_err(|e| anyhow!("IP protocol scan: {e}"))?
         }
         ScanKind::TcpSyn
         | ScanKind::TcpNull

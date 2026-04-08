@@ -67,6 +67,8 @@ pub struct ScanPlan {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanKind {
     TcpConnect,
+    /// IPv4 IP protocol scan (`-sO` / `--sO`).
+    IpProto,
     TcpSyn,
     TcpNull,
     TcpFin,
@@ -131,9 +133,6 @@ impl ScanPlan {
             bail!("-sn and -sL together are ambiguous");
         }
 
-        if args.ip_proto_scan {
-            bail!("-sO IP protocol scan is not implemented");
-        }
         if args.idle_scan.is_some() {
             bail!("-sI idle scan is not implemented");
         }
@@ -194,6 +193,13 @@ impl ScanPlan {
             }
         }
 
+        if args.ip_proto_scan {
+            if args.scan_type.is_some() {
+                bail!("-sO (--sO) cannot be combined with --scan-type or other -sS/-sT/-sU scan flags");
+            }
+            scan_kind = ScanKind::IpProto;
+        }
+
         let mut tcp_scan_flags = None;
         if let Some(ref s) = args.scanflags {
             tcp_scan_flags = Some(crate::scanflags::parse_scanflags(s)?);
@@ -211,6 +217,27 @@ impl ScanPlan {
                 warn!("-sn ignores explicit -p port list");
             }
             vec![]
+        } else if args.ip_proto_scan {
+            if args.top_ports.is_some() && args.ports.is_none() {
+                warn!("-sO: --top-ports is a TCP list in nmap; omit -p to scan all IP protocols 0..255");
+            }
+            if args.port_ratio.is_some() && args.ports.is_none() {
+                warn!("-sO: --port-ratio applies to TCP in nmap; omit -p to scan all IP protocols 0..255");
+            }
+            let v = if let Some(p) = &args.ports {
+                parse_port_spec(p).map_err(|e| anyhow!(e))?
+            } else {
+                if args.fast {
+                    warn!("-sO with -F: embedded fast protocol list not implemented; scanning all 256 IP protocols (0..255)");
+                }
+                (0u16..=255).collect()
+            };
+            for &p in &v {
+                if p > 255 {
+                    bail!("IP protocol scan (-sO): protocol numbers must be in 0..=255 (got {p})");
+                }
+            }
+            v
         } else if let Some(p) = &args.ports {
             parse_port_spec(p).map_err(|e| anyhow!(e))?
         } else if args.fast {
@@ -533,6 +560,38 @@ mod rate_validation_tests {
             assert_eq!(plan.scan_kind, kind, "{opt} {ch}");
             assert_eq!(plan.scan_kind.tcp_port_raw_kind(), Some(raw));
         }
+    }
+
+    #[test]
+    fn ip_proto_scan_defaults_all_protocols() {
+        use super::ScanKind;
+
+        let args = Args::try_parse_from(["nmaprs", "--sO", "127.0.0.1"]).expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.scan_kind, ScanKind::IpProto);
+        assert_eq!(plan.ports.len(), 256);
+        let mut seen = [false; 256];
+        for &p in &plan.ports {
+            seen[p as usize] = true;
+        }
+        assert!(seen.iter().all(|&x| x));
+    }
+
+    #[test]
+    fn ip_proto_with_scan_type_errors() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--sO",
+            "--scan-type",
+            "S",
+            "-p",
+            "1",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("sO") || s.contains("scan-type"), "{s}");
     }
 
     #[test]
