@@ -4,8 +4,8 @@ pub mod argv_expand;
 pub mod cli;
 pub mod config;
 pub mod discovery;
-pub mod ftp_bounce;
 pub mod fp_match;
+pub mod ftp_bounce;
 pub mod help_tp;
 pub mod icmp_listen;
 pub mod icmp_ping;
@@ -53,11 +53,7 @@ fn expand_opts(args: &Args) -> ExpandOpts {
     let dns_servers: Vec<std::net::IpAddr> = args
         .dns_servers
         .as_deref()
-        .map(|s| {
-            s.split(',')
-                .filter_map(|p| p.trim().parse().ok())
-                .collect()
-        })
+        .map(|s| s.split(',').filter_map(|p| p.trim().parse().ok()).collect())
         .unwrap_or_default();
     ExpandOpts {
         ipv6: args.ipv6,
@@ -423,8 +419,9 @@ async fn port_scan(
                 Err(e) => {
                     if kind.tcp_connect_fallback_on_raw_error() {
                         warn!("{kind} scan failed ({e}); falling back to TCP connect for IPv4");
-                        collected
-                            .extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone(), None).await);
+                        collected.extend(
+                            tcp_connect_scan(work_tcp_fallback_v4, plan.clone(), None).await,
+                        );
                     } else {
                         warn!(
                             "{kind} scan failed ({e}); skipping TCP connect fallback (raw scan semantics differ from connect)"
@@ -439,8 +436,9 @@ async fn port_scan(
                         warn!(
                             "IPv6 {kind} scan failed ({e}); falling back to TCP connect for IPv6"
                         );
-                        collected
-                            .extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone(), None).await);
+                        collected.extend(
+                            tcp_connect_scan(work_tcp_fallback_v6, plan.clone(), None).await,
+                        );
                     } else {
                         warn!(
                             "IPv6 {kind} scan failed ({e}); skipping TCP connect fallback (raw scan semantics differ from connect)"
@@ -823,7 +821,11 @@ pub async fn run(args: Args) -> Result<i32> {
                 } else {
                     100.0
                 };
-                let rate = if elapsed > 0.0 { d as f64 / elapsed } else { 0.0 };
+                let rate = if elapsed > 0.0 {
+                    d as f64 / elapsed
+                } else {
+                    0.0
+                };
                 let eta = if rate > 0.0 && d < total_probes {
                     let remaining = (total_probes - d) as f64 / rate;
                     format!("{:.0}s", remaining)
@@ -894,7 +896,8 @@ pub async fn run(args: Args) -> Result<i32> {
                 if work.is_empty() {
                     continue;
                 }
-                let batch = port_scan(work, kind_plan.clone(), Some(completed_probes.clone())).await?;
+                let batch =
+                    port_scan(work, kind_plan.clone(), Some(completed_probes.clone())).await?;
                 // TCP connect increments per-probe inside the task; other scan types count here.
                 if kind_plan.scan_kind != ScanKind::TcpConnect {
                     completed_probes.fetch_add(batch.len(), Ordering::Relaxed);

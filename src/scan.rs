@@ -253,12 +253,10 @@ async fn connect_via_proxy(proxy: &ProxySpec, target: SocketAddr) -> io::Result<
         proxy.port,
     );
     match proxy.kind {
-        ProxyKind::Socks4 => {
-            tokio_socks::tcp::Socks4Stream::connect(proxy_addr, target)
-                .await
-                .map(|s| s.into_inner())
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-        }
+        ProxyKind::Socks4 => tokio_socks::tcp::Socks4Stream::connect(proxy_addr, target)
+            .await
+            .map(|s| s.into_inner())
+            .map_err(io::Error::other),
         ProxyKind::Http => {
             let mut stream = TcpStream::connect(proxy_addr).await?;
             let req = format!(
@@ -278,7 +276,10 @@ async fn connect_via_proxy(proxy: &ProxySpec, target: SocketAddr) -> io::Result<
             } else {
                 Err(io::Error::new(
                     io::ErrorKind::ConnectionRefused,
-                    format!("HTTP CONNECT rejected: {}", resp.lines().next().unwrap_or("")),
+                    format!(
+                        "HTTP CONNECT rejected: {}",
+                        resp.lines().next().unwrap_or("")
+                    ),
                 ))
             }
         }
@@ -317,85 +318,79 @@ pub async fn tcp_connect_scan(
 
         handles.push(tokio::spawn(async move {
             let result = async {
-            let addr = SocketAddr::new(host, port);
-            let overall_start = Instant::now();
-            let max_tries = 1u32.saturating_add(connect_retries);
-            let mut timeouts = 0u32;
+                let addr = SocketAddr::new(host, port);
+                let overall_start = Instant::now();
+                let max_tries = 1u32.saturating_add(connect_retries);
+                let mut timeouts = 0u32;
 
-            loop {
-                if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
-                    if host_over_deadline(hs.as_ref(), host, limit) {
-                        return PortLine::new(
-                            host,
-                            port,
-                            "tcp",
-                            "filtered",
-                            PortReason::HostTimeout,
-                            None,
-                        );
-                    }
-                }
-                if timeouts == 0 {
-                    sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
-                    if let Some(p) = pacer.as_ref() {
-                        p.wait_turn().await;
-                    }
-                }
-
-                let _permit = sem.acquire().await.expect("semaphore closed");
-                let res = if let Some(proxy) = proxies.first() {
-                    tokio::time::timeout(timeout, connect_via_proxy(proxy, addr)).await
-                } else {
-                    tokio::time::timeout(timeout, TcpStream::connect(addr)).await
-                };
-                drop(_permit);
-
-                let elapsed = overall_start.elapsed().as_millis();
-                match res {
-                    Ok(Ok(stream)) => {
-                        drop(stream);
-                        return PortLine::new(
-                            host,
-                            port,
-                            "tcp",
-                            "open",
-                            PortReason::SynAck,
-                            Some(elapsed),
-                        );
-                    }
-                    Ok(Err(e)) => {
-                        let kind = e.kind();
-                        let (state, reason): (&'static str, PortReason) =
-                            if kind == io::ErrorKind::ConnectionRefused {
-                                ("closed", PortReason::ConnRefused)
-                            } else {
-                                ("filtered", PortReason::Error)
-                            };
-                        return PortLine::new(
-                            host,
-                            port,
-                            "tcp",
-                            state,
-                            reason,
-                            Some(elapsed),
-                        );
-                    }
-                    Err(_) => {
-                        timeouts += 1;
-                        if timeouts >= max_tries {
+                loop {
+                    if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
+                        if host_over_deadline(hs.as_ref(), host, limit) {
                             return PortLine::new(
                                 host,
                                 port,
                                 "tcp",
-                                if no_ping { "open|filtered" } else { "filtered" },
-                                PortReason::Timeout,
+                                "filtered",
+                                PortReason::HostTimeout,
                                 None,
                             );
                         }
                     }
+                    if timeouts == 0 {
+                        sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
+                        if let Some(p) = pacer.as_ref() {
+                            p.wait_turn().await;
+                        }
+                    }
+
+                    let _permit = sem.acquire().await.expect("semaphore closed");
+                    let res = if let Some(proxy) = proxies.first() {
+                        tokio::time::timeout(timeout, connect_via_proxy(proxy, addr)).await
+                    } else {
+                        tokio::time::timeout(timeout, TcpStream::connect(addr)).await
+                    };
+                    drop(_permit);
+
+                    let elapsed = overall_start.elapsed().as_millis();
+                    match res {
+                        Ok(Ok(stream)) => {
+                            drop(stream);
+                            return PortLine::new(
+                                host,
+                                port,
+                                "tcp",
+                                "open",
+                                PortReason::SynAck,
+                                Some(elapsed),
+                            );
+                        }
+                        Ok(Err(e)) => {
+                            let kind = e.kind();
+                            let (state, reason): (&'static str, PortReason) =
+                                if kind == io::ErrorKind::ConnectionRefused {
+                                    ("closed", PortReason::ConnRefused)
+                                } else {
+                                    ("filtered", PortReason::Error)
+                                };
+                            return PortLine::new(host, port, "tcp", state, reason, Some(elapsed));
+                        }
+                        Err(_) => {
+                            timeouts += 1;
+                            if timeouts >= max_tries {
+                                return PortLine::new(
+                                    host,
+                                    port,
+                                    "tcp",
+                                    if no_ping { "open|filtered" } else { "filtered" },
+                                    PortReason::Timeout,
+                                    None,
+                                );
+                            }
+                        }
+                    }
                 }
             }
-            }.await;
+            .await;
             if let Some(ref p) = progress {
                 p.fetch_add(1, Ordering::Relaxed);
             }

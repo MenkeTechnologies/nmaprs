@@ -57,10 +57,7 @@ impl OutputSet {
     ) -> Result<()> {
         if let Some(f) = &mut self.xml {
             writeln!(f, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
-            writeln!(
-                f,
-                r#"<!DOCTYPE nmaprun>"#
-            )?;
+            writeln!(f, r#"<!DOCTYPE nmaprun>"#)?;
             if !no_stylesheet {
                 if let Some(s) = stylesheet {
                     writeln!(
@@ -89,7 +86,12 @@ impl OutputSet {
         Ok(())
     }
 
-    pub fn write_scaninfo(&mut self, scan_type: &str, protocol: &str, num_services: usize) -> Result<()> {
+    pub fn write_scaninfo(
+        &mut self,
+        scan_type: &str,
+        protocol: &str,
+        num_services: usize,
+    ) -> Result<()> {
         if let Some(f) = &mut self.xml {
             writeln!(
                 f,
@@ -102,10 +104,17 @@ impl OutputSet {
         Ok(())
     }
 
-    pub fn write_footer(&mut self, hosts_up: usize, hosts_down: usize, hosts_total: usize) -> Result<()> {
+    pub fn write_footer(
+        &mut self,
+        hosts_up: usize,
+        hosts_down: usize,
+        hosts_total: usize,
+    ) -> Result<()> {
         if let Some(f) = &mut self.xml {
             let now = chrono_timestamp();
-            writeln!(f, r#"<runstats><finished time="{}" timestr="{}" summary="nmaprs done: {} IP address{} ({} host{} up)" exit="success"/>"#,
+            writeln!(
+                f,
+                r#"<runstats><finished time="{}" timestr="{}" summary="nmaprs done: {} IP address{} ({} host{} up)" exit="success"/>"#,
                 now.0,
                 xml_escape(&now.1),
                 hosts_total,
@@ -285,7 +294,10 @@ pub fn write_sn_host_files(
     if let Some(xf) = xml.as_mut() {
         let ty = if host.is_ipv4() { "ipv4" } else { "ipv6" };
         writeln!(xf, r#"<host>"#)?;
-        writeln!(xf, r#"<status state="up" reason="echo-reply" reason_ttl="0"/>"#)?;
+        writeln!(
+            xf,
+            r#"<status state="up" reason="echo-reply" reason_ttl="0"/>"#
+        )?;
         writeln!(xf, r#"<address addr="{host}" addrtype="{ty}"/>"#)?;
         writeln!(xf, r#"<hostnames/>"#)?;
         writeln!(xf, r#"</host>"#)?;
@@ -320,10 +332,18 @@ pub fn write_grep(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> 
     Ok(())
 }
 
-pub fn write_xml_host(f: &mut File, host: IpAddr, lines: &[PortLine], os_info: Option<&str>) -> Result<()> {
+pub fn write_xml_host(
+    f: &mut File,
+    host: IpAddr,
+    lines: &[PortLine],
+    os_info: Option<&str>,
+) -> Result<()> {
     let ty = if host.is_ipv4() { "ipv4" } else { "ipv6" };
     writeln!(f, r#"<host starttime="0" endtime="0">"#)?;
-    writeln!(f, r#"<status state="up" reason="user-set" reason_ttl="0"/>"#)?;
+    writeln!(
+        f,
+        r#"<status state="up" reason="user-set" reason_ttl="0"/>"#
+    )?;
     writeln!(f, r#"<address addr="{}" addrtype="{}"/>"#, host, ty)?;
     writeln!(f, r#"<hostnames/>"#)?;
 
@@ -335,17 +355,28 @@ pub fn write_xml_host(f: &mut File, host: IpAddr, lines: &[PortLine], os_info: O
 
     // extraports: summarize closed/filtered ports
     if closed_count > 0 {
-        writeln!(f, r#"<extraports state="closed" count="{}"/>"#, closed_count)?;
+        writeln!(
+            f,
+            r#"<extraports state="closed" count="{}"/>"#,
+            closed_count
+        )?;
     }
     if filtered_count > 0 {
-        writeln!(f, r#"<extraports state="filtered" count="{}"/>"#, filtered_count)?;
+        writeln!(
+            f,
+            r#"<extraports state="filtered" count="{}"/>"#,
+            filtered_count
+        )?;
     }
 
     for l in lines {
         write!(
             f,
             r#"<port protocol="{}" portid="{}"><state state="{}" reason="{}" reason_ttl="0"/>"#,
-            l.proto, l.port, l.state, reason_str(l)
+            l.proto,
+            l.port,
+            l.state,
+            reason_str(l)
         )?;
         if let Some(ref v) = l.version_info {
             // Parse version_info into product/version if possible.
@@ -353,7 +384,7 @@ pub fn write_xml_host(f: &mut File, host: IpAddr, lines: &[PortLine], os_info: O
             write!(
                 f,
                 r#"<service name="{}" product="{}" version="{}"/>"#,
-                xml_escape(&l.proto),
+                xml_escape(l.proto),
                 xml_escape(product),
                 xml_escape(version)
             )?;
@@ -363,7 +394,11 @@ pub fn write_xml_host(f: &mut File, host: IpAddr, lines: &[PortLine], os_info: O
     writeln!(f, "</ports>")?;
 
     if let Some(os) = os_info {
-        writeln!(f, r#"<os><osmatch name="{}" accuracy="0"/></os>"#, xml_escape(os))?;
+        writeln!(
+            f,
+            r#"<os><osmatch name="{}" accuracy="0"/></os>"#,
+            xml_escape(os)
+        )?;
     }
 
     writeln!(f, "</host>")?;

@@ -195,8 +195,8 @@ async fn resolve_host(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr>, Targ
             true, // trust_negative_responses
         );
         let cfg = ResolverConfig::from_parts(None, vec![], ns_group);
-        let resolver = Resolver::builder_with_config(cfg, TokioConnectionProvider::default())
-            .build();
+        let resolver =
+            Resolver::builder_with_config(cfg, TokioConnectionProvider::default()).build();
         let lookup = resolver
             .lookup_ip(host)
             .await

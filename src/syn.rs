@@ -359,8 +359,7 @@ fn tcp_ipv4_one_round(
      -> io::Result<()> {
         // Write data payload into buffer region after TCP header.
         if !evasion.data_payload.is_empty() && pkt_buf.len() >= tcp_hdr_len + data_len {
-            pkt_buf[tcp_hdr_len..tcp_hdr_len + data_len]
-                .copy_from_slice(&evasion.data_payload);
+            pkt_buf[tcp_hdr_len..tcp_hdr_len + data_len].copy_from_slice(&evasion.data_payload);
         }
         let mut tcp = MutableTcpPacket::new(pkt_buf).expect("tcp buffer");
         tcp.set_source(sport);

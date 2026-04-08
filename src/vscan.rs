@@ -420,16 +420,16 @@ fn extract_m_delimited(rest: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn extract_p_v_templates(
-    tail: &str,
-) -> (
+type PVTemplates = (
     Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
     Vec<String>,
-) {
+);
+
+fn extract_p_v_templates(tail: &str) -> PVTemplates {
     let p = find_slash_field(tail, "p/");
     let v = find_slash_field(tail, "v/");
     let i = find_slash_field(tail, "i/");
@@ -520,11 +520,7 @@ fn format_match(m: &ServiceMatch, caps: &Captures) -> String {
         .as_ref()
         .map(|t| apply_template(t, caps))
         .unwrap_or_default();
-    let cpe_strs: Vec<String> = m
-        .cpe_tpl
-        .iter()
-        .map(|t| apply_template(t, caps))
-        .collect();
+    let cpe_strs: Vec<String> = m.cpe_tpl.iter().map(|t| apply_template(t, caps)).collect();
 
     let prod = prod.trim();
     let ver = ver.trim();

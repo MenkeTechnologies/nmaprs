@@ -244,7 +244,10 @@ fn parse_proxy_list(s: &str) -> Result<Vec<ProxySpec>> {
                 .with_context(|| format!("bad proxy port in '{part}'"))?;
             (rest[..colon].to_string(), p)
         } else {
-            (rest.to_string(), if kind == ProxyKind::Http { 8080 } else { 1080 })
+            (
+                rest.to_string(),
+                if kind == ProxyKind::Http { 8080 } else { 1080 },
+            )
         };
         out.push(ProxySpec { kind, host, port });
     }
@@ -271,10 +274,7 @@ fn parse_dns_servers(s: &str) -> Result<Vec<std::net::IpAddr>> {
 
 fn parse_mac(s: &str) -> Result<[u8; 6]> {
     // Accept XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX or XXXXXXXXXXXX
-    let hex: String = s
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .collect();
+    let hex: String = s.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     if hex.len() != 12 {
         bail!("--spoof-mac: expected 6-byte MAC address, got '{s}'");
     }
@@ -502,7 +502,9 @@ impl ScanPlan {
             tcp_scan_flags = Some(crate::scanflags::parse_scanflags(s)?);
         }
         let any_raw_tcp = scan_kind.tcp_port_raw_kind().is_some()
-            || extra_scan_kinds.iter().any(|k| k.tcp_port_raw_kind().is_some());
+            || extra_scan_kinds
+                .iter()
+                .any(|k| k.tcp_port_raw_kind().is_some());
         if tcp_scan_flags.is_some() && !any_raw_tcp {
             warn!(
                 "--scanflags requires a raw TCP scan type (-sS, -sN, -sF, -sX, -sM, -sA, -sW); ignoring"
@@ -709,11 +711,13 @@ impl ScanPlan {
         }
 
         // --- Evasion options ---
-        let mut evasion = EvasionOpts::default();
-        evasion.source_port = args.source_port;
-        evasion.ttl = args.ttl;
-        evasion.badsum = args.badsum;
-        evasion.interface = args.interface.clone();
+        let mut evasion = EvasionOpts {
+            source_port: args.source_port,
+            ttl: args.ttl,
+            badsum: args.badsum,
+            interface: args.interface.clone(),
+            ..Default::default()
+        };
 
         if let Some(ref d) = args.decoys {
             for part in d.split(',') {
@@ -758,12 +762,12 @@ impl ScanPlan {
 
         if args.fragment {
             evasion.fragment_mtu = args.mtu.unwrap_or(8);
-            if evasion.fragment_mtu % 8 != 0 {
+            if !evasion.fragment_mtu.is_multiple_of(8) {
                 bail!("--mtu must be a multiple of 8");
             }
         } else if let Some(mtu) = args.mtu {
             evasion.fragment_mtu = mtu;
-            if evasion.fragment_mtu % 8 != 0 {
+            if !evasion.fragment_mtu.is_multiple_of(8) {
                 bail!("--mtu must be a multiple of 8");
             }
         }
@@ -876,7 +880,7 @@ impl ScanPlan {
 
 fn parse_hex_data(hex: &str) -> Result<Vec<u8>> {
     let hex = hex.trim().strip_prefix("0x").unwrap_or(hex.trim());
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         bail!("--data: hex string must have even length");
     }
     let mut out = Vec::with_capacity(hex.len() / 2);
@@ -1108,7 +1112,8 @@ mod rate_validation_tests {
         ];
         for (opt, ch, kind, raw) in cases {
             let args =
-                Args::try_parse_from(["nmaprs", "--privileged", opt, ch, "-p", "22", "127.0.0.1"]).expect("parse");
+                Args::try_parse_from(["nmaprs", "--privileged", opt, ch, "-p", "22", "127.0.0.1"])
+                    .expect("parse");
             let plan = ScanPlan::from_args(&args).expect("plan");
             assert_eq!(plan.scan_kind, kind, "{opt} {ch}");
             assert_eq!(plan.scan_kind.tcp_port_raw_kind(), Some(raw));
@@ -1119,7 +1124,8 @@ mod rate_validation_tests {
     fn ip_proto_scan_defaults_all_protocols() {
         use super::ScanKind;
 
-        let args = Args::try_parse_from(["nmaprs", "--privileged", "--sO", "127.0.0.1"]).expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "--privileged", "--sO", "127.0.0.1"]).expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.scan_kind, ScanKind::IpProto);
         assert_eq!(plan.ports.len(), 256);
@@ -1134,7 +1140,8 @@ mod rate_validation_tests {
     fn ip_proto_scan_fast_matches_embedded_nmap_protocols_list() {
         use super::ScanKind;
 
-        let args = Args::try_parse_from(["nmaprs", "--privileged", "--sO", "-F", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "--privileged", "--sO", "-F", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.scan_kind, ScanKind::IpProto);
         let mut got = plan.ports.clone();
@@ -1175,9 +1182,16 @@ mod rate_validation_tests {
     fn idle_scan_sets_kind_and_probe_port() {
         use super::ScanKind;
 
-        let args =
-            Args::try_parse_from(["nmaprs", "--privileged", "--sI", "192.0.2.1:443", "-p", "80", "10.0.0.1"])
-                .expect("parse");
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--privileged",
+            "--sI",
+            "192.0.2.1:443",
+            "-p",
+            "80",
+            "10.0.0.1",
+        ])
+        .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.scan_kind, ScanKind::Idle);
         assert_eq!(plan.idle_scan.expect("idle").probe_port, 443);
@@ -1187,14 +1201,30 @@ mod rate_validation_tests {
     fn scan_type_sctp_y_and_z() {
         use super::ScanKind;
 
-        let y = Args::try_parse_from(["nmaprs", "--privileged", "--scan-type", "Y", "-p", "38412", "127.0.0.1"])
-            .expect("parse");
+        let y = Args::try_parse_from([
+            "nmaprs",
+            "--privileged",
+            "--scan-type",
+            "Y",
+            "-p",
+            "38412",
+            "127.0.0.1",
+        ])
+        .expect("parse");
         assert_eq!(
             ScanPlan::from_args(&y).expect("plan").scan_kind,
             ScanKind::SctpInit
         );
-        let z = Args::try_parse_from(["nmaprs", "--privileged", "--scan-type", "z", "-p", "38412", "127.0.0.1"])
-            .expect("parse");
+        let z = Args::try_parse_from([
+            "nmaprs",
+            "--privileged",
+            "--scan-type",
+            "z",
+            "-p",
+            "38412",
+            "127.0.0.1",
+        ])
+        .expect("parse");
         assert_eq!(
             ScanPlan::from_args(&z).expect("plan").scan_kind,
             ScanKind::SctpCookieEcho

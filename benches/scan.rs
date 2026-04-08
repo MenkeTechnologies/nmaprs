@@ -82,7 +82,11 @@ fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
         b.iter(|| {
             let h = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
             let work: Vec<_> = plan.ports.iter().map(|p| (h, *p)).collect();
-            let out = rt.block_on(tcp_connect_scan(black_box(work), black_box(plan.clone()), None));
+            let out = rt.block_on(tcp_connect_scan(
+                black_box(work),
+                black_box(plan.clone()),
+                None,
+            ));
             black_box(out.len());
         });
     });

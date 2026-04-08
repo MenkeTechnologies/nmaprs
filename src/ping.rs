@@ -40,10 +40,7 @@ fn raw_icmp_ping(host: IpAddr, timeout: Duration) -> Option<PingOutcome> {
     }
 }
 
-fn raw_icmp_ping_v4(
-    addr: std::net::Ipv4Addr,
-    timeout: Duration,
-) -> Option<PingOutcome> {
+fn raw_icmp_ping_v4(addr: std::net::Ipv4Addr, timeout: Duration) -> Option<PingOutcome> {
     use pnet::packet::icmp::echo_request::MutableEchoRequestPacket;
     use pnet::packet::icmp::IcmpTypes;
     use pnet::packet::ip::IpNextHeaderProtocols;
@@ -129,10 +126,7 @@ fn raw_icmp_ping_v4(
     })
 }
 
-fn raw_icmp_ping_v6(
-    addr: std::net::Ipv6Addr,
-    timeout: Duration,
-) -> Option<PingOutcome> {
+fn raw_icmp_ping_v6(addr: std::net::Ipv6Addr, timeout: Duration) -> Option<PingOutcome> {
     use pnet::packet::icmpv6::Icmpv6Types;
     use pnet::packet::icmpv6::MutableIcmpv6Packet;
     use pnet::packet::ip::IpNextHeaderProtocols;

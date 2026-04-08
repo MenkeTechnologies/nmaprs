@@ -29,7 +29,9 @@ pub const TEST_ATTRS: [&[&str]; NUM_FP_TESTS] = [
     &["R", "DF", "T", "TG", "W", "S", "A", "F", "O", "RD", "Q"],
     &["R", "DF", "T", "TG", "W", "S", "A", "F", "O", "RD", "Q"],
     &["R", "DF", "T", "TG", "W", "S", "A", "F", "O", "RD", "Q"],
-    &["R", "DF", "T", "TG", "IPL", "UN", "RIPL", "RID", "RIPCK", "RUCK", "RUD"],
+    &[
+        "R", "DF", "T", "TG", "IPL", "UN", "RIPL", "RID", "RIPCK", "RUCK", "RUD",
+    ],
     &["R", "DFI", "T", "TG", "CD"],
 ];
 
@@ -48,7 +50,8 @@ impl Default for MatchPoints {
 
 impl MatchPoints {
     pub fn parse_block(lines: &[String]) -> Result<Self> {
-        let mut weights: [HashMap<String, u16>; NUM_FP_TESTS] = std::array::from_fn(|_| HashMap::new());
+        let mut weights: [HashMap<String, u16>; NUM_FP_TESTS] =
+            std::array::from_fn(|_| HashMap::new());
         for line in lines {
             let t = line.trim();
             if t.is_empty() || t.starts_with('#') {
@@ -69,7 +72,10 @@ impl MatchPoints {
                 let Some((k, v)) = part.split_once('=') else {
                     continue;
                 };
-                let pts: u16 = v.trim().parse().with_context(|| format!("MatchPoints {name}.{k}"))?;
+                let pts: u16 = v
+                    .trim()
+                    .parse()
+                    .with_context(|| format!("MatchPoints {name}.{k}"))?;
                 weights[ti].insert(k.to_string(), pts);
             }
         }
@@ -136,7 +142,8 @@ impl FingerprintDb {
                 let name = rest.trim().to_string();
                 let line_no = i + 1;
                 i += 1;
-                let mut tests: [Option<HashMap<String, String>>; NUM_FP_TESTS] = std::array::from_fn(|_| None);
+                let mut tests: [Option<HashMap<String, String>>; NUM_FP_TESTS] =
+                    std::array::from_fn(|_| None);
                 let mut family: Option<String> = None;
                 while i < lines.len() {
                     let row = lines[i].trim();
@@ -207,7 +214,7 @@ impl FingerprintDb {
         let mut best: Option<(usize, f64)> = None;
         for (idx, rf) in self.references.iter().enumerate() {
             let acc = compare_one(&self.match_points, rf, subject);
-            if acc >= threshold && best.map_or(true, |(_, a)| acc > a) {
+            if acc >= threshold && best.is_none_or(|(_, a)| acc > a) {
                 best = Some((idx, acc));
             }
         }
@@ -230,7 +237,9 @@ impl FingerprintDb {
             if let Some(fam) = &r.family {
                 if family_matches_bucket(fam, bucket) {
                     out.push(r.name.as_str());
-                    if out.len() >= max { break; }
+                    if out.len() >= max {
+                        break;
+                    }
                 }
             }
         }
@@ -250,7 +259,12 @@ impl FingerprintDb {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TtlBucket { LinuxUnix, Windows, Network, Unknown }
+enum TtlBucket {
+    LinuxUnix,
+    Windows,
+    Network,
+    Unknown,
+}
 
 fn ttl_bucket(ttl: Option<u8>) -> TtlBucket {
     match ttl {
@@ -264,11 +278,21 @@ fn ttl_bucket(ttl: Option<u8>) -> TtlBucket {
 fn family_matches_bucket(family: &str, bucket: TtlBucket) -> bool {
     let f = family.to_lowercase();
     match bucket {
-        TtlBucket::LinuxUnix => f.contains("linux") || f.contains("unix") || f.contains("bsd")
-            || f.contains("solaris") || f.contains("android"),
+        TtlBucket::LinuxUnix => {
+            f.contains("linux")
+                || f.contains("unix")
+                || f.contains("bsd")
+                || f.contains("solaris")
+                || f.contains("android")
+        }
         TtlBucket::Windows => f.contains("windows") || f.contains("microsoft"),
-        TtlBucket::Network => f.contains("cisco") || f.contains("router") || f.contains("switch")
-            || f.contains("embedded") || f.contains("vxworks"),
+        TtlBucket::Network => {
+            f.contains("cisco")
+                || f.contains("router")
+                || f.contains("switch")
+                || f.contains("embedded")
+                || f.contains("vxworks")
+        }
         TtlBucket::Unknown => false,
     }
 }
@@ -282,7 +306,11 @@ fn parse_paren_line(line: &str) -> Option<(&str, &str)> {
     Some((name, &rest[..close]))
 }
 
-fn compare_one(mp: &MatchPoints, reference: &ReferenceFingerprint, subject: &SubjectFingerprint) -> f64 {
+fn compare_one(
+    mp: &MatchPoints,
+    reference: &ReferenceFingerprint,
+    subject: &SubjectFingerprint,
+) -> f64 {
     let mut subtests: u64 = 0;
     let mut ok: u64 = 0;
     for ti in 0..NUM_FP_TESTS {
