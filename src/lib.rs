@@ -355,13 +355,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 _ => unreachable!(),
             };
             let (work_v4, work_v6) = split_syn_work(&work);
-            if !work_v6.is_empty() {
-                warn!(
-                    "SCTP scan: skipping {} IPv6 target(s) (IPv4 raw SCTP only)",
-                    work_v6.len()
-                );
-            }
-            if work_v4.is_empty() {
+            if work_v4.is_empty() && work_v6.is_empty() {
                 return Ok(vec![]);
             }
             let to = plan.connect_timeout;
@@ -377,23 +371,63 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 .effective_probe_concurrency()
                 .clamp(1, crate::sctp::MAX_SCTP_PARALLEL_SHARDS);
 
-            let res = tokio::task::spawn_blocking(move || {
-                crate::sctp::parallel_sctp_scan_ipv4(
-                    work_v4,
-                    probe,
-                    to,
-                    pacer,
-                    host_limit,
-                    host_start,
-                    scan_delay,
-                    max_scan_delay,
-                    connect_retries,
-                    shard_cap,
-                )
-            })
-            .await
-            .map_err(|e| anyhow!("SCTP scan join: {e}"))?;
-            res.map_err(|e| anyhow!("SCTP scan: {e}"))?
+            let v4_fut = async {
+                if work_v4.is_empty() {
+                    return Ok::<Vec<PortLine>, anyhow::Error>(vec![]);
+                }
+                let work = work_v4;
+                let pacer = pacer.clone();
+                let host_start = host_start.clone();
+                let out = tokio::task::spawn_blocking(move || {
+                    crate::sctp::parallel_sctp_scan_ipv4(
+                        work,
+                        probe,
+                        to,
+                        pacer,
+                        host_limit,
+                        host_start,
+                        scan_delay,
+                        max_scan_delay,
+                        connect_retries,
+                        shard_cap,
+                    )
+                })
+                .await
+                .map_err(|e| anyhow!("SCTP IPv4 join: {e}"))?;
+                out.map_err(|e| anyhow!("SCTP IPv4: {e}"))
+            };
+
+            let v6_fut = async {
+                if work_v6.is_empty() {
+                    return Ok::<Vec<PortLine>, anyhow::Error>(vec![]);
+                }
+                let work = work_v6;
+                let pacer = pacer.clone();
+                let host_start = host_start.clone();
+                let out = tokio::task::spawn_blocking(move || {
+                    crate::sctp::parallel_sctp_scan_ipv6(
+                        work,
+                        probe,
+                        to,
+                        pacer,
+                        host_limit,
+                        host_start,
+                        scan_delay,
+                        max_scan_delay,
+                        connect_retries,
+                        shard_cap,
+                    )
+                })
+                .await
+                .map_err(|e| anyhow!("SCTP IPv6 join: {e}"))?;
+                out.map_err(|e| anyhow!("SCTP IPv6: {e}"))
+            };
+
+            let (v4_lines, v6_lines) = tokio::join!(v4_fut, v6_fut);
+            let mut collected = Vec::new();
+            collected.extend(v4_lines?);
+            collected.extend(v6_lines?);
+            collected
         }
         ScanKind::TcpConnect | ScanKind::Other(_) => {
             if let Some(fb) = plan.ftp_bounce.clone() {
