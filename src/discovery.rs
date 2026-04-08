@@ -12,6 +12,8 @@
 //!
 //! **`-PO`**: IP protocol probes (same engines as `-sO`); ICMP **protocol unreachable** or IPv6
 //! Parameter Problem ⇒ “closed”; any **open**/**closed** result ⇒ host up.
+//!
+//! **`-PP`** / **`-PM`**: legacy ICMP **timestamp** and **address mask** (IPv4 only; Unix raw ICMP).
 
 use std::collections::HashSet;
 use std::io::ErrorKind as IoErrorKind;
@@ -58,6 +60,8 @@ fn has_implemented_explicit_probes(args: &Args) -> bool {
         || args.ping_udp.is_some()
         || args.ping_sctp.is_some()
         || args.ping_ip_proto.is_some()
+        || args.ping_timestamp
+        || args.ping_mask
 }
 
 fn ports_from_ping_tcp(opt: &Option<Option<String>>, default: u16) -> Result<Vec<u16>> {
@@ -653,6 +657,84 @@ async fn udp_discovery(
     alive.extend(new_up);
 }
 
+#[cfg(unix)]
+async fn icmp_timestamp_discovery_merge(
+    hosts: &[IpAddr],
+    alive: &mut HashSet<IpAddr>,
+    timeout: Duration,
+    concurrency: usize,
+) {
+    let skip = alive.clone();
+    let v4: Vec<Ipv4Addr> = hosts
+        .iter()
+        .copied()
+        .filter(|h| !skip.contains(h))
+        .filter_map(|h| match h {
+            IpAddr::V4(a) => Some(a),
+            IpAddr::V6(_) => None,
+        })
+        .collect();
+    if v4.is_empty() {
+        return;
+    }
+    let results: Vec<(IpAddr, bool)> = stream::iter(v4.into_iter())
+        .map(|dst| async move {
+            let ok = tokio::task::spawn_blocking(move || {
+                crate::icmp_ping::icmp_timestamp_probe_v4(dst, timeout)
+            })
+            .await
+            .unwrap_or(false);
+            (IpAddr::V4(dst), ok)
+        })
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+    for (ip, ok) in results {
+        if ok {
+            alive.insert(ip);
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn icmp_mask_discovery_merge(
+    hosts: &[IpAddr],
+    alive: &mut HashSet<IpAddr>,
+    timeout: Duration,
+    concurrency: usize,
+) {
+    let skip = alive.clone();
+    let v4: Vec<Ipv4Addr> = hosts
+        .iter()
+        .copied()
+        .filter(|h| !skip.contains(h))
+        .filter_map(|h| match h {
+            IpAddr::V4(a) => Some(a),
+            IpAddr::V6(_) => None,
+        })
+        .collect();
+    if v4.is_empty() {
+        return;
+    }
+    let results: Vec<(IpAddr, bool)> = stream::iter(v4.into_iter())
+        .map(|dst| async move {
+            let ok = tokio::task::spawn_blocking(move || {
+                crate::icmp_ping::icmp_address_mask_probe_v4(dst, timeout)
+            })
+            .await
+            .unwrap_or(false);
+            (IpAddr::V4(dst), ok)
+        })
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+    for (ip, ok) in results {
+        if ok {
+            alive.insert(ip);
+        }
+    }
+}
+
 /// Filter `hosts` to targets that respond to at least one discovery probe.
 pub async fn hosts_after_discovery(
     hosts: Vec<IpAddr>,
@@ -672,11 +754,20 @@ pub async fn hosts_after_discovery(
     let max_sctp_shards = c.clamp(1, MAX_SCTP_PARALLEL_SHARDS);
     let max_ip_proto_shards = c.clamp(1, MAX_IP_PROTO_PARALLEL_SHARDS);
 
-    if args.ping_timestamp {
-        tracing::warn!("-PP (ICMP timestamp) host discovery is not implemented; ignoring");
+    if (args.ping_timestamp || args.ping_mask)
+        && hosts.iter().any(|h| matches!(h, IpAddr::V6(_)))
+    {
+        let n = hosts.iter().filter(|h| matches!(h, IpAddr::V6(_))).count();
+        tracing::warn!(
+            count = n,
+            "ICMP timestamp (-PP) and netmask (-PM) are IPv4-only; skipping IPv6 targets"
+        );
     }
-    if args.ping_mask {
-        tracing::warn!("-PM (ICMP netmask) host discovery is not implemented; ignoring");
+    if args.ping_timestamp && cfg!(not(unix)) {
+        tracing::warn!("-PP (ICMP timestamp) requires Unix raw ICMP; skipping");
+    }
+    if args.ping_mask && cfg!(not(unix)) {
+        tracing::warn!("-PM (ICMP netmask) requires Unix raw ICMP; skipping");
     }
 
     let explicit = has_explicit_discovery_flags(args);
@@ -766,6 +857,14 @@ pub async fn hosts_after_discovery(
                 max_ip_proto_shards,
             )
             .await;
+        }
+        if args.ping_timestamp {
+            #[cfg(unix)]
+            icmp_timestamp_discovery_merge(&hosts, &mut alive, connect_timeout, c).await;
+        }
+        if args.ping_mask {
+            #[cfg(unix)]
+            icmp_mask_discovery_merge(&hosts, &mut alive, connect_timeout, c).await;
         }
     }
 

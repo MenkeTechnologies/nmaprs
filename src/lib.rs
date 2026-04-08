@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod ftp_bounce;
 pub mod idle;
 pub mod icmp_listen;
+pub mod icmp_ping;
 pub mod ip_proto;
 pub mod ipv6_l4;
 pub mod nse;
