@@ -62,6 +62,8 @@ nmaprs -p 443 -oG - scanme.nmap.org
 cargo test
 ```
 
+CI (GitHub Actions on `main` and pull requests): `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` on Ubuntu and macOS.
+
 ## Benchmarks
 
 ```bash
