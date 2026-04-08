@@ -85,7 +85,7 @@ cargo bench --bench scan
 1. **Argv expansion** (`src/argv_expand.rs`) normalizes glued nmap tokens before `clap`.
 2. **Plan** (`src/config.rs`) → `ScanPlan`.
 3. **Targets** (`src/target.rs`, `src/lib.rs` `expand_specs_ordered`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`; **parallel** `expand_target` with stable ordering.
-4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — TCP connect / UDP (+ parallel ICMP + ICMPv6 listeners for port-unreachable) / raw IPv4 + IPv6 SYN (recv thread pipelined with sends; optional multi-shard parallel pipelines per family).
+4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 SYN (recv thread pipelined with sends; optional multi-shard parallel pipelines per family).
 5. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
 6. **Output** (`src/output.rs`).
 

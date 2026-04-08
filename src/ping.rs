@@ -16,17 +16,10 @@ pub struct PingOutcome {
 }
 
 pub async fn ping_hosts(hosts: &[IpAddr], concurrency: usize) -> Vec<PingOutcome> {
-    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency.max(1)));
+    let c = concurrency.max(1);
     stream::iter(hosts.iter().copied())
-        .map(|h| {
-            let sem = sem.clone();
-            async move {
-                let _p = sem.acquire().await.ok()?;
-                Some(ping_one(h).await)
-            }
-        })
-        .buffer_unordered(concurrency.max(1))
-        .filter_map(|x| async move { x })
+        .map(ping_one)
+        .buffer_unordered(c)
         .collect()
         .await
 }

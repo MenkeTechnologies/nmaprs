@@ -11,7 +11,6 @@ use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
 use rand::Rng;
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::sync::Semaphore;
 
 use crate::config::ScanPlan;
 
@@ -199,10 +198,9 @@ pub struct PortLine {
     pub latency_ms: Option<u128>,
 }
 
-/// TCP connect scan with `buffer_unordered(concurrency)`.
+/// TCP connect scan with `buffer_unordered(concurrency)` (no extra semaphore: same cap).
 pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Vec<PortLine> {
     let conc = plan.effective_probe_concurrency();
-    let sem = Arc::new(Semaphore::new(conc));
     let timeout = plan.connect_timeout;
     let no_ping = plan.no_ping;
     let connect_retries = plan.connect_retries;
@@ -214,7 +212,6 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
 
     stream::iter(work)
         .map(|(host, port)| {
-            let sem = sem.clone();
             let pacer = pacer.clone();
             let host_deadline = host_deadline.clone();
             async move {
@@ -242,7 +239,6 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
                             p.wait_turn().await;
                         }
                     }
-                    let _p = sem.acquire().await.ok()?;
                     let fut = TcpStream::connect(addr);
                     let res = tokio::time::timeout(timeout, fut).await;
                     let elapsed = overall_start.elapsed().as_millis();
@@ -308,7 +304,6 @@ pub async fn udp_scan(
     icmp_notes: Option<UdpIcmpNotes>,
 ) -> Vec<PortLine> {
     let conc = plan.effective_probe_concurrency();
-    let sem = Arc::new(Semaphore::new(conc));
     let timeout = plan.connect_timeout;
     let pacer = ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate);
     let host_deadline = plan.host_timeout.map(|_| Arc::new(DashMap::new()));
@@ -320,7 +315,6 @@ pub async fn udp_scan(
 
     stream::iter(work)
         .map(move |(host, port)| {
-            let sem = sem.clone();
             let icmp_notes = icmp_notes.clone();
             let pacer = pacer.clone();
             let host_deadline = host_deadline.clone();
@@ -365,7 +359,6 @@ pub async fn udp_scan(
                             p.wait_turn().await;
                         }
                     }
-                    let _p = sem.acquire().await.ok()?;
                     let start = Instant::now();
                     if socket.send_to(&payload, dst).await.is_err() {
                         return Some(PortLine {
