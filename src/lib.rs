@@ -16,20 +16,19 @@ pub mod syn;
 pub mod target;
 pub mod trace;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use parking_lot::Mutex;
-
 use anyhow::{anyhow, bail, Context, Result};
+use dashmap::DashMap;
 use tracing::{info, warn};
 
 use crate::cli::Args;
 use crate::config::{ScanKind, ScanPlan};
 use crate::output::{print_stdout, OutputSet};
-use crate::scan::{tcp_connect_scan, udp_scan, PortLine, UdpIcmpClosedSet};
+use crate::scan::{tcp_connect_scan, udp_scan, PortLine, UdpIcmpNotes};
 use crate::target::{apply_exclude, expand_target, random_addresses, read_input_list, ExpandOpts};
 
 fn build_work(hosts: &[IpAddr], ports: &[u16]) -> Vec<(IpAddr, u16)> {
@@ -158,32 +157,32 @@ pub async fn run(args: Args) -> Result<i32> {
             let has_v4 = work.iter().any(|(h, _)| h.is_ipv4());
             let has_v6 = work.iter().any(|(h, _)| h.is_ipv6());
             if has_v4 || has_v6 {
-                let closed: UdpIcmpClosedSet = Arc::new(Mutex::new(HashSet::new()));
+                let notes: UdpIcmpNotes = Arc::new(DashMap::new());
                 let stop = Arc::new(AtomicBool::new(false));
                 let mut listeners = Vec::new();
                 if has_v4 {
-                    let closed_bg = closed.clone();
+                    let notes_bg = notes.clone();
                     let stop_bg = stop.clone();
                     listeners.push(std::thread::spawn(move || {
                         if let Err(e) =
-                            crate::icmp_listen::run_ipv4_port_unreachable_listener(closed_bg, stop_bg)
+                            crate::icmp_listen::run_ipv4_port_unreachable_listener(notes_bg, stop_bg)
                         {
-                            warn!(error = %e, "IPv4 ICMP port-unreachable listener exited");
+                            warn!(error = %e, "IPv4 ICMP listener exited");
                         }
                     }));
                 }
                 if has_v6 {
-                    let closed_bg = closed.clone();
+                    let notes_bg = notes.clone();
                     let stop_bg = stop.clone();
                     listeners.push(std::thread::spawn(move || {
                         if let Err(e) =
-                            crate::icmp_listen::run_ipv6_port_unreachable_listener(closed_bg, stop_bg)
+                            crate::icmp_listen::run_ipv6_port_unreachable_listener(notes_bg, stop_bg)
                         {
-                            warn!(error = %e, "ICMPv6 port-unreachable listener exited");
+                            warn!(error = %e, "ICMPv6 listener exited");
                         }
                     }));
                 }
-                let lines = udp_scan(work, plan.clone(), Some(closed)).await;
+                let lines = udp_scan(work, plan.clone(), Some(notes)).await;
                 stop.store(true, Ordering::SeqCst);
                 for h in listeners {
                     let _ = h.join();

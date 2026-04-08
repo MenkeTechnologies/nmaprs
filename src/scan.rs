@@ -1,21 +1,40 @@
 //! Parallel TCP connect and UDP probes (`tokio` + bounded concurrency).
 
-use std::collections::HashSet;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
-use parking_lot::Mutex;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
 
 use crate::config::ScanPlan;
 
-/// Filled by ICMP / ICMPv6 listeners when a UDP port-unreachable is observed (IPv4: type 3 code 3; IPv6: type 1 code 4).
-pub type UdpIcmpClosedSet = Arc<Mutex<HashSet<(IpAddr, u16)>>>;
+/// Outcome of an ICMP error that references our UDP probe (embedded IP header + UDP).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UdpIcmpOutcome {
+    /// ICMPv4 type 3 code 3 / ICMPv6 type 1 code 4 — port explicitly closed.
+    Closed,
+    /// Other destination-unreachable codes (host/net unreachable, admin prohibited, etc.) — path/filtered.
+    Filtered,
+}
+
+/// Concurrent map filled by ICMP / ICMPv6 listeners. `Closed` wins over `Filtered` if both appear.
+pub type UdpIcmpNotes = Arc<DashMap<(IpAddr, u16), UdpIcmpOutcome>>;
+
+pub(crate) fn merge_udp_icmp_note(notes: &UdpIcmpNotes, k: (IpAddr, u16), new: UdpIcmpOutcome) {
+    notes
+        .entry(k)
+        .and_modify(|cur| {
+            if new == UdpIcmpOutcome::Closed {
+                *cur = UdpIcmpOutcome::Closed;
+            }
+        })
+        .or_insert(new);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortReason {
@@ -25,6 +44,7 @@ pub enum PortReason {
     Error,
     UdpResponse,
     IcmpPortUnreachable,
+    IcmpUnreachableFiltered,
 }
 
 #[derive(Debug, Clone)]
@@ -101,12 +121,12 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
 
 /// UDP scan: send a minimal datagram and treat any UDP reply as `open`; timeout → `open|filtered`.
 ///
-/// When `icmp_closed` is set (ICMP / ICMPv6 listeners), a port-unreachable after the UDP timeout
-/// marks the port `closed` instead of `open|filtered`.
+/// When `icmp_notes` is set, ICMP destination-unreachable messages after the UDP timeout refine
+/// `open|filtered` to `closed` (port unreachable) or `filtered` (other unreachable codes).
 pub async fn udp_scan(
     work: Vec<(IpAddr, u16)>,
     plan: Arc<ScanPlan>,
-    icmp_closed: Option<UdpIcmpClosedSet>,
+    icmp_notes: Option<UdpIcmpNotes>,
 ) -> Vec<PortLine> {
     let sem = Arc::new(Semaphore::new(plan.concurrency.max(1)));
     let timeout = plan.connect_timeout;
@@ -114,7 +134,7 @@ pub async fn udp_scan(
     stream::iter(work)
         .map(|(host, port)| {
             let sem = sem.clone();
-            let icmp_closed = icmp_closed.clone();
+            let icmp_notes = icmp_notes.clone();
             async move {
                 let _p = sem.acquire().await.ok()?;
                 let bind_addr: SocketAddr = match host {
@@ -157,16 +177,26 @@ pub async fn udp_scan(
                         latency_ms: Some(elapsed),
                     },
                     Err(_) => {
-                        if let Some(ref set) = icmp_closed {
+                        if let Some(ref notes) = icmp_notes {
                             tokio::time::sleep(Duration::from_millis(5)).await;
-                            if set.lock().contains(&(host, port)) {
-                                return Some(PortLine {
-                                    host,
-                                    port,
-                                    proto: "udp",
-                                    state: "closed",
-                                    reason: PortReason::IcmpPortUnreachable,
-                                    latency_ms: None,
+                            if let Some(out) = notes.get(&(host, port)).as_deref().copied() {
+                                return Some(match out {
+                                    UdpIcmpOutcome::Closed => PortLine {
+                                        host,
+                                        port,
+                                        proto: "udp",
+                                        state: "closed",
+                                        reason: PortReason::IcmpPortUnreachable,
+                                        latency_ms: None,
+                                    },
+                                    UdpIcmpOutcome::Filtered => PortLine {
+                                        host,
+                                        port,
+                                        proto: "udp",
+                                        state: "filtered",
+                                        reason: PortReason::IcmpUnreachableFiltered,
+                                        latency_ms: None,
+                                    },
                                 });
                             }
                         }
@@ -186,4 +216,32 @@ pub async fn udp_scan(
         .filter_map(|x| async move { x })
         .collect()
         .await
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::Arc;
+
+    use dashmap::DashMap;
+
+    use super::{merge_udp_icmp_note, UdpIcmpNotes, UdpIcmpOutcome};
+
+    #[test]
+    fn merge_prefers_closed_over_filtered() {
+        let notes: UdpIcmpNotes = Arc::new(DashMap::new());
+        let k = (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 7);
+        merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Filtered);
+        merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Closed);
+        assert_eq!(*notes.get(&k).unwrap(), UdpIcmpOutcome::Closed);
+    }
+
+    #[test]
+    fn merge_keeps_closed_when_later_filtered() {
+        let notes: UdpIcmpNotes = Arc::new(DashMap::new());
+        let k = (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)), 9);
+        merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Closed);
+        merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Filtered);
+        assert_eq!(*notes.get(&k).unwrap(), UdpIcmpOutcome::Closed);
+    }
 }

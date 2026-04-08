@@ -1,4 +1,4 @@
-//! ICMP / ICMPv6 “port unreachable” listeners to refine UDP scan (`closed` vs `open|filtered`).
+//! ICMP / ICMPv6 destination-unreachable listeners to refine UDP scan (`closed` / `filtered` / `open|filtered`).
 
 use std::io;
 use std::mem;
@@ -18,13 +18,10 @@ use pnet::transport::{
 use pnet_sys;
 
 use crate::ipv6_l4;
-use crate::scan::UdpIcmpClosedSet;
+use crate::scan::{merge_udp_icmp_note, UdpIcmpNotes, UdpIcmpOutcome};
 
-/// Background loop: ICMP type 3 code 3 (IPv4 port unreachable).
-pub fn run_ipv4_port_unreachable_listener(
-    closed: UdpIcmpClosedSet,
-    stop: Arc<AtomicBool>,
-) -> io::Result<()> {
+/// ICMPv4 type 3: code 3 → `closed`; any other code with a parsable embedded UDP probe → `filtered`.
+pub fn run_ipv4_port_unreachable_listener(notes: UdpIcmpNotes, stop: Arc<AtomicBool>) -> io::Result<()> {
     let (mut _tx, mut rx) = transport_channel(
         4096,
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp)),
@@ -36,14 +33,15 @@ pub fn run_ipv4_port_unreachable_listener(
                 if pkt.get_icmp_type() != IcmpTypes::DestinationUnreachable {
                     continue;
                 }
-                if pkt.get_icmp_code().0 != 3 {
+                let code = pkt.get_icmp_code().0;
+                let Some((dst, dport)) = parse_embedded_udp_ipv4(pkt.payload()) else {
                     continue;
-                }
-                if let Some((dst, dport)) = parse_embedded_udp_ipv4(pkt.payload()) {
-                    closed
-                        .lock()
-                        .insert((IpAddr::V4(dst), dport));
-                }
+                };
+                let outcome = match code {
+                    3 => UdpIcmpOutcome::Closed,
+                    _ => UdpIcmpOutcome::Filtered,
+                };
+                merge_udp_icmp_note(&notes, (IpAddr::V4(dst), dport), outcome);
             }
             Ok(None) => {}
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
@@ -54,11 +52,8 @@ pub fn run_ipv4_port_unreachable_listener(
     Ok(())
 }
 
-/// Background loop: ICMPv6 type 1 code 4 (port unreachable) [RFC 4443].
-pub fn run_ipv6_port_unreachable_listener(
-    closed: UdpIcmpClosedSet,
-    stop: Arc<AtomicBool>,
-) -> io::Result<()> {
+/// ICMPv6 type 1: code 4 → `closed`; other codes with parsable embedded UDP → `filtered` [RFC 4443].
+pub fn run_ipv6_port_unreachable_listener(notes: UdpIcmpNotes, stop: Arc<AtomicBool>) -> io::Result<()> {
     let (mut _tx, mut rx) = transport_channel(
         4096,
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Icmpv6)),
@@ -69,12 +64,15 @@ pub fn run_ipv6_port_unreachable_listener(
                 if pkt.get_icmpv6_type() != Icmpv6Types::DestinationUnreachable {
                     continue;
                 }
-                if pkt.get_icmpv6_code().0 != 4 {
+                let code = pkt.get_icmpv6_code().0;
+                let Some((dst, dport)) = parse_embedded_udp_ipv6(pkt.payload()) else {
                     continue;
-                }
-                if let Some((dst, dport)) = parse_embedded_udp_ipv6(pkt.payload()) {
-                    closed.lock().insert((IpAddr::V6(dst), dport));
-                }
+                };
+                let outcome = match code {
+                    4 => UdpIcmpOutcome::Closed,
+                    _ => UdpIcmpOutcome::Filtered,
+                };
+                merge_udp_icmp_note(&notes, (IpAddr::V6(dst), dport), outcome);
             }
             Ok(None) => {}
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}

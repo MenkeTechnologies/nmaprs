@@ -16,7 +16,7 @@ Created by **MenkeTechnologies**.
 | Area | Status |
 |------|--------|
 | TCP connect (`-sT`, default) | **Implemented** — async, parallel, timeout-bound |
-| UDP (`-sU`) | **Implemented** — reply → `open`; timeout → `open|filtered`; **IPv4** ICMP type 3 code 3 and **IPv6** ICMPv6 type 1 code 4 (port unreachable) refine to `closed` when raw ICMP listeners work (privileged) |
+| UDP (`-sU`) | **Implemented** — reply → `open`; timeout → `open|filtered`; raw ICMP listeners (privileged) classify **destination unreachable** ICMPs whose payload matches the probe: **port unreachable** → `closed`; **other unreachable codes** → `filtered` (IPv4 type 3 / ICMPv6 type 1); later `closed` wins if both arrive |
 | SYN (`-sS`) | **Implemented** — raw IPv4 + **separate** raw IPv6 TCP path via `pnet` — **requires privileges**; falls back to TCP connect per address family on failure |
 | Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6` |
 | IPv6 (`-6`) | **Implemented** — targets + scans (including raw SYN when privileged) |
