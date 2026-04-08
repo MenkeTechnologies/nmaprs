@@ -117,57 +117,57 @@ cargo test
 
 ### nmaprs vs nmap (wall clock)
 
-All runs on **127.0.0.1**, TCP connect (`-sT`), `-n -Pn`, `--min-rtt-timeout 50ms`, `--max-retries 0`, output to `/dev/null`. Measured with **[hyperfine](https://github.com/sharkdep/hyperfine)** (warmup + 15–30 runs). macOS arm64, nmap 7.99.
+All runs on **127.0.0.1**, TCP connect (`-sT`), `-n -Pn`, `--min-rtt-timeout 50ms`, `--max-retries 0`, output to `/dev/null`. Measured with **[hyperfine](https://github.com/sharkdp/hyperfine)** (warmup + 10–30 runs). macOS arm64, nmap 7.99.
 
 #### By port count (M=256)
 
 | Test | nmap | nmaprs | Speedup |
 |------|------|--------|---------|
-| 2 ports (`-p 80,443`) | 13.2 ms | 2.5 ms | **5.3× faster** |
-| 3 closed high ports (65533–65535) | 12.9 ms | 2.6 ms | **5.0× faster** |
-| `-F` (fast, ~100 ports) | 15.9 ms | 5.2 ms | **3.0× faster** |
-| `--top-ports 100` | 16.5 ms | 5.5 ms | **3.0× faster** |
-| `--top-ports 1000` | 40.7 ms | 22.9 ms | **1.8× faster** |
-| `-p-` (all 65535) | 2.13 s | 1.27 s | **1.7× faster** |
+| 2 ports (`-p 80,443`) | 12.7 ms | 2.4 ms | **5.3× faster** |
+| 3 closed high ports (65533–65535) | 13.3 ms | 2.7 ms | **5.0× faster** |
+| `-F` (fast, ~100 ports) | 15.6 ms | 5.1 ms | **3.0× faster** |
+| `--top-ports 100` | 16.4 ms | 5.3 ms | **3.1× faster** |
+| `--top-ports 1000` | 44.7 ms | 22.3 ms | **2.0× faster** |
+| `-p-` (all 65535) | 1.81 s | 1.27 s | **1.4× faster** |
 
 #### By parallelism (`--top-ports 1000`)
 
 | Parallelism | nmap | nmaprs | Speedup |
 |-------------|------|--------|---------|
-| M=64 | 41.0 ms | 19.5 ms | **2.1× faster** |
-| M=256 | 40.7 ms | 22.9 ms | **1.8× faster** |
+| M=64 | 39.4 ms | 20.7 ms | **1.9× faster** |
+| M=256 | 44.7 ms | 22.3 ms | **2.0× faster** |
 
 #### By parallelism (`-p-`, all 65535)
 
 | Parallelism | nmap | nmaprs | Speedup |
 |-------------|------|--------|---------|
-| M=256 | 2.13 s | 1.27 s | **1.7× faster** |
-| M=1024 | 1.99 s | 1.38 s | **1.4× faster** |
+| M=256 | 1.81 s | 1.27 s | **1.4× faster** |
+| M=1024 | 1.79 s | 1.20 s | **1.5× faster** |
 
 #### By output format (`--top-ports 100`, M=256)
 
 | Output | nmap | nmaprs | Speedup |
 |--------|------|--------|---------|
-| `-oN` | 16.5 ms | 5.5 ms | **3.0× faster** |
-| `-oG` | 16.7 ms | 5.8 ms | **2.9× faster** |
-| `-oX` | 16.4 ms | 5.7 ms | **2.9× faster** |
+| `-oN` | 16.4 ms | 5.3 ms | **3.1× faster** |
+| `-oG` | 15.3 ms | 5.6 ms | **2.7× faster** |
+| `-oX` | 16.1 ms | 5.6 ms | **2.9× faster** |
 
 #### Ping scan (`-sn`, no `-Pn`)
 
 | Test | nmap | nmaprs | Speedup |
 |------|------|--------|---------|
-| `-sn 127.0.0.1` | 5.0 ms | 4.5 ms | **~1× (parity)** |
+| `-sn 127.0.0.1` | 4.5 ms | 4.4 ms | **~1× (parity)** |
 
 #### Analysis
 
-nmaprs is **1.4–5.3× faster** across all port counts. Small scans (2–100 ports) see the largest gains (**3–5×**) because nmap's startup overhead (Lua/NSE, libpcap, service databases) dominates. Full 65535-port sweeps still show **1.4–1.7×** speedup thanks to `tokio::spawn` per probe with work-stealing across all CPU cores (vs `buffer_unordered` single-task polling). Ping scan is at parity since both hit the same ICMP syscall floor. Output format has negligible impact on either tool.
+nmaprs is **1.4–5.3× faster** across all port counts. Small scans (2–100 ports) see the largest gains (**3–5×**) because nmap's startup overhead (Lua/NSE, libpcap, service databases) dominates. Full 65535-port sweeps still show **1.4–1.5×** speedup thanks to `tokio::spawn` per probe with work-stealing across all CPU cores (vs `buffer_unordered` single-task polling). Ping scan is at parity since both hit the same ICMP syscall floor. Output format has negligible impact on either tool.
 
 ### Criterion (Rust internals)
 
 TCP connect scan to three closed localhost ports — measures pure scan-loop overhead:
 
 ```
-tcp_connect_scan_localhost_3_ports  time: [81.0 µs 84.4 µs 88.6 µs]
+tcp_connect_scan_localhost_3_ports  time: [74.8 µs 78.3 µs 82.4 µs]
 ```
 
 ### Running benchmarks
