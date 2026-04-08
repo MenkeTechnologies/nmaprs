@@ -163,13 +163,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
         }
         ScanKind::IpProto => {
             let (work_v4, work_v6) = split_syn_work(&work);
-            if !work_v6.is_empty() {
-                warn!(
-                    "-sO IPv4 IP protocol scan: skipping {} IPv6 target(s)",
-                    work_v6.len()
-                );
-            }
-            if work_v4.is_empty() {
+            if work_v4.is_empty() && work_v6.is_empty() {
                 return Ok(vec![]);
             }
             let to = plan.connect_timeout;
@@ -185,22 +179,61 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 .effective_probe_concurrency()
                 .clamp(1, crate::ip_proto::MAX_IP_PROTO_PARALLEL_SHARDS);
 
-            let res = tokio::task::spawn_blocking(move || {
-                crate::ip_proto::parallel_ip_proto_scan_ipv4(
-                    work_v4,
-                    to,
-                    pacer,
-                    host_limit,
-                    host_start,
-                    scan_delay,
-                    max_scan_delay,
-                    connect_retries,
-                    shard_cap,
-                )
-            })
-            .await
-            .map_err(|e| anyhow!("IP protocol scan join: {e}"))?;
-            res.map_err(|e| anyhow!("IP protocol scan: {e}"))?
+            let v4_fut = async {
+                if work_v4.is_empty() {
+                    return Ok::<Vec<PortLine>, anyhow::Error>(vec![]);
+                }
+                let work = work_v4;
+                let pacer = pacer.clone();
+                let host_start = host_start.clone();
+                let out = tokio::task::spawn_blocking(move || {
+                    crate::ip_proto::parallel_ip_proto_scan_ipv4(
+                        work,
+                        to,
+                        pacer,
+                        host_limit,
+                        host_start,
+                        scan_delay,
+                        max_scan_delay,
+                        connect_retries,
+                        shard_cap,
+                    )
+                })
+                .await
+                .map_err(|e| anyhow!("IP protocol scan IPv4 join: {e}"))?;
+                out.map_err(|e| anyhow!("IP protocol scan IPv4: {e}"))
+            };
+
+            let v6_fut = async {
+                if work_v6.is_empty() {
+                    return Ok::<Vec<PortLine>, anyhow::Error>(vec![]);
+                }
+                let work = work_v6;
+                let pacer = pacer.clone();
+                let host_start = host_start.clone();
+                let out = tokio::task::spawn_blocking(move || {
+                    crate::ip_proto::parallel_ip_proto_scan_ipv6(
+                        work,
+                        to,
+                        pacer,
+                        host_limit,
+                        host_start,
+                        scan_delay,
+                        max_scan_delay,
+                        connect_retries,
+                        shard_cap,
+                    )
+                })
+                .await
+                .map_err(|e| anyhow!("IP protocol scan IPv6 join: {e}"))?;
+                out.map_err(|e| anyhow!("IP protocol scan IPv6: {e}"))
+            };
+
+            let (v4_lines, v6_lines) = tokio::join!(v4_fut, v6_fut);
+            let mut collected = Vec::new();
+            collected.extend(v4_lines?);
+            collected.extend(v6_lines?);
+            collected
         }
         ScanKind::TcpSyn
         | ScanKind::TcpNull
