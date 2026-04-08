@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use rand::seq::SliceRandom;
+use rand::Rng;
 use tracing::{info, warn};
 
 use crate::cli::Args;
@@ -92,6 +93,27 @@ pub fn parse_idle_scan(spec: &str) -> Result<IdleScanTarget> {
 }
 
 /// Resolved scan configuration after validating nmap-style flags.
+/// Packet-level evasion and spoofing options parsed from CLI flags.
+#[derive(Debug, Clone, Default)]
+pub struct EvasionOpts {
+    /// `-g` / `--source-port`: fixed source port for raw scans (None = random).
+    pub source_port: Option<u16>,
+    /// `--ttl`: custom IP TTL value.
+    pub ttl: Option<u8>,
+    /// `--badsum`: intentionally corrupt checksum.
+    pub badsum: bool,
+    /// `-D`: decoy IP addresses (sent before/after real probe).
+    pub decoys: Vec<std::net::Ipv4Addr>,
+    /// `-S`: spoof source IP address.
+    pub spoof_source: Option<std::net::IpAddr>,
+    /// `-e`: bind to specific network interface.
+    pub interface: Option<String>,
+    /// `--data`: hex payload appended to probes.
+    pub data_payload: Vec<u8>,
+    /// `-f` / `--mtu`: IP fragmentation MTU (8-byte aligned); 0 means no fragmentation.
+    pub fragment_mtu: u16,
+}
+
 #[derive(Debug, Clone)]
 pub struct ScanPlan {
     pub ports: Vec<u16>,
@@ -102,6 +124,8 @@ pub struct ScanPlan {
     pub connect_timeout: Duration,
     pub no_ping: bool,
     pub scan_kind: ScanKind,
+    /// Additional scan kinds to run alongside `scan_kind` (e.g. `-sS -sU` combines SYN + UDP).
+    pub extra_scan_kinds: Vec<ScanKind>,
     /// TCP flag byte from `--scanflags` (only with raw `-s*` TCP scans).
     pub tcp_scan_flags: Option<u8>,
     pub verbosity: u8,
@@ -175,6 +199,8 @@ pub struct ScanPlan {
     pub output_machine: Option<PathBuf>,
     /// Nmap `-oH` hex output (placeholder file when set).
     pub output_hex: Option<PathBuf>,
+    /// Packet-level evasion options.
+    pub evasion: EvasionOpts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,6 +224,25 @@ pub enum ScanKind {
 }
 
 impl ScanKind {
+    /// Human-readable flag name for error messages.
+    pub fn flag_name(self) -> &'static str {
+        match self {
+            ScanKind::TcpConnect => "-sT",
+            ScanKind::TcpSyn => "-sS",
+            ScanKind::TcpNull => "-sN",
+            ScanKind::TcpFin => "-sF",
+            ScanKind::TcpXmas => "-sX",
+            ScanKind::TcpAck => "-sA",
+            ScanKind::TcpWindow => "-sW",
+            ScanKind::TcpMaimon => "-sM",
+            ScanKind::Udp => "-sU",
+            ScanKind::IpProto => "-sO",
+            ScanKind::SctpInit => "-sY",
+            ScanKind::SctpCookieEcho => "-sZ",
+            ScanKind::Idle => "-sI",
+        }
+    }
+
     /// Raw half-open TCP scan (`-sS` / `-sN` / `-sF` / `-sX` / `-sA` / `-sW` / `-sM`), if applicable.
     pub fn tcp_port_raw_kind(self) -> Option<crate::syn::TcpPortScanKind> {
         match self {
@@ -287,21 +332,21 @@ impl ScanPlan {
             }
         }
 
-        // --- Scan kind ---
-        let mut scan_kind = ScanKind::TcpConnect;
-        if let Some(ch) = args.scan_type {
-            match ch {
-                'T' | 't' => scan_kind = ScanKind::TcpConnect,
-                'S' | 's' => scan_kind = ScanKind::TcpSyn,
-                'U' | 'u' => scan_kind = ScanKind::Udp,
-                'N' | 'n' => scan_kind = ScanKind::TcpNull,
-                'F' | 'f' => scan_kind = ScanKind::TcpFin,
-                'X' | 'x' => scan_kind = ScanKind::TcpXmas,
-                'A' | 'a' => scan_kind = ScanKind::TcpAck,
-                'W' | 'w' => scan_kind = ScanKind::TcpWindow,
-                'M' | 'm' => scan_kind = ScanKind::TcpMaimon,
-                'Y' | 'y' => scan_kind = ScanKind::SctpInit,
-                'Z' | 'z' => scan_kind = ScanKind::SctpCookieEcho,
+        // --- Scan kind(s) ---
+        let mut scan_kinds: Vec<ScanKind> = Vec::new();
+        for &ch in &args.scan_type {
+            let kind = match ch {
+                'T' | 't' => ScanKind::TcpConnect,
+                'S' | 's' => ScanKind::TcpSyn,
+                'U' | 'u' => ScanKind::Udp,
+                'N' | 'n' => ScanKind::TcpNull,
+                'F' | 'f' => ScanKind::TcpFin,
+                'X' | 'x' => ScanKind::TcpXmas,
+                'A' | 'a' => ScanKind::TcpAck,
+                'W' | 'w' => ScanKind::TcpWindow,
+                'M' | 'm' => ScanKind::TcpMaimon,
+                'Y' | 'y' => ScanKind::SctpInit,
+                'Z' | 'z' => ScanKind::SctpCookieEcho,
                 'O' | 'o' => {
                     bail!(
                         "IP protocol scan uses `-sO` / `--sO`, not `--scan-type O` (that flag selects TCP/UDP/SCTP/raw-TCP scan letters)"
@@ -313,11 +358,25 @@ impl ScanPlan {
                     );
                 }
                 _ => bail!("unknown --scan-type {ch}"),
+            };
+            if !scan_kinds.contains(&kind) {
+                scan_kinds.push(kind);
             }
         }
 
+        let mut scan_kind = if scan_kinds.is_empty() {
+            ScanKind::TcpConnect
+        } else {
+            scan_kinds[0]
+        };
+        let mut extra_scan_kinds: Vec<ScanKind> = if scan_kinds.len() > 1 {
+            scan_kinds[1..].to_vec()
+        } else {
+            Vec::new()
+        };
+
         if args.ip_proto_scan {
-            if args.scan_type.is_some() {
+            if !scan_kinds.is_empty() {
                 bail!("-sO (--sO) cannot be combined with --scan-type or other -sS/-sT/-sU scan flags");
             }
             scan_kind = ScanKind::IpProto;
@@ -325,7 +384,7 @@ impl ScanPlan {
 
         let mut idle_scan = None;
         if let Some(ref s) = args.idle_scan {
-            if args.scan_type.is_some() {
+            if !scan_kinds.is_empty() {
                 bail!("-sI idle scan cannot be combined with --scan-type");
             }
             if args.ip_proto_scan {
@@ -346,7 +405,9 @@ impl ScanPlan {
             if args.ip_proto_scan {
                 bail!("-b (FTP bounce) cannot be combined with -sO");
             }
-            if !matches!(scan_kind, ScanKind::TcpConnect) {
+            if scan_kinds.len() > 1
+                || (!scan_kinds.is_empty() && !matches!(scan_kind, ScanKind::TcpConnect))
+            {
                 bail!(
                     "FTP bounce (-b) only works with TCP connect (-sT); omit -sS/-sU and other scan types"
                 );
@@ -358,26 +419,60 @@ impl ScanPlan {
         if let Some(ref s) = args.scanflags {
             tcp_scan_flags = Some(crate::scanflags::parse_scanflags(s)?);
         }
-        if tcp_scan_flags.is_some() && scan_kind.tcp_port_raw_kind().is_none() {
+        let any_raw_tcp = scan_kind.tcp_port_raw_kind().is_some()
+            || extra_scan_kinds.iter().any(|k| k.tcp_port_raw_kind().is_some());
+        if tcp_scan_flags.is_some() && !any_raw_tcp {
             warn!(
                 "--scanflags requires a raw TCP scan type (-sS, -sN, -sF, -sX, -sM, -sA, -sW); ignoring"
             );
             tcp_scan_flags = None;
         }
 
-        if args.unprivileged {
-            if matches!(
-                scan_kind,
-                ScanKind::IpProto | ScanKind::Idle | ScanKind::SctpInit | ScanKind::SctpCookieEcho
-            ) {
-                bail!(
-                    "--unprivileged: this scan type requires raw sockets (omit or use TCP connect)"
-                );
+        // Auto-detect privilege level: if not explicitly --privileged and we lack
+        // root/sudo, treat as unprivileged (auto-fallback from SYN to connect).
+        let effectively_unprivileged = if args.unprivileged {
+            true
+        } else if args.privileged {
+            false
+        } else {
+            !is_privileged()
+        };
+
+        if effectively_unprivileged {
+            let all_kinds = std::iter::once(scan_kind).chain(extra_scan_kinds.iter().copied());
+            for k in all_kinds {
+                if matches!(
+                    k,
+                    ScanKind::IpProto
+                        | ScanKind::Idle
+                        | ScanKind::SctpInit
+                        | ScanKind::SctpCookieEcho
+                ) {
+                    if args.unprivileged {
+                        bail!(
+                            "--unprivileged: {} requires raw sockets (omit or use TCP connect)",
+                            k.flag_name()
+                        );
+                    } else {
+                        bail!(
+                            "{} requires raw sockets (run as root/sudo or use --privileged to force)",
+                            k.flag_name()
+                        );
+                    }
+                }
             }
             if scan_kind.tcp_port_raw_kind().is_some() {
-                warn!("--unprivileged: using TCP connect scan instead of raw half-open");
+                warn!("not privileged: falling back to TCP connect scan instead of raw half-open (use sudo or --privileged to force)");
                 scan_kind = ScanKind::TcpConnect;
             }
+            extra_scan_kinds.retain(|k| {
+                if k.tcp_port_raw_kind().is_some() {
+                    warn!("not privileged: dropping raw TCP scan type {} (use sudo or --privileged to force)", k.flag_name());
+                    false
+                } else {
+                    true
+                }
+            });
         }
 
         // --- Ports (skipped for host-discovery-only) ---
@@ -531,6 +626,66 @@ impl ScanPlan {
             version_intensity = 9;
         }
 
+        // --- Evasion options ---
+        let mut evasion = EvasionOpts::default();
+        evasion.source_port = args.source_port;
+        evasion.ttl = args.ttl;
+        evasion.badsum = args.badsum;
+        evasion.interface = args.interface.clone();
+
+        if let Some(ref d) = args.decoys {
+            for part in d.split(',') {
+                let part = part.trim();
+                if part.eq_ignore_ascii_case("ME") {
+                    continue; // placeholder for real source, handled during send
+                }
+                if part.eq_ignore_ascii_case("RND") {
+                    let mut rng = rand::thread_rng();
+                    let a = Ipv4Addr::new(
+                        rng.gen_range(1..=254),
+                        rng.gen_range(0..=255),
+                        rng.gen_range(0..=255),
+                        rng.gen_range(1..=254),
+                    );
+                    evasion.decoys.push(a);
+                    continue;
+                }
+                if let Ok(ip) = part.parse::<Ipv4Addr>() {
+                    evasion.decoys.push(ip);
+                } else {
+                    warn!("-D: skipping non-IPv4 decoy '{}'", part);
+                }
+            }
+        }
+
+        if let Some(ref s) = args.spoof_source {
+            match s.parse::<std::net::IpAddr>() {
+                Ok(ip) => evasion.spoof_source = Some(ip),
+                Err(_) => bail!("-S: invalid source address '{}'", s),
+            }
+        }
+
+        // Parse --data (hex), --data-string, --data-length into combined payload.
+        if let Some(ref hex) = args.data_hex {
+            evasion.data_payload = parse_hex_data(hex)?;
+        } else if let Some(ref s) = args.data_string {
+            evasion.data_payload = s.as_bytes().to_vec();
+        } else if let Some(n) = args.data_length {
+            evasion.data_payload = vec![0u8; n as usize];
+        }
+
+        if args.fragment {
+            evasion.fragment_mtu = args.mtu.unwrap_or(8);
+            if evasion.fragment_mtu % 8 != 0 {
+                bail!("--mtu must be a multiple of 8");
+            }
+        } else if let Some(mtu) = args.mtu {
+            evasion.fragment_mtu = mtu;
+            if evasion.fragment_mtu % 8 != 0 {
+                bail!("--mtu must be a multiple of 8");
+            }
+        }
+
         let plan = ScanPlan {
             ports,
             concurrency,
@@ -538,6 +693,7 @@ impl ScanPlan {
             connect_timeout,
             no_ping: args.no_ping,
             scan_kind,
+            extra_scan_kinds,
             tcp_scan_flags,
             verbosity: args.effective_verbosity(),
             debug: args.effective_debug(),
@@ -588,6 +744,7 @@ impl ScanPlan {
             servicedb: args.servicedb.clone(),
             output_machine,
             output_hex,
+            evasion,
         };
 
         for msg in &plan.unimplemented {
@@ -613,6 +770,42 @@ impl ScanPlan {
         }
 
         Ok(plan)
+    }
+}
+
+fn parse_hex_data(hex: &str) -> Result<Vec<u8>> {
+    let hex = hex.trim().strip_prefix("0x").unwrap_or(hex.trim());
+    if hex.len() % 2 != 0 {
+        bail!("--data: hex string must have even length");
+    }
+    let mut out = Vec::with_capacity(hex.len() / 2);
+    for chunk in hex.as_bytes().chunks(2) {
+        let hi = hex_nibble(chunk[0]).ok_or_else(|| anyhow!("--data: invalid hex char"))?;
+        let lo = hex_nibble(chunk[1]).ok_or_else(|| anyhow!("--data: invalid hex char"))?;
+        out.push((hi << 4) | lo);
+    }
+    Ok(out)
+}
+
+fn hex_nibble(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Check if we have elevated privileges (root on Unix, admin on Windows).
+fn is_privileged() -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::geteuid() == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        // On Windows, assume privileged (raw sockets require admin but detection is complex).
+        true
     }
 }
 
@@ -814,7 +1007,7 @@ mod rate_validation_tests {
         ];
         for (opt, ch, kind, raw) in cases {
             let args =
-                Args::try_parse_from(["nmaprs", opt, ch, "-p", "22", "127.0.0.1"]).expect("parse");
+                Args::try_parse_from(["nmaprs", "--privileged", opt, ch, "-p", "22", "127.0.0.1"]).expect("parse");
             let plan = ScanPlan::from_args(&args).expect("plan");
             assert_eq!(plan.scan_kind, kind, "{opt} {ch}");
             assert_eq!(plan.scan_kind.tcp_port_raw_kind(), Some(raw));
@@ -825,7 +1018,7 @@ mod rate_validation_tests {
     fn ip_proto_scan_defaults_all_protocols() {
         use super::ScanKind;
 
-        let args = Args::try_parse_from(["nmaprs", "--sO", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "--privileged", "--sO", "127.0.0.1"]).expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.scan_kind, ScanKind::IpProto);
         assert_eq!(plan.ports.len(), 256);
@@ -840,7 +1033,7 @@ mod rate_validation_tests {
     fn ip_proto_scan_fast_matches_embedded_nmap_protocols_list() {
         use super::ScanKind;
 
-        let args = Args::try_parse_from(["nmaprs", "--sO", "-F", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "--privileged", "--sO", "-F", "127.0.0.1"]).expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.scan_kind, ScanKind::IpProto);
         let mut got = plan.ports.clone();
@@ -882,7 +1075,7 @@ mod rate_validation_tests {
         use super::ScanKind;
 
         let args =
-            Args::try_parse_from(["nmaprs", "--sI", "192.0.2.1:443", "-p", "80", "10.0.0.1"])
+            Args::try_parse_from(["nmaprs", "--privileged", "--sI", "192.0.2.1:443", "-p", "80", "10.0.0.1"])
                 .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.scan_kind, ScanKind::Idle);
@@ -893,13 +1086,13 @@ mod rate_validation_tests {
     fn scan_type_sctp_y_and_z() {
         use super::ScanKind;
 
-        let y = Args::try_parse_from(["nmaprs", "--scan-type", "Y", "-p", "38412", "127.0.0.1"])
+        let y = Args::try_parse_from(["nmaprs", "--privileged", "--scan-type", "Y", "-p", "38412", "127.0.0.1"])
             .expect("parse");
         assert_eq!(
             ScanPlan::from_args(&y).expect("plan").scan_kind,
             ScanKind::SctpInit
         );
-        let z = Args::try_parse_from(["nmaprs", "--scan-type", "z", "-p", "38412", "127.0.0.1"])
+        let z = Args::try_parse_from(["nmaprs", "--privileged", "--scan-type", "z", "-p", "38412", "127.0.0.1"])
             .expect("parse");
         assert_eq!(
             ScanPlan::from_args(&z).expect("plan").scan_kind,
@@ -942,6 +1135,7 @@ mod rate_validation_tests {
         use super::ScanKind;
         let args = Args::try_parse_from([
             "nmaprs",
+            "--privileged",
             "--scan-type",
             "S",
             "--scanflags",

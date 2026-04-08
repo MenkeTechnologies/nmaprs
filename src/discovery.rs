@@ -688,6 +688,138 @@ async fn icmp_mask_discovery_merge(
     }
 }
 
+/// Determine which IPv4 targets are on local subnets (ARP-reachable) by comparing
+/// against local interface addresses.
+fn local_subnet_v4_hosts(hosts: &[IpAddr]) -> Vec<Ipv4Addr> {
+    let ifaces = match if_addrs::get_if_addrs() {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let mut locals: Vec<(Ipv4Addr, u32)> = Vec::new();
+    for iface in &ifaces {
+        if let if_addrs::IfAddr::V4(ref v4) = iface.addr {
+            let ip = v4.ip;
+            let mask = v4.netmask;
+            let mask_u32 = u32::from(mask);
+            locals.push((ip, mask_u32));
+        }
+    }
+    let mut out = Vec::new();
+    for h in hosts {
+        if let IpAddr::V4(target) = h {
+            let t = u32::from(*target);
+            for &(local_ip, mask) in &locals {
+                let l = u32::from(local_ip);
+                if (t & mask) == (l & mask) {
+                    out.push(*target);
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// ARP ping for local-subnet IPv4 hosts. Sends ARP requests and listens for replies.
+/// Returns set of hosts that replied within the timeout.
+#[cfg(unix)]
+fn arp_ping_hosts(targets: &[Ipv4Addr], timeout: Duration) -> HashSet<IpAddr> {
+    use pnet::datalink::{self, Channel};
+    use pnet::packet::arp::{ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket};
+    use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
+    use pnet::packet::Packet;
+    use pnet::util::MacAddr;
+
+    let mut alive = HashSet::new();
+    if targets.is_empty() {
+        return alive;
+    }
+
+    // Find the default interface.
+    let interfaces = datalink::interfaces();
+    let iface = match interfaces
+        .iter()
+        .find(|i| i.is_up() && !i.is_loopback() && i.ips.iter().any(|ip| ip.is_ipv4()))
+    {
+        Some(i) => i.clone(),
+        None => return alive,
+    };
+
+    let src_mac = match iface.mac {
+        Some(m) => m,
+        None => return alive,
+    };
+    let src_ip = match iface.ips.iter().find_map(|ip| match ip.ip() {
+        IpAddr::V4(a) => Some(a),
+        _ => None,
+    }) {
+        Some(ip) => ip,
+        None => return alive,
+    };
+
+    let (mut tx, mut rx) = match datalink::channel(&iface, Default::default()) {
+        Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
+        _ => return alive,
+    };
+
+    // Send ARP requests for all targets.
+    let target_set: HashSet<Ipv4Addr> = targets.iter().copied().collect();
+    for &target in targets {
+        let mut eth_buf = vec![0u8; 42]; // 14 (eth) + 28 (arp)
+        if let Some(mut eth) = MutableEthernetPacket::new(&mut eth_buf) {
+            eth.set_destination(MacAddr::broadcast());
+            eth.set_source(src_mac);
+            eth.set_ethertype(EtherTypes::Arp);
+
+            let mut arp_buf = vec![0u8; 28];
+            if let Some(mut arp) = MutableArpPacket::new(&mut arp_buf) {
+                arp.set_hardware_type(ArpHardwareTypes::Ethernet);
+                arp.set_protocol_type(EtherTypes::Ipv4);
+                arp.set_hw_addr_len(6);
+                arp.set_proto_addr_len(4);
+                arp.set_operation(ArpOperations::Request);
+                arp.set_sender_hw_addr(src_mac);
+                arp.set_sender_proto_addr(src_ip);
+                arp.set_target_hw_addr(MacAddr::zero());
+                arp.set_target_proto_addr(target);
+                eth.set_payload(arp.packet());
+            }
+            let _ = tx.send_to(eth.packet(), None);
+        }
+    }
+
+    // Listen for ARP replies.
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        match rx.next() {
+            Ok(frame) => {
+                if let Some(eth) = pnet::packet::ethernet::EthernetPacket::new(frame) {
+                    if eth.get_ethertype() == EtherTypes::Arp {
+                        if let Some(arp) = ArpPacket::new(eth.payload()) {
+                            if arp.get_operation() == ArpOperations::Reply {
+                                let sender = arp.get_sender_proto_addr();
+                                if target_set.contains(&sender) {
+                                    alive.insert(IpAddr::V4(sender));
+                                    if alive.len() == target_set.len() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    alive
+}
+
+#[cfg(not(unix))]
+fn arp_ping_hosts(_targets: &[Ipv4Addr], _timeout: Duration) -> HashSet<IpAddr> {
+    HashSet::new()
+}
+
 /// Filter `hosts` to targets that respond to at least one discovery probe.
 pub async fn hosts_after_discovery(
     hosts: Vec<IpAddr>,
@@ -736,6 +868,21 @@ pub async fn hosts_after_discovery(
     }
 
     let mut alive: HashSet<IpAddr> = HashSet::new();
+
+    // ARP discovery for local-subnet IPv4 hosts (nmap default behavior, skip with --disable-arp-ping).
+    if !args.disable_arp_ping {
+        let local_v4 = local_subnet_v4_hosts(&hosts);
+        if !local_v4.is_empty() {
+            let arp_alive = tokio::task::spawn_blocking({
+                let local_v4 = local_v4.clone();
+                let ct = connect_timeout;
+                move || arp_ping_hosts(&local_v4, ct.min(Duration::from_secs(2)))
+            })
+            .await
+            .unwrap_or_default();
+            alive.extend(arp_alive);
+        }
+    }
 
     let use_default = !(explicit && implemented);
 

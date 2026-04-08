@@ -57,6 +57,10 @@ impl OutputSet {
     ) -> Result<()> {
         if let Some(f) = &mut self.xml {
             writeln!(f, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
+            writeln!(
+                f,
+                r#"<!DOCTYPE nmaprun>"#
+            )?;
             if !no_stylesheet {
                 if let Some(s) = stylesheet {
                     writeln!(
@@ -71,14 +75,50 @@ impl OutputSet {
                     )?;
                 }
             }
-            writeln!(f, r#"<nmaprs><cmdline>{}</cmdline>"#, xml_escape(cmdline))?;
+            let now = chrono_timestamp();
+            writeln!(
+                f,
+                r#"<nmaprun scanner="nmaprs" args="{}" start="{}" startstr="{}" version="0.1.0" xmloutputversion="1.05">"#,
+                xml_escape(cmdline),
+                now.0,
+                xml_escape(&now.1)
+            )?;
+            writeln!(f, r#"<verbose level="0"/>"#)?;
+            writeln!(f, r#"<debugging level="0"/>"#)?;
         }
         Ok(())
     }
 
-    pub fn write_footer(&mut self) -> Result<()> {
+    pub fn write_scaninfo(&mut self, scan_type: &str, protocol: &str, num_services: usize) -> Result<()> {
         if let Some(f) = &mut self.xml {
-            writeln!(f, "</nmaprs>")?;
+            writeln!(
+                f,
+                r#"<scaninfo type="{}" protocol="{}" numservices="{}"/>"#,
+                xml_escape(scan_type),
+                xml_escape(protocol),
+                num_services
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn write_footer(&mut self, hosts_up: usize, hosts_down: usize, hosts_total: usize) -> Result<()> {
+        if let Some(f) = &mut self.xml {
+            let now = chrono_timestamp();
+            writeln!(f, r#"<runstats><finished time="{}" timestr="{}" summary="nmaprs done: {} IP address{} ({} host{} up)" exit="success"/>"#,
+                now.0,
+                xml_escape(&now.1),
+                hosts_total,
+                if hosts_total == 1 { "" } else { "es" },
+                hosts_up,
+                if hosts_up == 1 { "" } else { "s" },
+            )?;
+            writeln!(
+                f,
+                r#"<hosts up="{}" down="{}" total="{}"/>"#,
+                hosts_up, hosts_down, hosts_total
+            )?;
+            writeln!(f, "</runstats></nmaprun>")?;
         }
         Ok(())
     }
@@ -89,6 +129,52 @@ fn xml_escape(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('\"', "&quot;")
+}
+
+/// Returns (unix_timestamp, human_readable_string).
+fn chrono_timestamp() -> (u64, String) {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = dur.as_secs();
+    // Format a simple UTC timestamp without pulling in chrono crate.
+    // Days since epoch → date; seconds of day → HH:MM:SS.
+    let days = secs / 86400;
+    let rem = secs % 86400;
+    let h = rem / 3600;
+    let m = (rem % 3600) / 60;
+    let s = rem % 60;
+    // Compute year/month/day from days since 1970-01-01 (civil calendar algorithm).
+    let (y, mo, d) = days_to_ymd(days);
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let month_name = months.get(mo as usize).unwrap_or(&"???");
+    let weekdays = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    let dow = weekdays[(days % 7) as usize];
+    (
+        secs,
+        format!(
+            "{} {} {:2} {:02}:{:02}:{:02} {}",
+            dow, month_name, d, h, m, s, y
+        ),
+    )
+}
+
+fn days_to_ymd(days: u64) -> (i64, u32, u32) {
+    // Algorithm from Howard Hinnant's chrono-compatible date library.
+    let z = days as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m as u32 - 1, d as u32) // m-1 for 0-indexed month
 }
 
 /// Single port line as printed / written to `-oN` (tab-separated).
@@ -198,10 +284,11 @@ pub fn write_sn_host_files(
     }
     if let Some(xf) = xml.as_mut() {
         let ty = if host.is_ipv4() { "ipv4" } else { "ipv6" };
-        writeln!(
-            xf,
-            r#"  <host><status state="up"/><address addr="{host}" addrtype="{ty}"/></host>"#
-        )?;
+        writeln!(xf, r#"<host>"#)?;
+        writeln!(xf, r#"<status state="up" reason="echo-reply" reason_ttl="0"/>"#)?;
+        writeln!(xf, r#"<address addr="{host}" addrtype="{ty}"/>"#)?;
+        writeln!(xf, r#"<hostnames/>"#)?;
+        writeln!(xf, r#"</host>"#)?;
     }
     if let Some(line) = os_guess_line {
         if let Some(f) = normal.as_mut() {
@@ -233,17 +320,61 @@ pub fn write_grep(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> 
     Ok(())
 }
 
-pub fn write_xml_host(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> {
+pub fn write_xml_host(f: &mut File, host: IpAddr, lines: &[PortLine], os_info: Option<&str>) -> Result<()> {
     let ty = if host.is_ipv4() { "ipv4" } else { "ipv6" };
-    writeln!(f, r#"  <host><address addr="{}" addrtype="{}"/>"#, host, ty)?;
-    writeln!(f, "    <ports>")?;
-    for l in lines {
-        writeln!(
-            f,
-            r#"      <port protocol="{}" portid="{}"><state state="{}"/></port>"#,
-            l.proto, l.port, l.state
-        )?;
+    writeln!(f, r#"<host starttime="0" endtime="0">"#)?;
+    writeln!(f, r#"<status state="up" reason="user-set" reason_ttl="0"/>"#)?;
+    writeln!(f, r#"<address addr="{}" addrtype="{}"/>"#, host, ty)?;
+    writeln!(f, r#"<hostnames/>"#)?;
+
+    // Compute extraports (most common non-shown state).
+    let closed_count = lines.iter().filter(|l| l.state == "closed").count();
+    let filtered_count = lines.iter().filter(|l| l.state == "filtered").count();
+
+    writeln!(f, "<ports>")?;
+
+    // extraports: summarize closed/filtered ports
+    if closed_count > 0 {
+        writeln!(f, r#"<extraports state="closed" count="{}"/>"#, closed_count)?;
     }
-    writeln!(f, "    </ports></host>")?;
+    if filtered_count > 0 {
+        writeln!(f, r#"<extraports state="filtered" count="{}"/>"#, filtered_count)?;
+    }
+
+    for l in lines {
+        write!(
+            f,
+            r#"<port protocol="{}" portid="{}"><state state="{}" reason="{}" reason_ttl="0"/>"#,
+            l.proto, l.port, l.state, reason_str(l)
+        )?;
+        if let Some(ref v) = l.version_info {
+            // Parse version_info into product/version if possible.
+            let (product, version) = split_version_info(v);
+            write!(
+                f,
+                r#"<service name="{}" product="{}" version="{}"/>"#,
+                xml_escape(&l.proto),
+                xml_escape(product),
+                xml_escape(version)
+            )?;
+        }
+        writeln!(f, "</port>")?;
+    }
+    writeln!(f, "</ports>")?;
+
+    if let Some(os) = os_info {
+        writeln!(f, r#"<os><osmatch name="{}" accuracy="0"/></os>"#, xml_escape(os))?;
+    }
+
+    writeln!(f, "</host>")?;
     Ok(())
+}
+
+fn split_version_info(v: &str) -> (&str, &str) {
+    // Version info format: "product version (info) [os] {device} cpe:/..."
+    // Simple split on first space for product vs version.
+    match v.split_once(' ') {
+        Some((p, rest)) => (p, rest),
+        None => (v, ""),
+    }
 }

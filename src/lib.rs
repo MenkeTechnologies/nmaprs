@@ -336,6 +336,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 .effective_probe_concurrency()
                 .clamp(1, crate::syn::MAX_SYN_PARALLEL_SHARDS);
             let tcp_scan_flags = plan.tcp_scan_flags;
+            let evasion_opts = Arc::new(plan.evasion.clone());
 
             let v4_fut = async {
                 if work_v4.is_empty() {
@@ -343,6 +344,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                 }
                 let pacer = syn_pacer.clone();
                 let host_start = syn_host_start.clone();
+                let evasion = evasion_opts.clone();
                 match tokio::task::spawn_blocking(move || {
                     crate::syn::parallel_tcp_port_scan_ipv4(
                         kind,
@@ -356,6 +358,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                         syn_max_scan_delay,
                         syn_connect_retries,
                         syn_shard_cap,
+                        evasion,
                     )
                 })
                 .await
@@ -746,7 +749,9 @@ pub async fn run(args: Args) -> Result<i32> {
                 writeln!(mf, "Host: {} ()\tStatus: Up", o.host)?;
             }
         }
-        outs.write_footer()?;
+        let up_count = ping_out.iter().filter(|o| o.up).count();
+        let total = hosts.len();
+        outs.write_footer(up_count, total - up_count, total)?;
         if plan.traceroute {
             crate::trace::run_traceroute(&hosts, plan.effective_probe_concurrency()).await?;
         }
@@ -769,49 +774,69 @@ pub async fn run(args: Args) -> Result<i32> {
 
     let mut lines: Vec<PortLine> = Vec::new();
 
-    if plan.scan_kind == ScanKind::Udp {
-        let has_v4 = hosts.iter().any(|h| h.is_ipv4());
-        let has_v6 = hosts.iter().any(|h| h.is_ipv6());
-        let mut icmp_session: Option<(
-            UdpIcmpNotes,
-            Arc<AtomicBool>,
-            Vec<std::thread::JoinHandle<()>>,
-        )> = None;
+    // Collect all scan kinds to run (primary + extras for combined e.g. -sS -sU).
+    let all_scan_kinds = {
+        let mut v = vec![plan.scan_kind];
+        v.extend(plan.extra_scan_kinds.iter().copied());
+        v
+    };
 
-        for batch_hosts in host_batches(&hosts, &plan) {
-            let mut work = build_work(&batch_hosts, &plan.ports);
-            if let Some(ref st) = resume_st {
-                work.retain(|(h, p)| !st.is_done(*h, *p));
-            }
-            if work.is_empty() {
-                continue;
-            }
-            if icmp_session.is_none() && (has_v4 || has_v6) {
-                let notes: UdpIcmpNotes = Arc::new(DashMap::new());
-                let stop = Arc::new(AtomicBool::new(false));
-                let handles = spawn_udp_icmp_listeners(has_v4, has_v6, notes.clone(), stop.clone());
-                icmp_session = Some((notes, stop, handles));
-            }
-            let icmp_notes = icmp_session.as_ref().map(|(n, _, _)| n.clone());
-            lines.extend(udp_scan(work, plan.clone(), icmp_notes).await);
-        }
+    for current_kind in &all_scan_kinds {
+        // Build a temporary plan with this scan kind as primary.
+        let kind_plan = if *current_kind != plan.scan_kind {
+            let mut p = (*plan).clone();
+            p.scan_kind = *current_kind;
+            p.extra_scan_kinds.clear();
+            Arc::new(p)
+        } else {
+            plan.clone()
+        };
 
-        if let Some((_, stop, handles)) = icmp_session {
-            stop.store(true, Ordering::SeqCst);
-            for h in handles {
-                let _ = h.join();
+        if *current_kind == ScanKind::Udp {
+            let has_v4 = hosts.iter().any(|h| h.is_ipv4());
+            let has_v6 = hosts.iter().any(|h| h.is_ipv6());
+            let mut icmp_session: Option<(
+                UdpIcmpNotes,
+                Arc<AtomicBool>,
+                Vec<std::thread::JoinHandle<()>>,
+            )> = None;
+
+            for batch_hosts in host_batches(&hosts, &kind_plan) {
+                let mut work = build_work(&batch_hosts, &kind_plan.ports);
+                if let Some(ref st) = resume_st {
+                    work.retain(|(h, p)| !st.is_done(*h, *p));
+                }
+                if work.is_empty() {
+                    continue;
+                }
+                if icmp_session.is_none() && (has_v4 || has_v6) {
+                    let notes: UdpIcmpNotes = Arc::new(DashMap::new());
+                    let stop = Arc::new(AtomicBool::new(false));
+                    let handles =
+                        spawn_udp_icmp_listeners(has_v4, has_v6, notes.clone(), stop.clone());
+                    icmp_session = Some((notes, stop, handles));
+                }
+                let icmp_notes = icmp_session.as_ref().map(|(n, _, _)| n.clone());
+                lines.extend(udp_scan(work, kind_plan.clone(), icmp_notes).await);
             }
-        }
-    } else {
-        for batch_hosts in host_batches(&hosts, &plan) {
-            let mut work = build_work(&batch_hosts, &plan.ports);
-            if let Some(ref st) = resume_st {
-                work.retain(|(h, p)| !st.is_done(*h, *p));
+
+            if let Some((_, stop, handles)) = icmp_session {
+                stop.store(true, Ordering::SeqCst);
+                for h in handles {
+                    let _ = h.join();
+                }
             }
-            if work.is_empty() {
-                continue;
+        } else {
+            for batch_hosts in host_batches(&hosts, &kind_plan) {
+                let mut work = build_work(&batch_hosts, &kind_plan.ports);
+                if let Some(ref st) = resume_st {
+                    work.retain(|(h, p)| !st.is_done(*h, *p));
+                }
+                if work.is_empty() {
+                    continue;
+                }
+                lines.extend(port_scan(work, kind_plan.clone()).await?);
             }
-            lines.extend(port_scan(work, plan.clone()).await?);
         }
     }
 
@@ -929,6 +954,26 @@ pub async fn run(args: Args) -> Result<i32> {
         )?;
     }
 
+    // Write scaninfo for each scan kind.
+    for kind in &all_scan_kinds {
+        let (scan_type, protocol) = match kind {
+            ScanKind::TcpConnect => ("connect", "tcp"),
+            ScanKind::TcpSyn => ("syn", "tcp"),
+            ScanKind::TcpNull => ("null", "tcp"),
+            ScanKind::TcpFin => ("fin", "tcp"),
+            ScanKind::TcpXmas => ("xmas", "tcp"),
+            ScanKind::TcpAck => ("ack", "tcp"),
+            ScanKind::TcpWindow => ("window", "tcp"),
+            ScanKind::TcpMaimon => ("maimon", "tcp"),
+            ScanKind::Udp => ("udp", "udp"),
+            ScanKind::IpProto => ("ipproto", "ip"),
+            ScanKind::SctpInit => ("sctpinit", "sctp"),
+            ScanKind::SctpCookieEcho => ("sctpcookieecho", "sctp"),
+            ScanKind::Idle => ("idle", "tcp"),
+        };
+        outs.write_scaninfo(scan_type, protocol, plan.ports.len())?;
+    }
+
     let ex_cap = (plan.max_os_tries as usize).min(10);
     for host in &hosts {
         let hl = by_host.get(host).cloned().unwrap_or_default();
@@ -948,11 +993,12 @@ pub async fn run(args: Args) -> Result<i32> {
             crate::output::write_grep(f, *host, &hl)?;
         }
         if let Some(f) = &mut outs.xml {
-            crate::output::write_xml_host(f, *host, &hl)?;
+            crate::output::write_xml_host(f, *host, &hl, None)?;
         }
     }
 
-    outs.write_footer()?;
+    let hosts_total = hosts.len();
+    outs.write_footer(hosts_total, 0, hosts_total)?;
 
     if plan.os_detect_requested && !plan.ping_only {
         let any_open_tcp = lines.iter().any(|l| l.proto == "tcp" && l.state == "open");

@@ -91,7 +91,7 @@ pub struct Args {
 
     // --- Scan techniques ---
     #[arg(long = "scan-type", value_name = "CHAR")]
-    pub scan_type: Option<char>,
+    pub scan_type: Vec<char>,
 
     #[arg(long = "scanflags", value_name = "FLAGS")]
     pub scanflags: Option<String>,

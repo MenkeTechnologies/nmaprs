@@ -23,6 +23,7 @@ use pnet::transport::{
 use pnet_sys;
 use rand::Rng;
 
+use crate::config::EvasionOpts;
 use crate::ipv6_l4;
 use crate::scan::{
     host_over_deadline, sleep_inter_probe_delay_sync, PortLine, PortReason, ProbeRatePacer,
@@ -258,6 +259,7 @@ fn tcp_ipv4_one_round(
     max_scan_delay: Option<Duration>,
     apply_probe_delays: bool,
     global_results: Arc<Mutex<Vec<Option<SynOutcome>>>>,
+    evasion: &EvasionOpts,
 ) -> io::Result<()> {
     if subset.is_empty() {
         return Ok(());
@@ -332,9 +334,63 @@ fn tcp_ipv4_one_round(
         Ok(())
     });
 
-    let tcp_len = MutableTcpPacket::minimum_packet_size();
+    // Use spoofed source if provided.
+    let effective_src = match evasion.spoof_source {
+        Some(IpAddr::V4(a)) => a,
+        _ => src_ip,
+    };
+
+    let tcp_hdr_len = MutableTcpPacket::minimum_packet_size();
+    let data_len = evasion.data_payload.len();
+    let tcp_len = tcp_hdr_len + data_len;
     let mut pkt_buf = vec![0u8; tcp_len];
     let mut ge_max = Instant::now();
+
+    // Helper: send a TCP probe from a specific source IP (used for decoys too).
+    let send_tcp_probe = |tx: &mut pnet::transport::TransportSender,
+                          pkt_buf: &mut [u8],
+                          from_ip: Ipv4Addr,
+                          sport: u16,
+                          dst_ip: Ipv4Addr,
+                          port: u16,
+                          seq: u32,
+                          ack_num: u32,
+                          flags: u8|
+     -> io::Result<()> {
+        // Write data payload into buffer region after TCP header.
+        if !evasion.data_payload.is_empty() && pkt_buf.len() >= tcp_hdr_len + data_len {
+            pkt_buf[tcp_hdr_len..tcp_hdr_len + data_len]
+                .copy_from_slice(&evasion.data_payload);
+        }
+        let mut tcp = MutableTcpPacket::new(pkt_buf).expect("tcp buffer");
+        tcp.set_source(sport);
+        tcp.set_destination(port);
+        tcp.set_sequence(seq);
+        tcp.set_acknowledgement(ack_num);
+        let data_offset = if data_len > 0 {
+            // data_offset is in 32-bit words: header is 20 bytes (5 words)
+            5
+        } else {
+            5
+        };
+        tcp.set_data_offset(data_offset);
+        tcp.set_reserved(0);
+        tcp.set_flags(flags);
+        tcp.set_window(64240);
+        tcp.set_checksum(0);
+        tcp.set_urgent_ptr(0);
+        let cks = if evasion.badsum {
+            // Intentionally bad checksum: compute correct then flip a bit.
+            let good = ipv4_checksum(&tcp.to_immutable(), &from_ip, &dst_ip);
+            good.wrapping_add(1)
+        } else {
+            ipv4_checksum(&tcp.to_immutable(), &from_ip, &dst_ip)
+        };
+        tcp.set_checksum(cks);
+        tx.send_to(tcp.to_immutable(), IpAddr::V4(dst_ip))?;
+        Ok(())
+    };
+
     for &(gidx, dst_ip, port) in subset {
         if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
             let ip = IpAddr::V4(dst_ip);
@@ -349,15 +405,20 @@ fn tcp_ipv4_one_round(
                 p.wait_turn_sync();
             }
         }
-        let sport = loop {
-            let s: u16 = rng.gen_range(32768..65535);
-            let k = SynKeyV4 {
-                dst: dst_ip,
-                dport: port,
-                sport: s,
-            };
-            if !pending.contains_key(&k) {
-                break s;
+        // Use fixed source port or pick random.
+        let sport = if let Some(sp) = evasion.source_port {
+            sp
+        } else {
+            loop {
+                let s: u16 = rng.gen_range(32768..65535);
+                let k = SynKeyV4 {
+                    dst: dst_ip,
+                    dport: port,
+                    sport: s,
+                };
+                if !pending.contains_key(&k) {
+                    break s;
+                }
             }
         };
         let (seq, ack_num, flags) = tcp_probe_fields(probe_kind, send_flags_override, &mut rng);
@@ -371,23 +432,40 @@ fn tcp_ipv4_one_round(
             },
             (deadline, gidx),
         );
-        {
-            let buf = &mut pkt_buf[..];
-            let mut tcp = MutableTcpPacket::new(buf).expect("tcp buffer");
-            tcp.set_source(sport);
-            tcp.set_destination(port);
-            tcp.set_sequence(seq);
-            tcp.set_acknowledgement(ack_num);
-            tcp.set_data_offset(5);
-            tcp.set_reserved(0);
-            tcp.set_flags(flags);
-            tcp.set_window(64240);
-            tcp.set_checksum(0);
-            tcp.set_urgent_ptr(0);
-            let cks = ipv4_checksum(&tcp.to_immutable(), &src_ip, &dst_ip);
-            tcp.set_checksum(cks);
-            tx.send_to(tcp.to_immutable(), IpAddr::V4(dst_ip))?;
+
+        // Send decoy probes before real probe (random seq/ack for decoys).
+        for &decoy_ip in &evasion.decoys {
+            let d_seq = rng.gen::<u32>();
+            let d_ack = if flags & TcpFlags::ACK != 0 {
+                rng.gen::<u32>() | 1
+            } else {
+                0u32
+            };
+            let _ = send_tcp_probe(
+                &mut tx,
+                &mut pkt_buf,
+                decoy_ip,
+                sport,
+                dst_ip,
+                port,
+                d_seq,
+                d_ack,
+                flags,
+            );
         }
+
+        // Send real probe.
+        send_tcp_probe(
+            &mut tx,
+            &mut pkt_buf,
+            effective_src,
+            sport,
+            dst_ip,
+            port,
+            seq,
+            ack_num,
+            flags,
+        )?;
     }
 
     *global_end.lock().expect("global_end") = Some(ge_max);
@@ -412,6 +490,7 @@ fn tcp_scan_ipv4_with_kind(
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
     connect_retries: u32,
+    evasion: Arc<EvasionOpts>,
 ) -> io::Result<Vec<PortLine>> {
     let total = order.len();
     if total == 0 {
@@ -451,6 +530,7 @@ fn tcp_scan_ipv4_with_kind(
             max_scan_delay,
             pass == 0,
             Arc::clone(&global_results),
+            &evasion,
         )?;
     }
 
@@ -481,6 +561,7 @@ pub fn tcp_port_scan_ipv4(
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
     connect_retries: u32,
+    evasion: Arc<EvasionOpts>,
 ) -> io::Result<Vec<PortLine>> {
     tcp_scan_ipv4_with_kind(
         order,
@@ -493,6 +574,7 @@ pub fn tcp_port_scan_ipv4(
         scan_delay,
         max_scan_delay,
         connect_retries,
+        evasion,
     )
 }
 
@@ -519,6 +601,7 @@ pub fn syn_scan_ipv4(
         scan_delay,
         max_scan_delay,
         connect_retries,
+        Arc::new(EvasionOpts::default()),
     )
 }
 
@@ -545,6 +628,7 @@ pub fn ack_ping_scan_ipv4(
         scan_delay,
         max_scan_delay,
         connect_retries,
+        Arc::new(EvasionOpts::default()),
     )
 }
 
@@ -871,6 +955,7 @@ pub fn parallel_tcp_port_scan_ipv4(
     max_scan_delay: Option<Duration>,
     connect_retries: u32,
     max_shards: usize,
+    evasion: Arc<EvasionOpts>,
 ) -> io::Result<Vec<PortLine>> {
     let total = order.len();
     if total == 0 {
@@ -889,6 +974,7 @@ pub fn parallel_tcp_port_scan_ipv4(
             scan_delay,
             max_scan_delay,
             connect_retries,
+            evasion,
         );
     }
     let chunks = split_into_syn_chunks(order, shards);
@@ -899,6 +985,7 @@ pub fn parallel_tcp_port_scan_ipv4(
         for chunk in chunks {
             let pacer = pacer.clone();
             let host_start = host_start.clone();
+            let evasion = evasion.clone();
             handles.push(s.spawn(move || {
                 tcp_port_scan_ipv4(
                     kind,
@@ -911,6 +998,7 @@ pub fn parallel_tcp_port_scan_ipv4(
                     scan_delay,
                     max_scan_delay,
                     connect_retries,
+                    evasion,
                 )
             }));
         }
@@ -957,6 +1045,7 @@ pub fn parallel_syn_scan_ipv4(
         max_scan_delay,
         connect_retries,
         max_shards,
+        Arc::new(EvasionOpts::default()),
     )
 }
 

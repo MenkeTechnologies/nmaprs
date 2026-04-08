@@ -101,6 +101,10 @@ pub fn parse_port_spec(spec: &str) -> Result<Vec<u16>, PortParseError> {
     if spec.is_empty() {
         return Err(PortParseError::Empty);
     }
+    // nmap `-p -` shorthand for all 65536 ports (0-65535)
+    if spec == "-" {
+        return Ok((0u16..=65535).collect());
+    }
     let mut out: Vec<u16> = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

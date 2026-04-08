@@ -28,6 +28,14 @@ pub struct ServiceMatch {
     pub regex: Regex,
     pub product_tpl: Option<String>,
     pub version_tpl: Option<String>,
+    /// `i/` — extra info (e.g. "protocol 2.0").
+    pub info_tpl: Option<String>,
+    /// `o/` — operating system.
+    pub os_tpl: Option<String>,
+    /// `d/` — device type.
+    pub device_tpl: Option<String>,
+    /// `cpe:/` — Common Platform Enumeration URI(s).
+    pub cpe_tpl: Vec<String>,
     /// `softmatch` — does not stop the probe sequence; used only if no hard match is found.
     pub soft: bool,
 }
@@ -361,12 +369,17 @@ fn parse_match_line(line: &str) -> Result<Option<ServiceMatch>> {
         Err(_) => return Ok(None),
     };
 
-    let (product_tpl, version_tpl) = extract_p_v_templates(tail);
+    let (product_tpl, version_tpl, info_tpl, os_tpl, device_tpl, cpe_tpl) =
+        extract_p_v_templates(tail);
     Ok(Some(ServiceMatch {
         service_name: service_token.to_string(),
         regex,
         product_tpl,
         version_tpl,
+        info_tpl,
+        os_tpl,
+        device_tpl,
+        cpe_tpl,
         soft,
     }))
 }
@@ -407,10 +420,36 @@ fn extract_m_delimited(rest: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn extract_p_v_templates(tail: &str) -> (Option<String>, Option<String>) {
+fn extract_p_v_templates(
+    tail: &str,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+) {
     let p = find_slash_field(tail, "p/");
     let v = find_slash_field(tail, "v/");
-    (p, v)
+    let i = find_slash_field(tail, "i/");
+    let o = find_slash_field(tail, "o/");
+    let d = find_slash_field(tail, "d/");
+    let cpe = find_all_slash_fields(tail, "cpe:/");
+    (p, v, i, o, d, cpe)
+}
+
+fn find_all_slash_fields(s: &str, needle: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut search = s;
+    while let Some(idx) = search.find(needle) {
+        let rest = &search[idx + needle.len()..];
+        if let Some(end) = rest.find('/') {
+            out.push(format!("cpe:/{}", &rest[..end]));
+        }
+        search = &search[idx + needle.len()..];
+    }
+    out
 }
 
 fn find_slash_field(s: &str, needle: &str) -> Option<String> {
@@ -466,13 +505,60 @@ fn format_match(m: &ServiceMatch, caps: &Captures) -> String {
         .as_ref()
         .map(|t| apply_template(t, caps))
         .unwrap_or_default();
+    let info = m
+        .info_tpl
+        .as_ref()
+        .map(|t| apply_template(t, caps))
+        .unwrap_or_default();
+    let os = m
+        .os_tpl
+        .as_ref()
+        .map(|t| apply_template(t, caps))
+        .unwrap_or_default();
+    let device = m
+        .device_tpl
+        .as_ref()
+        .map(|t| apply_template(t, caps))
+        .unwrap_or_default();
+    let cpe_strs: Vec<String> = m
+        .cpe_tpl
+        .iter()
+        .map(|t| apply_template(t, caps))
+        .collect();
+
     let prod = prod.trim();
     let ver = ver.trim();
-    match (prod.is_empty(), ver.is_empty()) {
-        (false, false) => format!("{} {}", prod, ver),
-        (false, true) => prod.to_string(),
-        (true, false) => ver.to_string(),
-        (true, true) => m.service_name.clone(),
+    let info = info.trim();
+    let os = os.trim();
+    let device = device.trim();
+
+    let mut parts = Vec::new();
+    if !prod.is_empty() {
+        parts.push(prod.to_string());
+    }
+    if !ver.is_empty() {
+        parts.push(ver.to_string());
+    }
+    if !info.is_empty() {
+        parts.push(format!("({})", info));
+    }
+    if !os.is_empty() {
+        parts.push(format!("[{}]", os));
+    }
+    if !device.is_empty() {
+        parts.push(format!("{{{}}}", device));
+    }
+    for c in &cpe_strs {
+        let c = c.trim();
+        if !c.is_empty() {
+            parts.push(c.to_string());
+        }
+    }
+
+    if parts.is_empty() {
+        m.service_name.clone()
+    } else {
+        parts.join(" ")
     }
 }
 
