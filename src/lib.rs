@@ -208,7 +208,6 @@ pub async fn run(args: Args) -> Result<i32> {
             }
         }
         ScanKind::TcpSyn => {
-            let mut collected = Vec::new();
             let v4: Vec<Ipv4Addr> = hosts
                 .iter()
                 .filter_map(|h| match h {
@@ -223,45 +222,57 @@ pub async fn run(args: Args) -> Result<i32> {
                     _ => None,
                 })
                 .collect();
+            let v4_hosts: Vec<IpAddr> = hosts.iter().filter(|h| h.is_ipv4()).copied().collect();
             let v6_hosts: Vec<IpAddr> = hosts.iter().filter(|h| h.is_ipv6()).copied().collect();
-            if !v4.is_empty() {
-                let ports = plan.ports.clone();
-                let to = plan.connect_timeout;
-                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv4(v4, &ports, to))
+
+            let ports_v4 = plan.ports.clone();
+            let ports_v6 = plan.ports.clone();
+            let to = plan.connect_timeout;
+
+            let v4_fut = async {
+                if v4.is_empty() {
+                    return Ok(Ok(vec![]));
+                }
+                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv4(v4, &ports_v4, to))
                     .await
                 {
-                    Ok(Ok(mut s)) => collected.append(&mut s),
-                    Ok(Err(e)) => {
-                        warn!("SYN scan failed ({e}); falling back to TCP connect for IPv4");
-                        let w: Vec<_> = build_work(
-                            &hosts
-                                .iter()
-                                .copied()
-                                .filter(|h| h.is_ipv4())
-                                .collect::<Vec<_>>(),
-                            &plan.ports,
-                        );
-                        collected.extend(tcp_connect_scan(w, plan.clone()).await);
-                    }
-                    Err(e) => bail!("SYN join: {e}"),
+                    Ok(r) => Ok(r),
+                    Err(e) => Err(anyhow!("SYN join v4: {e}")),
                 }
-            }
-            if !v6.is_empty() {
-                let ports = plan.ports.clone();
-                let to = plan.connect_timeout;
-                let plan_clone = plan.clone();
-                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv6(v6, &ports, to))
+            };
+            let v6_fut = async {
+                if v6.is_empty() {
+                    return Ok(Ok(vec![]));
+                }
+                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv6(v6, &ports_v6, to))
                     .await
                 {
-                    Ok(Ok(mut s)) => collected.append(&mut s),
-                    Ok(Err(e)) => {
-                        warn!("IPv6 SYN scan failed ({e}); falling back to TCP connect for IPv6");
-                        let w = build_work(&v6_hosts, &plan.ports);
-                        collected.extend(tcp_connect_scan(w, plan_clone).await);
-                    }
-                    Err(e) => bail!("IPv6 SYN join: {e}"),
+                    Ok(r) => Ok(r),
+                    Err(e) => Err(anyhow!("SYN join v6: {e}")),
+                }
+            };
+
+            let (v4_out, v6_out) = tokio::join!(v4_fut, v6_fut);
+
+            let mut collected = Vec::new();
+
+            match v4_out? {
+                Ok(mut lines) => collected.append(&mut lines),
+                Err(e) => {
+                    warn!("SYN scan failed ({e}); falling back to TCP connect for IPv4");
+                    let w = build_work(&v4_hosts, &plan.ports);
+                    collected.extend(tcp_connect_scan(w, plan.clone()).await);
                 }
             }
+            match v6_out? {
+                Ok(mut lines) => collected.append(&mut lines),
+                Err(e) => {
+                    warn!("IPv6 SYN scan failed ({e}); falling back to TCP connect for IPv6");
+                    let w = build_work(&v6_hosts, &plan.ports);
+                    collected.extend(tcp_connect_scan(w, plan.clone()).await);
+                }
+            }
+
             collected
         }
         ScanKind::TcpConnect | ScanKind::Other(_) => tcp_connect_scan(work, plan.clone()).await,
