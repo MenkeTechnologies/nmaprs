@@ -29,7 +29,7 @@ use tracing::{info, warn};
 use crate::cli::Args;
 use crate::config::{ScanKind, ScanPlan};
 use crate::output::{print_stdout, OutputSet};
-use crate::scan::{tcp_connect_scan, udp_scan, PortLine, UdpIcmpNotes};
+use crate::scan::{tcp_connect_scan, udp_scan, MaxRatePacer, PortLine, UdpIcmpNotes};
 use crate::target::{apply_exclude, expand_target, random_addresses, read_input_list, ExpandOpts};
 
 fn build_work(hosts: &[IpAddr], ports: &[u16]) -> Vec<(IpAddr, u16)> {
@@ -256,12 +256,19 @@ pub async fn run(args: Args) -> Result<i32> {
         ScanKind::TcpSyn => {
             let (work_v4, work_v6) = split_syn_work(&work);
             let to = plan.connect_timeout;
+            let syn_pacer = plan
+                .max_probe_rate
+                .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
 
             let v4_fut = async {
                 if work_v4.is_empty() {
                     return Ok(Ok(vec![]));
                 }
-                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv4(work_v4, to)).await
+                let pacer = syn_pacer.clone();
+                match tokio::task::spawn_blocking(move || {
+                    crate::syn::syn_scan_ipv4(work_v4, to, pacer)
+                })
+                .await
                 {
                     Ok(r) => Ok(r),
                     Err(e) => Err(anyhow!("SYN join v4: {e}")),
@@ -271,7 +278,11 @@ pub async fn run(args: Args) -> Result<i32> {
                 if work_v6.is_empty() {
                     return Ok(Ok(vec![]));
                 }
-                match tokio::task::spawn_blocking(move || crate::syn::syn_scan_ipv6(work_v6, to)).await
+                let pacer = syn_pacer.clone();
+                match tokio::task::spawn_blocking(move || {
+                    crate::syn::syn_scan_ipv6(work_v6, to, pacer)
+                })
+                .await
                 {
                     Ok(r) => Ok(r),
                     Err(e) => Err(anyhow!("SYN join v6: {e}")),

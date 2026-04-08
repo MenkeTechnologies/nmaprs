@@ -40,6 +40,8 @@ pub struct ScanPlan {
     pub script_requested: bool,
     pub traceroute: bool,
     pub resume_path: Option<PathBuf>,
+    /// Cap on probe **starts** per second (`--max-rate`). `None` = no limit.
+    pub max_probe_rate: Option<u64>,
     pub unimplemented: Vec<String>,
 }
 
@@ -79,6 +81,15 @@ impl ScanPlan {
         }
         if args.ftp_bounce.is_some() {
             bail!("-b FTP bounce scan is not implemented");
+        }
+
+        if let Some(n) = args.max_rate {
+            if n == 0 {
+                bail!("--max-rate must be > 0");
+            }
+        }
+        if args.min_rate.is_some() {
+            warn!("--min-rate is not implemented; ignoring");
         }
 
         // --- Scan kind ---
@@ -196,6 +207,7 @@ impl ScanPlan {
             script_requested: args.script_default || args.script.is_some() || args.aggressive,
             traceroute: args.traceroute,
             resume_path: args.resume.clone(),
+            max_probe_rate: args.max_rate,
             unimplemented,
         };
 

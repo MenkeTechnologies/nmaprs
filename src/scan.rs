@@ -2,9 +2,10 @@
 
 use std::io;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
-use std::time::Duration;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use std::thread;
 
 use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
@@ -12,6 +13,64 @@ use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
 
 use crate::config::ScanPlan;
+
+/// Global cap on how fast probe tasks may **start** (matches `--max-rate` in Nmap terms).
+///
+/// Shared across threads (e.g. concurrent IPv4 + IPv6 SYN senders) via [`Arc`].
+pub struct MaxRatePacer {
+    next_slot: Mutex<Instant>,
+    interval: Duration,
+}
+
+impl MaxRatePacer {
+    pub fn new(probes_per_second: f64) -> Self {
+        assert!(probes_per_second > 0.0 && probes_per_second.is_finite());
+        Self {
+            next_slot: Mutex::new(Instant::now()),
+            interval: Duration::from_secs_f64(1.0 / probes_per_second),
+        }
+    }
+
+    /// Async probes (TCP connect, UDP): call before acquiring the scan semaphore.
+    pub async fn wait_turn(&self) {
+        let sleep_for = {
+            let mut next = self.next_slot.lock().expect("max-rate pacer");
+            let now = Instant::now();
+            let start = *next;
+            if start > now {
+                let w = start - now;
+                *next = start + self.interval;
+                w
+            } else {
+                *next = now + self.interval;
+                Duration::ZERO
+            }
+        };
+        if !sleep_for.is_zero() {
+            tokio::time::sleep(sleep_for).await;
+        }
+    }
+
+    /// Raw SYN send loop (blocking thread): call at the start of each probe iteration.
+    pub fn wait_turn_sync(&self) {
+        let sleep_for = {
+            let mut next = self.next_slot.lock().expect("max-rate pacer");
+            let now = Instant::now();
+            let start = *next;
+            if start > now {
+                let w = start - now;
+                *next = start + self.interval;
+                w
+            } else {
+                *next = now + self.interval;
+                Duration::ZERO
+            }
+        };
+        if !sleep_for.is_zero() {
+            thread::sleep(sleep_for);
+        }
+    }
+}
 
 /// Extra wait after UDP recv timeout so raw ICMP listeners can deliver matching errors (ms).
 const UDP_ICMP_DRAIN_MS: u64 = 2;
@@ -65,11 +124,18 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
     let sem = Arc::new(Semaphore::new(plan.concurrency.max(1)));
     let timeout = plan.connect_timeout;
     let no_ping = plan.no_ping;
+    let pacer = plan
+        .max_probe_rate
+        .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
 
     stream::iter(work)
         .map(|(host, port)| {
             let sem = sem.clone();
+            let pacer = pacer.clone();
             async move {
+                if let Some(p) = pacer.as_ref() {
+                    p.wait_turn().await;
+                }
                 let _p = sem.acquire().await.ok()?;
                 let addr = SocketAddr::new(host, port);
                 let start = Instant::now();
@@ -133,12 +199,19 @@ pub async fn udp_scan(
 ) -> Vec<PortLine> {
     let sem = Arc::new(Semaphore::new(plan.concurrency.max(1)));
     let timeout = plan.connect_timeout;
+    let pacer = plan
+        .max_probe_rate
+        .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
 
     stream::iter(work)
         .map(|(host, port)| {
             let sem = sem.clone();
             let icmp_notes = icmp_notes.clone();
+            let pacer = pacer.clone();
             async move {
+                if let Some(p) = pacer.as_ref() {
+                    p.wait_turn().await;
+                }
                 let _p = sem.acquire().await.ok()?;
                 let bind_addr: SocketAddr = match host {
                     IpAddr::V4(_) => "0.0.0.0:0".parse().unwrap(),
@@ -219,6 +292,22 @@ pub async fn udp_scan(
         .filter_map(|x| async move { x })
         .collect()
         .await
+}
+
+#[cfg(test)]
+mod pacer_tests {
+    use std::time::{Duration, Instant};
+
+    use super::MaxRatePacer;
+
+    #[test]
+    fn max_rate_pacer_high_rate_allows_back_to_back_sync() {
+        let p = MaxRatePacer::new(1_000_000.0);
+        let t0 = Instant::now();
+        p.wait_turn_sync();
+        p.wait_turn_sync();
+        assert!(t0.elapsed() < Duration::from_millis(5));
+    }
 }
 
 #[cfg(test)]

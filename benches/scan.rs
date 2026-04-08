@@ -39,6 +39,7 @@ fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
         script_requested: false,
         traceroute: false,
         resume_path: None,
+        max_probe_rate: None,
         unimplemented: vec![],
     });
 

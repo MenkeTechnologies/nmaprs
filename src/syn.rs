@@ -21,7 +21,7 @@ use pnet_sys;
 use rand::Rng;
 
 use crate::ipv6_l4;
-use crate::scan::{PortLine, PortReason};
+use crate::scan::{MaxRatePacer, PortLine, PortReason};
 
 const RECV_SLICE: Duration = Duration::from_millis(50);
 const RX_BUF: usize = 65536;
@@ -80,6 +80,7 @@ enum SynOutcome {
 pub fn syn_scan_ipv4(
     order: Vec<(Ipv4Addr, u16)>,
     per_probe_timeout: Duration,
+    pacer: Option<Arc<MaxRatePacer>>,
 ) -> io::Result<Vec<PortLine>> {
     let (mut tx, mut rx) = transport_channel(
         RX_BUF,
@@ -157,6 +158,9 @@ pub fn syn_scan_ipv4(
     let mut pkt_buf = vec![0u8; tcp_len];
     let mut ge_max = Instant::now();
     for (idx, (dst_ip, port)) in order.iter().enumerate() {
+        if let Some(p) = pacer.as_ref() {
+            p.wait_turn_sync();
+        }
         let sport = loop {
             let s: u16 = rng.gen_range(32768..65535);
             let k = Key {
@@ -228,6 +232,7 @@ pub fn syn_scan_ipv4(
 pub fn syn_scan_ipv6(
     order: Vec<(Ipv6Addr, u16)>,
     per_probe_timeout: Duration,
+    pacer: Option<Arc<MaxRatePacer>>,
 ) -> io::Result<Vec<PortLine>> {
     let (mut tx, mut rx) = transport_channel(
         RX_BUF,
@@ -304,6 +309,9 @@ pub fn syn_scan_ipv6(
     let mut pkt_buf = vec![0u8; tcp_len];
     let mut ge_max = Instant::now();
     for (idx, (dst_ip, port)) in order.iter().enumerate() {
+        if let Some(p) = pacer.as_ref() {
+            p.wait_turn_sync();
+        }
         let sport = loop {
             let s: u16 = rng.gen_range(32768..65535);
             let k = Key {
