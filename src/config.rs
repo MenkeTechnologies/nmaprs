@@ -167,7 +167,6 @@ pub enum ScanKind {
     /// TCP idle scan (`-sI zombie`) — spoofed SYN, IP-ID delta on zombie (IPv4 only).
     Idle,
     Udp,
-    Other(char),
 }
 
 impl ScanKind {
@@ -268,11 +267,15 @@ impl ScanPlan {
                 'M' | 'm' => scan_kind = ScanKind::TcpMaimon,
                 'Y' | 'y' => scan_kind = ScanKind::SctpInit,
                 'Z' | 'z' => scan_kind = ScanKind::SctpCookieEcho,
-                'O' | 'o' | 'I' | 'i' => {
-                    scan_kind = ScanKind::Other(ch);
-                    unimplemented.push(format!(
-                        "scan type -s{ch} is not implemented in nmaprs (use nmap for exotic TCP flags)"
-                    ));
+                'O' | 'o' => {
+                    bail!(
+                        "IP protocol scan uses `-sO` / `--sO`, not `--scan-type O` (that flag selects TCP/UDP/SCTP/raw-TCP scan letters)"
+                    );
+                }
+                'I' | 'i' => {
+                    bail!(
+                        "Idle scan uses `-sI <zombie[:probeport]>` / `--sI`, not `--scan-type I`"
+                    );
                 }
                 _ => bail!("unknown --scan-type {ch}"),
             }
@@ -748,6 +751,22 @@ mod rate_validation_tests {
         assert_eq!(ScanPlan::from_args(&y).expect("plan").scan_kind, ScanKind::SctpInit);
         let z = Args::try_parse_from(["nmaprs", "--scan-type", "z", "-p", "38412", "127.0.0.1"]).expect("parse");
         assert_eq!(ScanPlan::from_args(&z).expect("plan").scan_kind, ScanKind::SctpCookieEcho);
+    }
+
+    #[test]
+    fn scan_type_letter_o_points_to_so_flag() {
+        let args = Args::try_parse_from(["nmaprs", "--scan-type", "O", "127.0.0.1"]).expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("sO") || s.contains("-sO"), "{s}");
+    }
+
+    #[test]
+    fn scan_type_letter_i_points_to_si_flag() {
+        let args = Args::try_parse_from(["nmaprs", "--scan-type", "i", "127.0.0.1"]).expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("sI") || s.contains("-sI"), "{s}");
     }
 
     #[test]

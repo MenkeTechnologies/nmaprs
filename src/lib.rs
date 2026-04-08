@@ -463,7 +463,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
             collected.extend(v6_lines?);
             collected
         }
-        ScanKind::TcpConnect | ScanKind::Other(_) => {
+        ScanKind::TcpConnect => {
             if let Some(fb) = plan.ftp_bounce.clone() {
                 crate::ftp_bounce::ftp_bounce_scan(work, plan.clone(), fb).await
             } else {
