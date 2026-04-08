@@ -5,6 +5,7 @@ pub mod cli;
 pub mod config;
 pub mod discovery;
 pub mod ftp_bounce;
+pub mod fp_match;
 pub mod help_tp;
 pub mod icmp_listen;
 pub mod icmp_ping;
@@ -14,6 +15,8 @@ pub mod ipv6_l4;
 pub mod nse;
 pub mod os_db;
 pub mod os_detect;
+pub mod os_fp_db;
+pub mod os_scan;
 pub mod output;
 pub mod ping;
 pub mod ports;
@@ -108,6 +111,24 @@ async fn try_load_os_db(plan: &ScanPlan) -> Option<Arc<crate::os_db::OsDb>> {
         }
         Err(e) => {
             warn!("nmap-os-db load: {e}");
+            None
+        }
+    }
+}
+
+async fn try_load_fp_db(plan: &ScanPlan) -> Option<Arc<crate::os_fp_db::FingerprintDb>> {
+    let path = plan.data_file("nmap-os-db");
+    if !path.exists() {
+        return None;
+    }
+    match tokio::task::spawn_blocking(move || crate::os_fp_db::FingerprintDb::load(&path)).await {
+        Ok(Ok(db)) => Some(Arc::new(db)),
+        Ok(Err(e)) => {
+            warn!("nmap-os-db (fingerprint DB): {e}");
+            None
+        }
+        Err(e) => {
+            warn!("nmap-os-db fingerprint load: {e}");
             None
         }
     }
@@ -618,6 +639,11 @@ pub async fn run(args: Args) -> Result<i32> {
     } else {
         None
     };
+    let fp_db = if plan.os_detect_requested {
+        try_load_fp_db(&plan).await
+    } else {
+        None
+    };
 
     trace_nmap_compat(&args);
     if args.servicedb.is_some() {
@@ -959,14 +985,44 @@ pub async fn run(args: Args) -> Result<i32> {
         } else {
             let ping_out =
                 crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
+            let to = plan.connect_timeout;
             for o in ping_out {
-                if o.up {
-                    println!(
-                        "OS guess for {}: {}",
-                        o.host,
-                        crate::os_db::format_os_guess(o.ttl, os_db.as_deref(), ex_cap)
-                    );
+                if !o.up {
+                    continue;
                 }
+                let mut os_line =
+                    crate::os_db::format_os_guess(o.ttl, os_db.as_deref(), ex_cap);
+                if let (Some(db), std::net::IpAddr::V4(ip)) = (fp_db.as_deref(), o.host) {
+                    let open = lines
+                        .iter()
+                        .find(|l| l.host == o.host && l.proto == "tcp" && l.state == "open")
+                        .map(|l| l.port);
+                    let closed = lines
+                        .iter()
+                        .find(|l| l.host == o.host && l.proto == "tcp" && l.state == "closed")
+                        .map(|l| l.port);
+                    let closed_udp = lines
+                        .iter()
+                        .find(|l| l.host == o.host && l.proto == "udp" && l.state == "closed")
+                        .map(|l| l.port)
+                        .unwrap_or(40125);
+                    if let (Some(op), Some(cl)) = (open, closed) {
+                        let r = tokio::task::spawn_blocking(move || {
+                            crate::os_scan::probe_ipv4_os(ip, op, cl, closed_udp, to)
+                        })
+                        .await;
+                        if let Ok(Ok(subj)) = r {
+                            if let Some((idx, acc)) = db.best_match(&subj, 0.85) {
+                                os_line = format!(
+                                    "{} ({:.0}% match)",
+                                    db.references[idx].name,
+                                    acc * 100.0
+                                );
+                            }
+                        }
+                    }
+                }
+                println!("OS guess for {}: {}", o.host, os_line);
             }
         }
     }
