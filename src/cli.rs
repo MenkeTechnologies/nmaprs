@@ -1,15 +1,10 @@
 //! nmap-compatible CLI surface. Parsing accepts the union of `nmap --help` and Nmap’s `long_options`
 //! table (`nmap.cc`); behavior parity is documented in README.
 
+use clap::CommandFactory;
+use clap::FromArgMatches;
 use clap::Parser;
 use std::path::PathBuf;
-
-const HELP_TEMPLATE: &str = r#"{before-help}{name} {version}
-{author-with-newline}{about-with-newline}
-{usage-heading}
-    {usage}
-
-{all-args}{after-help}"#;
 
 /// Parallel network scanner — nmap-compatible CLI (see README for parity).
 #[derive(Parser, Debug)]
@@ -21,7 +16,6 @@ const HELP_TEMPLATE: &str = r#"{before-help}{name} {version}
     long_about = "TCP connect, UDP probes, ICMP ping scan (-sn), IPv6 (-6), -iL/-iR, resume, SYN (-sS) via raw IPv4 (privileged), `-A` (like Nmap: -O, -sV, default scripts, --traceroute), `-O` / `-sV` with optional `nmap-os-db` / `nmap-service-probes` under `--datadir`, and built-in scripts (not full Nmap NSE/Lua).",
     disable_help_flag = true,
     disable_version_flag = true,
-    help_template = HELP_TEMPLATE,
     next_line_help = false
 )]
 pub struct Args {
@@ -434,7 +428,37 @@ impl Args {
     pub fn parse_from_env() -> Self {
         let raw: Vec<String> = std::env::args().collect();
         let expanded = crate::argv_expand::expand_nmap_style_argv(raw);
-        Self::parse_from(expanded)
+        let bin = expanded
+            .first()
+            .map(|p| {
+                std::path::Path::new(p)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("nmaprs")
+            })
+            .unwrap_or("nmaprs")
+            .to_string();
+
+        let mut cmd = Self::command();
+        cmd = cmd.bin_name(&bin).name(&bin);
+
+        match cmd.try_get_matches_from(expanded) {
+            Ok(matches) => Self::from_arg_matches(&matches).expect("nmaprs CLI parse"),
+            Err(err) => {
+                use clap::error::ErrorKind;
+                match err.kind() {
+                    ErrorKind::DisplayHelp | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
+                        crate::help_tp::print_help(&bin);
+                        std::process::exit(0);
+                    }
+                    ErrorKind::DisplayVersion => {
+                        crate::help_tp::print_version(&bin);
+                        std::process::exit(0);
+                    }
+                    _ => err.exit(),
+                }
+            }
+        }
     }
 
     pub fn effective_verbosity(&self) -> u8 {

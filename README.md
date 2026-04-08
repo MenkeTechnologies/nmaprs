@@ -80,6 +80,8 @@ Or symlink `_nmaprs` into a directory already on **`fpath`**.
 
 Combined flags like `-sT`, `-Pn`, `-PS80`, `-T4` are expanded before parsing.
 
+`-h` / `--help` prints a custom screen styled like **`tp`** ([temprs](https://github.com/MenkeTechnologies/temprs) `CYBERPUNK_TEMPLATE`): cyan section rules and box, magenta banner accents and tagline, yellow `USAGE` / copyright line, green `//` column, red/magenta/cyan ASCII bands. On a **non-TTY** or when **`NO_COLOR`** is set, escapes are omitted.
+
 ## Examples
 
 ```bash

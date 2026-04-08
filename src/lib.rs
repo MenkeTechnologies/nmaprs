@@ -2,6 +2,7 @@
 
 pub mod argv_expand;
 pub mod cli;
+pub mod help_tp;
 pub mod config;
 pub mod discovery;
 pub mod ftp_bounce;
