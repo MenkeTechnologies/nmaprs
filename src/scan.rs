@@ -347,6 +347,17 @@ pub async fn udp_scan(
                 let overall_start = Instant::now();
                 let mut timeouts = 0u32;
 
+                let Some(socket) = UdpSocket::bind(bind_addr).await.ok() else {
+                    return Some(PortLine {
+                        host,
+                        port,
+                        proto: "udp",
+                        state: "filtered",
+                        reason: PortReason::Error,
+                        latency_ms: Some(overall_start.elapsed().as_millis()),
+                    });
+                };
+
                 loop {
                     if timeouts == 0 {
                         sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
@@ -355,7 +366,6 @@ pub async fn udp_scan(
                         }
                     }
                     let _p = sem.acquire().await.ok()?;
-                    let socket = UdpSocket::bind(bind_addr).await.ok()?;
                     let start = Instant::now();
                     if socket.send_to(&payload, dst).await.is_err() {
                         return Some(PortLine {

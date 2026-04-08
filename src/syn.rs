@@ -1,9 +1,10 @@
 //! Raw TCP SYN scan via `pnet` (requires elevated privileges on most OSes).
 //!
 //! **Batched + pipelined**: a receiver thread drains TCP replies while the main thread sends SYNs,
-//! overlapping RTT with the send phase. `--max-retries` runs additional full rounds (new raw socket
-//! each round) for probes still unresolved, omitting scan-delay / rate pacing on later rounds (TCP
-//! connect parity).
+//! overlapping RTT with the send phase. Large scans **shard** work across multiple independent
+//! pipelines (see [`MAX_SYN_PARALLEL_SHARDS`]). `--max-retries` runs additional full rounds (new raw
+//! socket each round) for probes still unresolved, omitting scan-delay / rate pacing on later rounds
+//! (TCP connect parity).
 
 use std::io;
 use std::mem;
@@ -29,6 +30,35 @@ use crate::scan::{
 
 const RECV_SLICE: Duration = Duration::from_millis(50);
 const RX_BUF: usize = 65536;
+
+/// Upper bound on concurrent raw SYN pipelines per address family (each has its own recv thread).
+pub const MAX_SYN_PARALLEL_SHARDS: usize = 16;
+
+/// Split `order` into `shards` contiguous chunks (balanced lengths).
+fn split_into_syn_chunks<T>(order: Vec<T>, shards: usize) -> Vec<Vec<T>> {
+    let n = order.len();
+    if n == 0 {
+        return vec![];
+    }
+    let shards = shards.max(1).min(n);
+    if shards == 1 {
+        return vec![order];
+    }
+    let base = n / shards;
+    let rem = n % shards;
+    let mut out = Vec::with_capacity(shards);
+    let mut iter = order.into_iter();
+    for i in 0..shards {
+        let take = base + usize::from(i < rem);
+        let mut chunk = Vec::with_capacity(take);
+        for _ in 0..take {
+            chunk.push(iter.next().expect("split_into_syn_chunks: length mismatch"));
+        }
+        out.push(chunk);
+    }
+    debug_assert!(iter.next().is_none());
+    out
+}
 
 fn local_ipv4_for_checksum() -> io::Result<Ipv4Addr> {
     let s = UdpSocket::bind("0.0.0.0:0")?;
@@ -517,4 +547,160 @@ pub fn syn_scan_ipv6(
     }
 
     Ok(out)
+}
+
+/// Run several independent IPv4 SYN pipelines in parallel (one raw socket + recv thread per shard).
+#[allow(clippy::too_many_arguments)]
+pub fn parallel_syn_scan_ipv4(
+    order: Vec<(Ipv4Addr, u16)>,
+    per_probe_timeout: Duration,
+    pacer: Option<Arc<ProbeRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+    connect_retries: u32,
+    max_shards: usize,
+) -> io::Result<Vec<PortLine>> {
+    let total = order.len();
+    if total == 0 {
+        return Ok(vec![]);
+    }
+    let shards = max_shards.clamp(1, MAX_SYN_PARALLEL_SHARDS).min(total);
+    if shards <= 1 {
+        return syn_scan_ipv4(
+            order,
+            per_probe_timeout,
+            pacer,
+            host_timeout,
+            host_start,
+            scan_delay,
+            max_scan_delay,
+            connect_retries,
+        );
+    }
+    let chunks = split_into_syn_chunks(order, shards);
+    let mut merged: Vec<PortLine> = Vec::with_capacity(total);
+    let mut shard_results = Vec::new();
+    thread::scope(|s| {
+        let mut handles = Vec::with_capacity(chunks.len());
+        for chunk in chunks {
+            let pacer = pacer.clone();
+            let host_start = host_start.clone();
+            handles.push(s.spawn(move || {
+                syn_scan_ipv4(
+                    chunk,
+                    per_probe_timeout,
+                    pacer,
+                    host_timeout,
+                    host_start,
+                    scan_delay,
+                    max_scan_delay,
+                    connect_retries,
+                )
+            }));
+        }
+        for h in handles {
+            shard_results.push(h.join());
+        }
+    });
+    for r in shard_results {
+        match r {
+            Ok(Ok(lines)) => merged.extend(lines),
+            Ok(Err(e)) => return Err(e),
+            Err(e) => return Err(io::Error::other(format!("SYN shard join: {e:?}"))),
+        }
+    }
+    Ok(merged)
+}
+
+/// Run several independent IPv6 SYN pipelines in parallel.
+#[allow(clippy::too_many_arguments)]
+pub fn parallel_syn_scan_ipv6(
+    order: Vec<(Ipv6Addr, u16)>,
+    per_probe_timeout: Duration,
+    pacer: Option<Arc<ProbeRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+    connect_retries: u32,
+    max_shards: usize,
+) -> io::Result<Vec<PortLine>> {
+    let total = order.len();
+    if total == 0 {
+        return Ok(vec![]);
+    }
+    let shards = max_shards.clamp(1, MAX_SYN_PARALLEL_SHARDS).min(total);
+    if shards <= 1 {
+        return syn_scan_ipv6(
+            order,
+            per_probe_timeout,
+            pacer,
+            host_timeout,
+            host_start,
+            scan_delay,
+            max_scan_delay,
+            connect_retries,
+        );
+    }
+    let chunks = split_into_syn_chunks(order, shards);
+    let mut merged: Vec<PortLine> = Vec::with_capacity(total);
+    let mut shard_results = Vec::new();
+    thread::scope(|s| {
+        let mut handles = Vec::with_capacity(chunks.len());
+        for chunk in chunks {
+            let pacer = pacer.clone();
+            let host_start = host_start.clone();
+            handles.push(s.spawn(move || {
+                syn_scan_ipv6(
+                    chunk,
+                    per_probe_timeout,
+                    pacer,
+                    host_timeout,
+                    host_start,
+                    scan_delay,
+                    max_scan_delay,
+                    connect_retries,
+                )
+            }));
+        }
+        for h in handles {
+            shard_results.push(h.join());
+        }
+    });
+    for r in shard_results {
+        match r {
+            Ok(Ok(lines)) => merged.extend(lines),
+            Ok(Err(e)) => return Err(e),
+            Err(e) => return Err(io::Error::other(format!("SYN shard join: {e:?}"))),
+        }
+    }
+    Ok(merged)
+}
+
+#[cfg(test)]
+mod syn_shard_tests {
+    use super::split_into_syn_chunks;
+
+    #[test]
+    fn split_chunks_balanced() {
+        let v: Vec<u8> = (0..10).collect();
+        let c = split_into_syn_chunks(v, 4);
+        assert_eq!(c.len(), 4);
+        let sum: usize = c.iter().map(|x| x.len()).sum();
+        assert_eq!(sum, 10);
+        assert_eq!(c[0].len(), 3);
+        assert_eq!(c[1].len(), 3);
+        assert_eq!(c[2].len(), 2);
+        assert_eq!(c[3].len(), 2);
+    }
+
+    #[test]
+    fn split_single_chunk() {
+        let v = vec![1, 2, 3];
+        let c = split_into_syn_chunks(v, 1);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0], vec![1, 2, 3]);
+    }
 }

@@ -265,6 +265,9 @@ pub async fn run(args: Args) -> Result<i32> {
             let syn_scan_delay = plan.scan_delay;
             let syn_max_scan_delay = plan.max_scan_delay;
             let syn_connect_retries = plan.connect_retries;
+            let syn_shard_cap = plan
+                .effective_probe_concurrency()
+                .clamp(1, crate::syn::MAX_SYN_PARALLEL_SHARDS);
 
             let v4_fut = async {
                 if work_v4.is_empty() {
@@ -273,7 +276,7 @@ pub async fn run(args: Args) -> Result<i32> {
                 let pacer = syn_pacer.clone();
                 let host_start = syn_host_start.clone();
                 match tokio::task::spawn_blocking(move || {
-                    crate::syn::syn_scan_ipv4(
+                    crate::syn::parallel_syn_scan_ipv4(
                         work_v4,
                         to,
                         pacer,
@@ -282,6 +285,7 @@ pub async fn run(args: Args) -> Result<i32> {
                         syn_scan_delay,
                         syn_max_scan_delay,
                         syn_connect_retries,
+                        syn_shard_cap,
                     )
                 })
                 .await
@@ -297,7 +301,7 @@ pub async fn run(args: Args) -> Result<i32> {
                 let pacer = syn_pacer.clone();
                 let host_start = syn_host_start.clone();
                 match tokio::task::spawn_blocking(move || {
-                    crate::syn::syn_scan_ipv6(
+                    crate::syn::parallel_syn_scan_ipv6(
                         work_v6,
                         to,
                         pacer,
@@ -306,6 +310,7 @@ pub async fn run(args: Args) -> Result<i32> {
                         syn_scan_delay,
                         syn_max_scan_delay,
                         syn_connect_retries,
+                        syn_shard_cap,
                     )
                 })
                 .await
