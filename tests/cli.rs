@@ -12,6 +12,16 @@ fn help_short_h() {
 }
 
 #[test]
+fn nms_binary_same_help() {
+    Command::cargo_bin("nms")
+        .expect("binary")
+        .arg("-h")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("GRID SCANNER"));
+}
+
+#[test]
 fn help_long() {
     Command::cargo_bin("nmaprs")
         .expect("binary")

@@ -17,6 +17,10 @@ path = "src/lib.rs"
 name = "nmaprs"
 path = "src/main.rs"
 
+[[bin]]
+name = "nms"
+path = "src/bin/nms.rs"
+
 [[bench]]
 name = "scan"
 harness = false

@@ -49,7 +49,7 @@ If you need **authoritative** Nmap NSE/OS DB behavior, use **[Nmap](https://nmap
 cargo build --release
 ```
 
-Binary: `target/release/nmaprs`
+Binaries: `target/release/nmaprs` and `target/release/nms` (same CLI and behavior; `nms` is a short alias).
 
 ## Help (`-h` / `--help`)
 
@@ -60,6 +60,7 @@ Combined flags like `-sT`, `-Pn`, `-PS80`, `-T4` are expanded before parsing.
 ```bash
 # TCP connect — top ports from embedded frequency table
 nmaprs scanme.nmap.org
+# same as: nms scanme.nmap.org
 
 # Ping scan (no port scan)
 nmaprs -sn scanme.nmap.org

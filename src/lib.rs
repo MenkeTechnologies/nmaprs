@@ -593,6 +593,28 @@ pub async fn run(args: Args) -> Result<i32> {
     Ok(0)
 }
 
+/// Initialize tracing, parse CLI args from the environment, and block on [`run`].
+///
+/// Shared by the `nmaprs` and `nms` binaries (identical behavior).
+pub fn run_from_cli_env() -> Result<()> {
+    use tracing_subscriber::EnvFilter;
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+        )
+        .with_target(false)
+        .compact()
+        .init();
+
+    let args = crate::cli::Args::parse_from_env();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let code = rt.block_on(crate::run(args))?;
+    std::process::exit(code);
+}
+
 #[cfg(test)]
 mod expand_specs_tests {
     use std::net::{IpAddr, Ipv4Addr};

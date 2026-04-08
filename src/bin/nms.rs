@@ -1,4 +1,4 @@
-//! `nmaprs` binary entry — [`nmaprs::run_from_cli_env`] (shared with `nms`).
+//! **`nms`** — same CLI as `nmaprs` ([`nmaprs::run_from_cli_env`]).
 
 use anyhow::Result;
 
