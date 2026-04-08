@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use nmaprs::config::{ScanKind, ScanPlan};
+use nmaprs::config::{EvasionOpts, ScanKind, ScanPlan};
 use nmaprs::scan::tcp_connect_scan;
 
 fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
@@ -71,6 +71,8 @@ fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
         servicedb: None,
         output_machine: None,
         output_hex: None,
+        evasion: EvasionOpts::default(),
+        extra_scan_kinds: vec![],
     });
 
     c.bench_function("tcp_connect_scan_localhost_3_ports", |b| {
