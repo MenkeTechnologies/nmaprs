@@ -188,13 +188,14 @@ fn days_to_ymd(days: u64) -> (i64, u32, u32) {
 
 /// Single port line as printed / written to `-oN` (tab-separated).
 pub fn port_line_text(l: &PortLine, show_reason: bool) -> String {
-    let mut s = if let Some(ref v) = l.version_info {
-        format!("{}/{}\t{}\t{}", l.port, l.proto, l.state, v)
-    } else {
-        format!("{}/{}\t{}", l.port, l.proto, l.state)
-    };
+    use std::fmt::Write;
+    let mut s = String::with_capacity(48);
+    let _ = write!(s, "{}/{}\t{}", l.port, l.proto, l.state);
+    if let Some(ref v) = l.version_info {
+        let _ = write!(s, "\t{v}");
+    }
     if show_reason {
-        s.push_str(&format!("\t{}", reason_str(l)));
+        let _ = write!(s, "\t{}", reason_str(l));
     }
     s
 }

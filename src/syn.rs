@@ -402,13 +402,7 @@ fn tcp_ipv4_one_round(
         tcp.set_destination(port);
         tcp.set_sequence(seq);
         tcp.set_acknowledgement(ack_num);
-        let data_offset = if data_len > 0 {
-            // data_offset is in 32-bit words: header is 20 bytes (5 words)
-            5
-        } else {
-            5
-        };
-        tcp.set_data_offset(data_offset);
+        tcp.set_data_offset(5);
         tcp.set_reserved(0);
         tcp.set_flags(flags);
         tcp.set_window(64240);
@@ -440,21 +434,23 @@ fn tcp_ipv4_one_round(
                 p.wait_turn_sync();
             }
         }
-        // Use fixed source port or pick random.
+        // Use fixed source port or pick random (retry-capped to avoid infinite loop).
         let sport = if let Some(sp) = evasion.source_port {
             sp
         } else {
-            loop {
-                let s: u16 = rng.gen_range(32768..65535);
+            let mut s: u16 = rng.gen_range(32768..65535);
+            for _ in 0..128 {
                 let k = SynKeyV4 {
                     dst: dst_ip,
                     dport: port,
                     sport: s,
                 };
                 if !pending.contains_key(&k) {
-                    break s;
+                    break;
                 }
+                s = rng.gen_range(32768..65535);
             }
+            s
         };
         let (seq, ack_num, flags) = tcp_probe_fields(probe_kind, send_flags_override, &mut rng);
         let deadline = Instant::now() + per_probe_timeout;
@@ -775,16 +771,20 @@ fn tcp_ipv6_one_round(
                 p.wait_turn_sync();
             }
         }
-        let sport = loop {
-            let s: u16 = rng.gen_range(32768..65535);
-            let k = SynKeyV6 {
-                dst: dst_ip,
-                dport: port,
-                sport: s,
-            };
-            if !pending.contains_key(&k) {
-                break s;
+        let sport = {
+            let mut s: u16 = rng.gen_range(32768..65535);
+            for _ in 0..128 {
+                let k = SynKeyV6 {
+                    dst: dst_ip,
+                    dport: port,
+                    sport: s,
+                };
+                if !pending.contains_key(&k) {
+                    break;
+                }
+                s = rng.gen_range(32768..65535);
             }
+            s
         };
         let (seq, ack_num, flags) = tcp_probe_fields(probe_kind, send_flags_override, &mut rng);
         let deadline = Instant::now() + per_probe_timeout;

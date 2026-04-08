@@ -386,16 +386,20 @@ fn sctp_ipv4_one_round(
                 p.wait_turn_sync();
             }
         }
-        let sport = loop {
-            let s: u16 = rng.gen_range(32768..65535);
-            let k = SctpKeyV4 {
-                dst: dst_ip,
-                dport: port,
-                sport: s,
-            };
-            if !pending.contains_key(&k) {
-                break s;
+        let sport = {
+            let mut s: u16 = rng.gen_range(32768..65535);
+            for _ in 0..128 {
+                let k = SctpKeyV4 {
+                    dst: dst_ip,
+                    dport: port,
+                    sport: s,
+                };
+                if !pending.contains_key(&k) {
+                    break;
+                }
+                s = rng.gen_range(32768..65535);
             }
+            s
         };
         let deadline = Instant::now() + per_probe_timeout;
         ge_max = ge_max.max(deadline);
@@ -531,16 +535,20 @@ fn sctp_ipv6_one_round(
                 p.wait_turn_sync();
             }
         }
-        let sport = loop {
-            let s: u16 = rng.gen_range(32768..65535);
-            let k = SctpKeyV6 {
-                dst: dst_ip,
-                dport: port,
-                sport: s,
-            };
-            if !pending.contains_key(&k) {
-                break s;
+        let sport = {
+            let mut s: u16 = rng.gen_range(32768..65535);
+            for _ in 0..128 {
+                let k = SctpKeyV6 {
+                    dst: dst_ip,
+                    dport: port,
+                    sport: s,
+                };
+                if !pending.contains_key(&k) {
+                    break;
+                }
+                s = rng.gen_range(32768..65535);
             }
+            s
         };
         let deadline = Instant::now() + per_probe_timeout;
         ge_max = ge_max.max(deadline);
