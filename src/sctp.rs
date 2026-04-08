@@ -5,7 +5,8 @@
 
 use std::io;
 use std::mem;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -65,6 +66,43 @@ enum SctpOutcome {
     HostTimeout,
 }
 
+const SCTP_NONE: u8 = 0;
+
+impl SctpOutcome {
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Open => 1,
+            Self::Closed => 2,
+            Self::HostTimeout => 3,
+        }
+    }
+    fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            1 => Some(Self::Open),
+            2 => Some(Self::Closed),
+            3 => Some(Self::HostTimeout),
+            _ => None,
+        }
+    }
+}
+
+struct AtomicSctpResults(Vec<AtomicU8>);
+
+impl AtomicSctpResults {
+    fn new(len: usize) -> Self {
+        Self((0..len).map(|_| AtomicU8::new(SCTP_NONE)).collect())
+    }
+    fn set(&self, idx: usize, outcome: SctpOutcome) {
+        self.0[idx].store(outcome.to_u8(), Ordering::Release);
+    }
+    fn get(&self, idx: usize) -> Option<SctpOutcome> {
+        SctpOutcome::from_u8(self.0[idx].load(Ordering::Acquire))
+    }
+    fn is_resolved(&self, idx: usize) -> bool {
+        self.0[idx].load(Ordering::Acquire) != SCTP_NONE
+    }
+}
+
 #[derive(Hash, Eq, PartialEq, Clone, Copy)]
 struct SctpKeyV4 {
     dst: Ipv4Addr,
@@ -80,12 +118,7 @@ struct SctpKeyV6 {
 }
 
 fn local_ipv4_for_checksum() -> io::Result<Ipv4Addr> {
-    let s = UdpSocket::bind("0.0.0.0:0")?;
-    s.connect("8.8.8.8:80")?;
-    match s.local_addr()? {
-        SocketAddr::V4(v) => Ok(*v.ip()),
-        _ => Err(io::Error::other("no IPv4 source")),
-    }
+    crate::net_util::local_ipv4()
 }
 
 fn recv_ipv4_with_timeout(
@@ -241,7 +274,7 @@ fn sctp_ipv4_one_round(
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
     apply_probe_delays: bool,
-    global_results: Arc<Mutex<Vec<Option<SctpOutcome>>>>,
+    global_results: Arc<AtomicSctpResults>,
     mut tx: pnet::transport::TransportSender,
     src_ip: Ipv4Addr,
 ) -> io::Result<()> {
@@ -325,7 +358,7 @@ fn sctp_ipv4_one_round(
                             }
                         }
                     };
-                    results_r.lock().expect("results")[gidx] = Some(o);
+                    results_r.set(gidx, o);
                     pending_r.remove(&key);
                 }
                 Ok(None) => {}
@@ -343,7 +376,7 @@ fn sctp_ipv4_one_round(
         if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
             let ip = IpAddr::V4(dst_ip);
             if host_over_deadline(hs.as_ref(), ip, limit) {
-                global_results.lock().expect("results")[gidx] = Some(SctpOutcome::HostTimeout);
+                global_results.set(gidx, SctpOutcome::HostTimeout);
                 continue;
             }
         }
@@ -399,7 +432,7 @@ fn sctp_ipv6_one_round(
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
     apply_probe_delays: bool,
-    global_results: Arc<Mutex<Vec<Option<SctpOutcome>>>>,
+    global_results: Arc<AtomicSctpResults>,
 ) -> io::Result<()> {
     if subset.is_empty() {
         return Ok(());
@@ -470,7 +503,7 @@ fn sctp_ipv6_one_round(
                             }
                         }
                     };
-                    results_r.lock().expect("results")[gidx] = Some(o);
+                    results_r.set(gidx, o);
                     pending_r.remove(&key);
                 }
                 Ok(None) => {}
@@ -488,7 +521,7 @@ fn sctp_ipv6_one_round(
         if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
             let ip = IpAddr::V6(dst_ip);
             if host_over_deadline(hs.as_ref(), ip, limit) {
-                global_results.lock().expect("results")[gidx] = Some(SctpOutcome::HostTimeout);
+                global_results.set(gidx, SctpOutcome::HostTimeout);
                 continue;
             }
         }
@@ -549,19 +582,18 @@ fn sctp_scan_ipv6_inner(
         return Ok(vec![]);
     }
 
-    let global_results = Arc::new(Mutex::new(vec![None; total]));
+    let global_results = Arc::new(AtomicSctpResults::new(total));
 
     for pass in 0..=connect_retries {
         let mut subset: Vec<(usize, Ipv6Addr, u16)> = Vec::new();
         for (idx, &(dst, port)) in order.iter().enumerate() {
-            if global_results.lock().expect("global_results")[idx].is_some() {
+            if global_results.is_resolved(idx) {
                 continue;
             }
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V6(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] =
-                        Some(SctpOutcome::HostTimeout);
+                    global_results.set(idx, SctpOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -585,10 +617,9 @@ fn sctp_scan_ipv6_inner(
         )?;
     }
 
-    let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
-        let (state, reason) = match results[i] {
+        let (state, reason) = match global_results.get(i) {
             Some(SctpOutcome::Open) => match probe {
                 SctpProbeKind::Init => ("open", PortReason::SctpInitAck),
                 SctpProbeKind::CookieEcho => ("open", PortReason::SctpCookieAck),
@@ -627,19 +658,18 @@ fn sctp_scan_ipv4_inner(
         return Ok(vec![]);
     }
 
-    let global_results = Arc::new(Mutex::new(vec![None; total]));
+    let global_results = Arc::new(AtomicSctpResults::new(total));
 
     for pass in 0..=connect_retries {
         let mut subset: Vec<(usize, Ipv4Addr, u16)> = Vec::new();
         for (idx, &(dst, port)) in order.iter().enumerate() {
-            if global_results.lock().expect("global_results")[idx].is_some() {
+            if global_results.is_resolved(idx) {
                 continue;
             }
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V4(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] =
-                        Some(SctpOutcome::HostTimeout);
+                    global_results.set(idx, SctpOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -671,10 +701,9 @@ fn sctp_scan_ipv4_inner(
         )?;
     }
 
-    let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
-        let (state, reason) = match results[i] {
+        let (state, reason) = match global_results.get(i) {
             Some(SctpOutcome::Open) => match probe {
                 SctpProbeKind::Init => ("open", PortReason::SctpInitAck),
                 SctpProbeKind::CookieEcho => ("open", PortReason::SctpCookieAck),

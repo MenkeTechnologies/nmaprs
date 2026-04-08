@@ -12,6 +12,7 @@ pub mod icmp_ping;
 pub mod idle;
 pub mod ip_proto;
 pub mod ipv6_l4;
+pub mod net_util;
 pub mod nse;
 pub mod os_db;
 pub mod os_detect;

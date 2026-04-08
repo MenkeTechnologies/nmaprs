@@ -9,7 +9,8 @@
 use std::fmt;
 use std::io;
 use std::mem;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -92,21 +93,11 @@ fn tcp_probe_fields(
 }
 
 fn local_ipv4_for_checksum() -> io::Result<Ipv4Addr> {
-    let s = UdpSocket::bind("0.0.0.0:0")?;
-    s.connect("8.8.8.8:80")?;
-    match s.local_addr()? {
-        SocketAddr::V4(v) => Ok(*v.ip()),
-        _ => Err(io::Error::other("no IPv4 source for checksum")),
-    }
+    crate::net_util::local_ipv4()
 }
 
 fn local_ipv6_for_checksum() -> io::Result<Ipv6Addr> {
-    let s = UdpSocket::bind("[::]:0")?;
-    s.connect("2001:4860:4860::8888:443")?;
-    match s.local_addr()? {
-        SocketAddr::V6(v) => Ok(*v.ip()),
-        _ => Err(io::Error::other("no IPv6 source for checksum")),
-    }
+    crate::net_util::local_ipv6()
 }
 
 fn recv_ipv6_tcp_with_timeout(
@@ -146,6 +137,49 @@ enum SynOutcome {
     /// RST with non-zero window on TCP window scan (`-sW`) — Nmap `open` on common BSD stacks.
     WindowOpen,
     HostTimeout,
+}
+
+/// Lock-free result slot: 0 = pending (None), 1..=5 = SynOutcome variant.
+const SYN_NONE: u8 = 0;
+
+impl SynOutcome {
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Open => 1,
+            Self::Closed => 2,
+            Self::Unfiltered => 3,
+            Self::WindowOpen => 4,
+            Self::HostTimeout => 5,
+        }
+    }
+    fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            1 => Some(Self::Open),
+            2 => Some(Self::Closed),
+            3 => Some(Self::Unfiltered),
+            4 => Some(Self::WindowOpen),
+            5 => Some(Self::HostTimeout),
+            _ => None,
+        }
+    }
+}
+
+/// Atomic result array replacing `Mutex<Vec<Option<SynOutcome>>>` for lock-free recv-path writes.
+struct AtomicSynResults(Vec<AtomicU8>);
+
+impl AtomicSynResults {
+    fn new(len: usize) -> Self {
+        Self((0..len).map(|_| AtomicU8::new(SYN_NONE)).collect())
+    }
+    fn set(&self, idx: usize, outcome: SynOutcome) {
+        self.0[idx].store(outcome.to_u8(), Ordering::Release);
+    }
+    fn get(&self, idx: usize) -> Option<SynOutcome> {
+        SynOutcome::from_u8(self.0[idx].load(Ordering::Acquire))
+    }
+    fn is_resolved(&self, idx: usize) -> bool {
+        self.0[idx].load(Ordering::Acquire) != SYN_NONE
+    }
 }
 
 /// Map raw recv outcomes to [`PortLine`] (SYN-style vs ACK scan semantics).
@@ -258,7 +292,7 @@ fn tcp_ipv4_one_round(
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
     apply_probe_delays: bool,
-    global_results: Arc<Mutex<Vec<Option<SynOutcome>>>>,
+    global_results: Arc<AtomicSynResults>,
     evasion: &EvasionOpts,
 ) -> io::Result<()> {
     if subset.is_empty() {
@@ -319,10 +353,10 @@ fn tcp_ipv4_one_round(
                             }
                             _ => SynOutcome::Closed,
                         };
-                        results_r.lock().expect("results")[gidx] = Some(o);
+                        results_r.set(gidx, o);
                         pending_r.remove(&key);
                     } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
-                        results_r.lock().expect("results")[gidx] = Some(SynOutcome::Open);
+                        results_r.set(gidx, SynOutcome::Open);
                         pending_r.remove(&key);
                     }
                 }
@@ -394,7 +428,7 @@ fn tcp_ipv4_one_round(
         if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
             let ip = IpAddr::V4(dst_ip);
             if host_over_deadline(hs.as_ref(), ip, limit) {
-                global_results.lock().expect("results")[gidx] = Some(SynOutcome::HostTimeout);
+                global_results.set(gidx, SynOutcome::HostTimeout);
                 continue;
             }
         }
@@ -496,19 +530,18 @@ fn tcp_scan_ipv4_with_kind(
         return Ok(vec![]);
     }
 
-    let global_results = Arc::new(Mutex::new(vec![None; total]));
+    let global_results = Arc::new(AtomicSynResults::new(total));
 
     for pass in 0..=connect_retries {
         let mut subset: Vec<(usize, Ipv4Addr, u16)> = Vec::new();
         for (idx, &(dst, port)) in order.iter().enumerate() {
-            if global_results.lock().expect("global_results")[idx].is_some() {
+            if global_results.is_resolved(idx) {
                 continue;
             }
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V4(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] =
-                        Some(SynOutcome::HostTimeout);
+                    global_results.set(idx, SynOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -533,12 +566,11 @@ fn tcp_scan_ipv4_with_kind(
         )?;
     }
 
-    let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
         out.push(port_line_from_syn_outcome(
             kind,
-            results[i],
+            global_results.get(i),
             IpAddr::V4(host),
             port,
         ));
@@ -650,7 +682,7 @@ fn tcp_ipv6_one_round(
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
     apply_probe_delays: bool,
-    global_results: Arc<Mutex<Vec<Option<SynOutcome>>>>,
+    global_results: Arc<AtomicSynResults>,
 ) -> io::Result<()> {
     if subset.is_empty() {
         return Ok(());
@@ -709,10 +741,10 @@ fn tcp_ipv6_one_round(
                             }
                             _ => SynOutcome::Closed,
                         };
-                        results_r.lock().expect("results")[gidx] = Some(o);
+                        results_r.set(gidx, o);
                         pending_r.remove(&key);
                     } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
-                        results_r.lock().expect("results")[gidx] = Some(SynOutcome::Open);
+                        results_r.set(gidx, SynOutcome::Open);
                         pending_r.remove(&key);
                     }
                 }
@@ -731,7 +763,7 @@ fn tcp_ipv6_one_round(
         if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
             let ip = IpAddr::V6(dst_ip);
             if host_over_deadline(hs.as_ref(), ip, limit) {
-                global_results.lock().expect("results")[gidx] = Some(SynOutcome::HostTimeout);
+                global_results.set(gidx, SynOutcome::HostTimeout);
                 continue;
             }
         }
@@ -810,19 +842,18 @@ fn tcp_scan_ipv6_with_kind(
         return Ok(vec![]);
     }
 
-    let global_results = Arc::new(Mutex::new(vec![None; total]));
+    let global_results = Arc::new(AtomicSynResults::new(total));
 
     for pass in 0..=connect_retries {
         let mut subset: Vec<(usize, Ipv6Addr, u16)> = Vec::new();
         for (idx, &(dst, port)) in order.iter().enumerate() {
-            if global_results.lock().expect("global_results")[idx].is_some() {
+            if global_results.is_resolved(idx) {
                 continue;
             }
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V6(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] =
-                        Some(SynOutcome::HostTimeout);
+                    global_results.set(idx, SynOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -846,12 +877,11 @@ fn tcp_scan_ipv6_with_kind(
         )?;
     }
 
-    let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
         out.push(port_line_from_syn_outcome(
             kind,
-            results[i],
+            global_results.get(i),
             IpAddr::V6(host),
             port,
         ));

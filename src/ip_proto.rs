@@ -9,7 +9,8 @@
 
 use std::io;
 use std::mem;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -49,23 +50,48 @@ enum ProtoOutcome {
     HostTimeout,
 }
 
-fn local_ipv4_for_checksum() -> io::Result<Ipv4Addr> {
-    let s = UdpSocket::bind("0.0.0.0:0")?;
-    s.connect("8.8.8.8:80")?;
-    match s.local_addr()? {
-        SocketAddr::V4(v) => Ok(*v.ip()),
-        _ => Err(io::Error::other("no IPv4 source for IP header")),
+const PROTO_NONE: u8 = 0;
+
+impl ProtoOutcome {
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Closed => 1,
+            Self::HostTimeout => 2,
+        }
     }
+    fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            1 => Some(Self::Closed),
+            2 => Some(Self::HostTimeout),
+            _ => None,
+        }
+    }
+}
+
+struct AtomicProtoResults(Vec<AtomicU8>);
+
+impl AtomicProtoResults {
+    fn new(len: usize) -> Self {
+        Self((0..len).map(|_| AtomicU8::new(PROTO_NONE)).collect())
+    }
+    fn set(&self, idx: usize, outcome: ProtoOutcome) {
+        self.0[idx].store(outcome.to_u8(), Ordering::Release);
+    }
+    fn get(&self, idx: usize) -> Option<ProtoOutcome> {
+        ProtoOutcome::from_u8(self.0[idx].load(Ordering::Acquire))
+    }
+    fn is_resolved(&self, idx: usize) -> bool {
+        self.0[idx].load(Ordering::Acquire) != PROTO_NONE
+    }
+}
+
+fn local_ipv4_for_checksum() -> io::Result<Ipv4Addr> {
+    crate::net_util::local_ipv4()
 }
 
 #[cfg(unix)]
 fn local_ipv6_for_checksum() -> io::Result<Ipv6Addr> {
-    let s = UdpSocket::bind("[::]:0")?;
-    s.connect("2001:4860:4860::8888:443")?;
-    match s.local_addr()? {
-        SocketAddr::V6(v) => Ok(*v.ip()),
-        _ => Err(io::Error::other("no IPv6 source for IP protocol scan")),
-    }
+    crate::net_util::local_ipv6()
 }
 
 /// Raw ICMP sockets may deliver an IPv4 header + ICMP payload; accept ICMP-only buffers too.
@@ -136,7 +162,7 @@ fn ip_proto_ipv4_one_round(
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
     apply_probe_delays: bool,
-    global_results: Arc<Mutex<Vec<Option<ProtoOutcome>>>>,
+    global_results: Arc<AtomicProtoResults>,
     mut tx: pnet::transport::TransportSender,
     src_ip: Ipv4Addr,
 ) -> io::Result<()> {
@@ -184,7 +210,7 @@ fn ip_proto_ipv4_one_round(
                     let Some((_, gidx)) = pending_r.get(&key).map(|e| *e.value()) else {
                         continue;
                     };
-                    results_r.lock().expect("results")[gidx] = Some(ProtoOutcome::Closed);
+                    results_r.set(gidx, ProtoOutcome::Closed);
                     pending_r.remove(&key);
                 }
                 Ok(None) => {}
@@ -205,7 +231,7 @@ fn ip_proto_ipv4_one_round(
         if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
             let ip = IpAddr::V4(dst_ip);
             if host_over_deadline(hs.as_ref(), ip, limit) {
-                global_results.lock().expect("results")[gidx] = Some(ProtoOutcome::HostTimeout);
+                global_results.set(gidx, ProtoOutcome::HostTimeout);
                 continue;
             }
         }
@@ -270,19 +296,18 @@ fn ip_proto_scan_ipv4_inner(
         return Ok(vec![]);
     }
 
-    let global_results = Arc::new(Mutex::new(vec![None; total]));
+    let global_results = Arc::new(AtomicProtoResults::new(total));
 
     for pass in 0..=connect_retries {
         let mut subset: Vec<(usize, Ipv4Addr, u16)> = Vec::new();
         for (idx, &(dst, proto)) in order.iter().enumerate() {
-            if global_results.lock().expect("global_results")[idx].is_some() {
+            if global_results.is_resolved(idx) {
                 continue;
             }
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V4(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] =
-                        Some(ProtoOutcome::HostTimeout);
+                    global_results.set(idx, ProtoOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -313,10 +338,9 @@ fn ip_proto_scan_ipv4_inner(
         )?;
     }
 
-    let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
-        let (state, reason) = match results[i] {
+        let (state, reason) = match global_results.get(i) {
             Some(ProtoOutcome::Closed) => ("closed", PortReason::IcmpProtoUnreachable),
             Some(ProtoOutcome::HostTimeout) => ("filtered", PortReason::HostTimeout),
             None => ("filtered", PortReason::Timeout),
@@ -553,7 +577,7 @@ fn ip_proto_ipv6_one_round(
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
     apply_probe_delays: bool,
-    global_results: Arc<Mutex<Vec<Option<ProtoOutcome>>>>,
+    global_results: Arc<AtomicProtoResults>,
     src_ip: Ipv6Addr,
     tx: std::os::fd::OwnedFd,
 ) -> io::Result<()> {
@@ -601,7 +625,7 @@ fn ip_proto_ipv6_one_round(
                     let Some((_, gidx)) = pending_r.get(&key).map(|e| *e.value()) else {
                         continue;
                     };
-                    results_r.lock().expect("results")[gidx] = Some(ProtoOutcome::Closed);
+                    results_r.set(gidx, ProtoOutcome::Closed);
                     pending_r.remove(&key);
                 }
                 Ok(None) => {}
@@ -620,7 +644,7 @@ fn ip_proto_ipv6_one_round(
         if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
             let ip = IpAddr::V6(dst_ip);
             if host_over_deadline(hs.as_ref(), ip, limit) {
-                global_results.lock().expect("results")[gidx] = Some(ProtoOutcome::HostTimeout);
+                global_results.set(gidx, ProtoOutcome::HostTimeout);
                 continue;
             }
         }
@@ -667,19 +691,18 @@ fn ip_proto_scan_ipv6_inner(
         return Ok(vec![]);
     }
 
-    let global_results = Arc::new(Mutex::new(vec![None; total]));
+    let global_results = Arc::new(AtomicProtoResults::new(total));
 
     for pass in 0..=connect_retries {
         let mut subset: Vec<(usize, Ipv6Addr, u16)> = Vec::new();
         for (idx, &(dst, proto)) in order.iter().enumerate() {
-            if global_results.lock().expect("global_results")[idx].is_some() {
+            if global_results.is_resolved(idx) {
                 continue;
             }
             if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
                 let ip = IpAddr::V6(dst);
                 if host_over_deadline(hs.as_ref(), ip, limit) {
-                    global_results.lock().expect("global_results")[idx] =
-                        Some(ProtoOutcome::HostTimeout);
+                    global_results.set(idx, ProtoOutcome::HostTimeout);
                     continue;
                 }
             }
@@ -707,10 +730,9 @@ fn ip_proto_scan_ipv6_inner(
         )?;
     }
 
-    let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
-        let (state, reason) = match results[i] {
+        let (state, reason) = match global_results.get(i) {
             Some(ProtoOutcome::Closed) => ("closed", PortReason::IcmpProtoUnreachable),
             Some(ProtoOutcome::HostTimeout) => ("filtered", PortReason::HostTimeout),
             None => ("filtered", PortReason::Timeout),
