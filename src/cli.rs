@@ -77,8 +77,8 @@ pub struct Args {
     #[arg(long = "ping-M", action = clap::ArgAction::SetTrue)]
     pub ping_mask: bool,
 
-    #[arg(long = "ping-ip-proto", value_name = "PROTOS")]
-    pub ping_ip_proto: Option<String>,
+    #[arg(long = "ping-ip-proto", num_args = 0..=1, value_name = "PROTOS")]
+    pub ping_ip_proto: Option<Option<String>>,
 
     #[arg(short = 'n')]
     pub no_dns: bool,

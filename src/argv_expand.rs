@@ -113,10 +113,22 @@ where
                 i += 1;
                 continue;
             }
-            // -PS [ports], -PA, -PU, -PY, -PO
+            // -PO [protocol list] — before generic -P* so "PO" is not mistaken for --ping-O
+            if rest == "PO" || rest.starts_with("PO") {
+                out.push("--ping-ip-proto".to_string());
+                if rest.len() > 2 {
+                    out.push(rest[2..].to_string());
+                } else {
+                    // Nmap default IP-protocol ping list when -PO is given alone
+                    out.push("1,2,4".to_string());
+                }
+                i += 1;
+                continue;
+            }
+            // -PS [ports], -PA, -PU, -PY
             if rest.len() >= 2 && rest.starts_with('P') {
                 let kind = rest.as_bytes()[1] as char;
-                if matches!(kind, 'S' | 'A' | 'U' | 'Y' | 'O') {
+                if matches!(kind, 'S' | 'A' | 'U' | 'Y') {
                     if rest.len() == 2 {
                         out.push(format!("--ping-{kind}"));
                         i += 1;
@@ -129,13 +141,6 @@ where
                     i += 1;
                     continue;
                 }
-            }
-            // -PO protocol list
-            if rest.starts_with("PO") && rest.len() > 2 {
-                out.push("--ping-ip-proto".to_string());
-                out.push(rest[2..].to_string());
-                i += 1;
-                continue;
             }
             // -T0 .. -T5
             if rest.len() == 2 && rest.starts_with('T') {
@@ -194,5 +199,20 @@ mod tests {
     fn expands_so_to_long_flag_not_scan_type_o() {
         let v = expand_nmap_style_argv(vec!["nmaprs".into(), "-sO".into(), "127.0.0.1".into()]);
         assert_eq!(v, vec!["nmaprs", "--sO", "127.0.0.1"]);
+    }
+
+    #[test]
+    fn expands_po_default_protos() {
+        let v = expand_nmap_style_argv(vec!["nmaprs".into(), "-PO".into(), "host".into()]);
+        assert_eq!(
+            v,
+            vec!["nmaprs", "--ping-ip-proto", "1,2,4", "host"]
+        );
+    }
+
+    #[test]
+    fn expands_po_with_tail() {
+        let v = expand_nmap_style_argv(vec!["nmaprs".into(), "-PO6".into()]);
+        assert_eq!(v, vec!["nmaprs", "--ping-ip-proto", "6"]);
     }
 }
