@@ -2,6 +2,7 @@
 
 use std::io;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -13,7 +14,7 @@ use rand::Rng;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
 
-use crate::config::ScanPlan;
+use crate::config::{ProxyKind, ProxySpec, ScanPlan};
 
 /// First probe per host records a start time; later probes are skipped once `limit` elapses (Nmap `--host-timeout`).
 pub(crate) fn host_over_deadline(
@@ -243,9 +244,55 @@ impl PortLine {
     }
 }
 
+/// Connect through a SOCKS4 or HTTP CONNECT proxy, returning a TCP stream to the target.
+async fn connect_via_proxy(proxy: &ProxySpec, target: SocketAddr) -> io::Result<TcpStream> {
+    let proxy_addr: SocketAddr = SocketAddr::new(
+        proxy.host.parse().map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidInput, format!("bad proxy host: {e}"))
+        })?,
+        proxy.port,
+    );
+    match proxy.kind {
+        ProxyKind::Socks4 => {
+            tokio_socks::tcp::Socks4Stream::connect(proxy_addr, target)
+                .await
+                .map(|s| s.into_inner())
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        }
+        ProxyKind::Http => {
+            let mut stream = TcpStream::connect(proxy_addr).await?;
+            let req = format!(
+                "CONNECT {}:{} HTTP/1.1\r\nHost: {}:{}\r\n\r\n",
+                target.ip(),
+                target.port(),
+                target.ip(),
+                target.port()
+            );
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            stream.write_all(req.as_bytes()).await?;
+            let mut buf = [0u8; 1024];
+            let n = stream.read(&mut buf).await?;
+            let resp = String::from_utf8_lossy(&buf[..n]);
+            if resp.contains("200") {
+                Ok(stream)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    format!("HTTP CONNECT rejected: {}", resp.lines().next().unwrap_or("")),
+                ))
+            }
+        }
+    }
+}
+
 /// TCP connect scan: each probe is `tokio::spawn`ed for multi-core work-stealing;
 /// an `Arc<Semaphore>` caps in-flight connects to `effective_probe_concurrency()`.
-pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Vec<PortLine> {
+/// `progress` is an optional atomic counter incremented after each probe completes (for `--stats-every`).
+pub async fn tcp_connect_scan(
+    work: Vec<(IpAddr, u16)>,
+    plan: Arc<ScanPlan>,
+    progress: Option<Arc<AtomicUsize>>,
+) -> Vec<PortLine> {
     let conc = plan.effective_probe_concurrency();
     let timeout = plan.connect_timeout;
     let no_ping = plan.no_ping;
@@ -255,6 +302,7 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
     let host_limit = plan.host_timeout;
     let scan_delay = plan.scan_delay;
     let max_scan_delay = plan.max_scan_delay;
+    let proxies: Arc<Vec<ProxySpec>> = Arc::new(plan.proxies.clone());
 
     let sem = Arc::new(Semaphore::new(conc));
     let n = work.len();
@@ -264,8 +312,11 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
         let sem = sem.clone();
         let pacer = pacer.clone();
         let host_deadline = host_deadline.clone();
+        let proxies = proxies.clone();
+        let progress = progress.clone();
 
         handles.push(tokio::spawn(async move {
+            let result = async {
             let addr = SocketAddr::new(host, port);
             let overall_start = Instant::now();
             let max_tries = 1u32.saturating_add(connect_retries);
@@ -292,8 +343,11 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
                 }
 
                 let _permit = sem.acquire().await.expect("semaphore closed");
-                let fut = TcpStream::connect(addr);
-                let res = tokio::time::timeout(timeout, fut).await;
+                let res = if let Some(proxy) = proxies.first() {
+                    tokio::time::timeout(timeout, connect_via_proxy(proxy, addr)).await
+                } else {
+                    tokio::time::timeout(timeout, TcpStream::connect(addr)).await
+                };
                 drop(_permit);
 
                 let elapsed = overall_start.elapsed().as_millis();
@@ -341,6 +395,11 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
                     }
                 }
             }
+            }.await;
+            if let Some(ref p) = progress {
+                p.fetch_add(1, Ordering::Relaxed);
+            }
+            result
         }));
     }
 

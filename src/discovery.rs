@@ -723,7 +723,11 @@ fn local_subnet_v4_hosts(hosts: &[IpAddr]) -> Vec<Ipv4Addr> {
 /// ARP ping for local-subnet IPv4 hosts. Sends ARP requests and listens for replies.
 /// Returns set of hosts that replied within the timeout.
 #[cfg(unix)]
-fn arp_ping_hosts(targets: &[Ipv4Addr], timeout: Duration) -> HashSet<IpAddr> {
+fn arp_ping_hosts(
+    targets: &[Ipv4Addr],
+    timeout: Duration,
+    spoof_mac: Option<[u8; 6]>,
+) -> HashSet<IpAddr> {
     use pnet::datalink::{self, Channel};
     use pnet::packet::arp::{ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket};
     use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
@@ -745,9 +749,13 @@ fn arp_ping_hosts(targets: &[Ipv4Addr], timeout: Duration) -> HashSet<IpAddr> {
         None => return alive,
     };
 
-    let src_mac = match iface.mac {
-        Some(m) => m,
-        None => return alive,
+    let src_mac = if let Some(mac) = spoof_mac {
+        MacAddr::new(mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
+    } else {
+        match iface.mac {
+            Some(m) => m,
+            None => return alive,
+        }
     };
     let src_ip = match iface.ips.iter().find_map(|ip| match ip.ip() {
         IpAddr::V4(a) => Some(a),
@@ -816,7 +824,11 @@ fn arp_ping_hosts(targets: &[Ipv4Addr], timeout: Duration) -> HashSet<IpAddr> {
 }
 
 #[cfg(not(unix))]
-fn arp_ping_hosts(_targets: &[Ipv4Addr], _timeout: Duration) -> HashSet<IpAddr> {
+fn arp_ping_hosts(
+    _targets: &[Ipv4Addr],
+    _timeout: Duration,
+    _spoof_mac: Option<[u8; 6]>,
+) -> HashSet<IpAddr> {
     HashSet::new()
 }
 
@@ -826,6 +838,7 @@ pub async fn hosts_after_discovery(
     args: &Args,
     concurrency: usize,
     connect_timeout: Duration,
+    spoof_mac: Option<[u8; 6]>,
 ) -> Result<Vec<IpAddr>> {
     if args.no_ping {
         return Ok(hosts);
@@ -876,7 +889,7 @@ pub async fn hosts_after_discovery(
             let arp_alive = tokio::task::spawn_blocking({
                 let local_v4 = local_v4.clone();
                 let ct = connect_timeout;
-                move || arp_ping_hosts(&local_v4, ct.min(Duration::from_secs(2)))
+                move || arp_ping_hosts(&local_v4, ct.min(Duration::from_secs(2)), spoof_mac)
             })
             .await
             .unwrap_or_default();

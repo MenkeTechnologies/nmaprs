@@ -32,7 +32,7 @@ pub mod vscan;
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -50,10 +50,20 @@ use crate::scan::{tcp_connect_scan, udp_scan, PortLine, ProbeRatePacer, UdpIcmpN
 use crate::target::{apply_exclude, expand_target, random_addresses, read_input_list, ExpandOpts};
 
 fn expand_opts(args: &Args) -> ExpandOpts {
+    let dns_servers: Vec<std::net::IpAddr> = args
+        .dns_servers
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .filter_map(|p| p.trim().parse().ok())
+                .collect()
+        })
+        .unwrap_or_default();
     ExpandOpts {
         ipv6: args.ipv6,
         no_dns: args.no_dns,
         resolve_all: args.resolve_all,
+        dns_servers,
     }
 }
 
@@ -232,7 +242,11 @@ fn spawn_udp_icmp_listeners(
     listeners
 }
 
-async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<PortLine>> {
+async fn port_scan(
+    work: Vec<(IpAddr, u16)>,
+    plan: Arc<ScanPlan>,
+    progress: Option<Arc<AtomicUsize>>,
+) -> Result<Vec<PortLine>> {
     let out = match plan.scan_kind {
         ScanKind::Udp => {
             unreachable!("UDP scans use shared ICMP listeners in run(); do not call port_scan")
@@ -410,7 +424,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                     if kind.tcp_connect_fallback_on_raw_error() {
                         warn!("{kind} scan failed ({e}); falling back to TCP connect for IPv4");
                         collected
-                            .extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone()).await);
+                            .extend(tcp_connect_scan(work_tcp_fallback_v4, plan.clone(), None).await);
                     } else {
                         warn!(
                             "{kind} scan failed ({e}); skipping TCP connect fallback (raw scan semantics differ from connect)"
@@ -426,7 +440,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
                             "IPv6 {kind} scan failed ({e}); falling back to TCP connect for IPv6"
                         );
                         collected
-                            .extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone()).await);
+                            .extend(tcp_connect_scan(work_tcp_fallback_v6, plan.clone(), None).await);
                     } else {
                         warn!(
                             "IPv6 {kind} scan failed ({e}); skipping TCP connect fallback (raw scan semantics differ from connect)"
@@ -545,7 +559,7 @@ async fn port_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> Result<Vec<
             if let Some(fb) = plan.ftp_bounce.clone() {
                 crate::ftp_bounce::ftp_bounce_scan(work, plan.clone(), fb).await
             } else {
-                tcp_connect_scan(work, plan.clone()).await
+                tcp_connect_scan(work, plan.clone(), progress.clone()).await
             }
         }
     };
@@ -562,13 +576,17 @@ async fn expand_specs_ordered(
         return Ok(vec![]);
     }
     let c = concurrency.max(1);
+    let opts = Arc::new(opts);
     let results: Vec<Result<(usize, Vec<IpAddr>), anyhow::Error>> =
         stream::iter(specs.into_iter().enumerate())
-            .map(|(i, token)| async move {
-                let ips = expand_target(&token, &opts)
-                    .await
-                    .map_err(|e| anyhow!("expand target {token}: {e}"))?;
-                Ok((i, ips))
+            .map(|(i, token)| {
+                let opts = opts.clone();
+                async move {
+                    let ips = expand_target(&token, &opts)
+                        .await
+                        .map_err(|e| anyhow!("expand target {token}: {e}"))?;
+                    Ok((i, ips))
+                }
             })
             .buffer_unordered(c)
             .collect()
@@ -586,7 +604,7 @@ async fn collect_hosts(args: &Args, concurrency: usize) -> Result<Vec<IpAddr>> {
     let mut hosts = Vec::new();
     if let Some(path) = &args.input_list {
         let lines = read_input_list(path)?;
-        hosts.extend(expand_specs_ordered(lines, opts, concurrency).await?);
+        hosts.extend(expand_specs_ordered(lines, opts.clone(), concurrency).await?);
     }
     if let Some(n) = args.random_targets {
         hosts.extend(random_addresses(n, args.ipv6));
@@ -688,6 +706,7 @@ pub async fn run(args: Args) -> Result<i32> {
             &args,
             plan.effective_probe_concurrency(),
             plan.connect_timeout,
+            plan.spoof_mac,
         )
         .await
         .context("host discovery")?;
@@ -781,6 +800,44 @@ pub async fn run(args: Args) -> Result<i32> {
         v
     };
 
+    // --stats-every: periodic progress line during the scan.
+    let total_probes = hosts.len() * plan.ports.len() * all_scan_kinds.len();
+    let completed_probes = Arc::new(AtomicUsize::new(0));
+    let stats_stop = Arc::new(AtomicBool::new(false));
+    let stats_handle = plan.stats_every.map(|interval| {
+        let done = completed_probes.clone();
+        let stop = stats_stop.clone();
+        let scan_start = Instant::now();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.tick().await; // skip immediate first tick
+            loop {
+                ticker.tick().await;
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let d = done.load(Ordering::Relaxed);
+                let elapsed = scan_start.elapsed().as_secs_f64();
+                let pct = if total_probes > 0 {
+                    (d as f64 / total_probes as f64 * 100.0).min(100.0)
+                } else {
+                    100.0
+                };
+                let rate = if elapsed > 0.0 { d as f64 / elapsed } else { 0.0 };
+                let eta = if rate > 0.0 && d < total_probes {
+                    let remaining = (total_probes - d) as f64 / rate;
+                    format!("{:.0}s", remaining)
+                } else {
+                    "0s".to_string()
+                };
+                eprintln!(
+                    "Stats: {:.2}% done; ETC: {} ({} of {} probes; {:.0} probes/sec)",
+                    pct, eta, d, total_probes, rate
+                );
+            }
+        })
+    });
+
     for current_kind in &all_scan_kinds {
         // Build a temporary plan with this scan kind as primary.
         let kind_plan = if *current_kind != plan.scan_kind {
@@ -817,7 +874,9 @@ pub async fn run(args: Args) -> Result<i32> {
                     icmp_session = Some((notes, stop, handles));
                 }
                 let icmp_notes = icmp_session.as_ref().map(|(n, _, _)| n.clone());
-                lines.extend(udp_scan(work, kind_plan.clone(), icmp_notes).await);
+                let batch = udp_scan(work, kind_plan.clone(), icmp_notes).await;
+                completed_probes.fetch_add(batch.len(), Ordering::Relaxed);
+                lines.extend(batch);
             }
 
             if let Some((_, stop, handles)) = icmp_session {
@@ -835,9 +894,20 @@ pub async fn run(args: Args) -> Result<i32> {
                 if work.is_empty() {
                     continue;
                 }
-                lines.extend(port_scan(work, kind_plan.clone()).await?);
+                let batch = port_scan(work, kind_plan.clone(), Some(completed_probes.clone())).await?;
+                // TCP connect increments per-probe inside the task; other scan types count here.
+                if kind_plan.scan_kind != ScanKind::TcpConnect {
+                    completed_probes.fetch_add(batch.len(), Ordering::Relaxed);
+                }
+                lines.extend(batch);
             }
         }
+    }
+
+    // Stop periodic stats ticker.
+    stats_stop.store(true, Ordering::Relaxed);
+    if let Some(h) = stats_handle {
+        h.abort();
     }
 
     if let Some(path) = &plan.resume_path {
@@ -1105,6 +1175,7 @@ mod expand_specs_tests {
             ipv6: false,
             no_dns: true,
             resolve_all: false,
+            dns_servers: vec![],
         };
         let v = expand_specs_ordered(vec![], opts, 4).await.unwrap();
         assert!(v.is_empty());
@@ -1116,6 +1187,7 @@ mod expand_specs_tests {
             ipv6: false,
             no_dns: true,
             resolve_all: false,
+            dns_servers: vec![],
         };
         let specs = vec!["127.0.0.2".to_string(), "127.0.0.1".to_string()];
         let v = expand_specs_ordered(specs, opts, 8).await.unwrap();

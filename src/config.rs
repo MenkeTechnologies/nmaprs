@@ -201,6 +201,88 @@ pub struct ScanPlan {
     pub output_hex: Option<PathBuf>,
     /// Packet-level evasion options.
     pub evasion: EvasionOpts,
+    /// `--proxies` / `--proxy`: SOCKS4/SOCKS5/HTTP proxy chain (comma-separated URLs).
+    pub proxies: Vec<ProxySpec>,
+    /// `--dns-servers`: custom DNS resolver addresses (comma-separated IPs).
+    pub dns_servers: Vec<std::net::IpAddr>,
+    /// `--spoof-mac`: spoofed source MAC for ARP / Layer2 frames.
+    pub spoof_mac: Option<[u8; 6]>,
+}
+
+/// Parsed proxy specification from `--proxies`.
+#[derive(Debug, Clone)]
+pub struct ProxySpec {
+    pub kind: ProxyKind,
+    pub host: String,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyKind {
+    Socks4,
+    Http,
+}
+
+fn parse_proxy_list(s: &str) -> Result<Vec<ProxySpec>> {
+    let mut out = Vec::new();
+    for part in s.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (kind, rest) = if let Some(r) = part.strip_prefix("socks4://") {
+            (ProxyKind::Socks4, r)
+        } else if let Some(r) = part.strip_prefix("http://") {
+            (ProxyKind::Http, r)
+        } else {
+            // Default to SOCKS4 if no scheme
+            (ProxyKind::Socks4, part)
+        };
+        let (host, port) = if let Some(colon) = rest.rfind(':') {
+            let p: u16 = rest[colon + 1..]
+                .parse()
+                .with_context(|| format!("bad proxy port in '{part}'"))?;
+            (rest[..colon].to_string(), p)
+        } else {
+            (rest.to_string(), if kind == ProxyKind::Http { 8080 } else { 1080 })
+        };
+        out.push(ProxySpec { kind, host, port });
+    }
+    Ok(out)
+}
+
+fn parse_dns_servers(s: &str) -> Result<Vec<std::net::IpAddr>> {
+    let mut out = Vec::new();
+    for part in s.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let ip: std::net::IpAddr = part
+            .parse()
+            .with_context(|| format!("bad DNS server address '{part}'"))?;
+        out.push(ip);
+    }
+    if out.is_empty() {
+        bail!("--dns-servers: no valid addresses");
+    }
+    Ok(out)
+}
+
+fn parse_mac(s: &str) -> Result<[u8; 6]> {
+    // Accept XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX or XXXXXXXXXXXX
+    let hex: String = s
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .collect();
+    if hex.len() != 12 {
+        bail!("--spoof-mac: expected 6-byte MAC address, got '{s}'");
+    }
+    let mut mac = [0u8; 6];
+    for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
+        mac[i] = u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16)?;
+    }
+    Ok(mac)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -686,6 +768,22 @@ impl ScanPlan {
             }
         }
 
+        let proxies = if let Some(ref s) = args.proxies {
+            parse_proxy_list(s)?
+        } else {
+            vec![]
+        };
+        let dns_servers = if let Some(ref s) = args.dns_servers {
+            parse_dns_servers(s)?
+        } else {
+            vec![]
+        };
+        let spoof_mac = if let Some(ref s) = args.spoof_mac {
+            Some(parse_mac(s)?)
+        } else {
+            None
+        };
+
         let plan = ScanPlan {
             ports,
             concurrency,
@@ -745,6 +843,9 @@ impl ScanPlan {
             output_machine,
             output_hex,
             evasion,
+            proxies,
+            dns_servers,
+            spoof_mac,
         };
 
         for msg in &plan.unimplemented {

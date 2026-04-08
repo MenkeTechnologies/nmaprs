@@ -13,7 +13,7 @@ use thiserror::Error;
 /// Hard cap to avoid accidental memory blow-ups on wide CIDRs.
 const MAX_HOSTS_PER_TARGET: usize = 65_536;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ExpandOpts {
     /// `-6`: resolve and expand IPv6 only.
     pub ipv6: bool,
@@ -21,6 +21,8 @@ pub struct ExpandOpts {
     pub no_dns: bool,
     /// Nmap `--resolve-all`: include every A/AAAA from forward DNS (default: first address only).
     pub resolve_all: bool,
+    /// `--dns-servers`: custom DNS resolver addresses.
+    pub dns_servers: Vec<IpAddr>,
 }
 
 #[derive(Debug, Error)]
@@ -175,10 +177,32 @@ fn expand_octet(part: &str) -> Result<Vec<u8>, TargetError> {
 }
 
 async fn resolve_host(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr>, TargetError> {
-    let mut addrs = tokio::net::lookup_host((host, 0))
-        .await
-        .map_err(|e| TargetError::Dns(host.to_string(), e.to_string()))?;
-    let mut out: Vec<IpAddr> = addrs.by_ref().map(|a| a.ip()).collect();
+    let mut out: Vec<IpAddr> = if opts.dns_servers.is_empty() {
+        // System resolver (default)
+        let addrs = tokio::net::lookup_host((host, 0))
+            .await
+            .map_err(|e| TargetError::Dns(host.to_string(), e.to_string()))?;
+        addrs.map(|a| a.ip()).collect()
+    } else {
+        // Custom DNS servers via hickory-resolver
+        use hickory_resolver::config::{NameServerConfigGroup, ResolverConfig};
+        use hickory_resolver::name_server::TokioConnectionProvider;
+        use hickory_resolver::Resolver;
+
+        let ns_group = NameServerConfigGroup::from_ips_clear(
+            &opts.dns_servers,
+            53,
+            true, // trust_negative_responses
+        );
+        let cfg = ResolverConfig::from_parts(None, vec![], ns_group);
+        let resolver = Resolver::builder_with_config(cfg, TokioConnectionProvider::default())
+            .build();
+        let lookup = resolver
+            .lookup_ip(host)
+            .await
+            .map_err(|e| TargetError::Dns(host.to_string(), e.to_string()))?;
+        lookup.iter().collect()
+    };
     if opts.ipv6 {
         out.retain(|ip| ip.is_ipv6());
     } else {
@@ -308,6 +332,7 @@ mod tests {
             ipv6: false,
             no_dns: true,
             resolve_all: false,
+            dns_servers: vec![],
         };
         let ips = rt.block_on(expand_target("10.0.0.0/31", &opts)).unwrap();
         assert_eq!(ips.len(), 2);
