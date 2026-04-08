@@ -3,8 +3,8 @@
 //! Default probes: **ICMP echo** (parallel with TCP) plus **TCP 443 and 80** using **raw SYN** when
 //! privileged ([`crate::syn::parallel_syn_scan_ipv4`] / `ipv6`), otherwise TCP connect fallback.
 //!
-//! **`-PS`**: raw half-open SYN (same as above); **`-PA`**: TCP connect (Nmap sends raw ACK; connect
-//! still detects RST/open without a second raw packet type here).
+//! **`-PS`**: raw half-open SYN; **`-PA`**: raw TCP ACK (same `syn` stack as `-PS`); both fall back to
+//! TCP connect if raw sockets fail.
 //!
 //! **UDP `-PU`**: UDP datagram; reply or ICMP-unreachable-style socket errors → “up”.
 
@@ -145,6 +145,78 @@ async fn syn_raw_discovery_collect(
     Ok(out)
 }
 
+/// Raw ACK discovery (`-PA`): RST or SYN-ACK ⇒ host responded.
+async fn ack_raw_discovery_collect(
+    hosts: &[IpAddr],
+    ports: &[u16],
+    skip: Option<&HashSet<IpAddr>>,
+    timeout: Duration,
+    max_shards: usize,
+) -> std::io::Result<HashSet<IpAddr>> {
+    let mut v4: Vec<(Ipv4Addr, u16)> = Vec::new();
+    let mut v6: Vec<(Ipv6Addr, u16)> = Vec::new();
+    for &h in hosts {
+        if skip.map(|s| s.contains(&h)).unwrap_or(false) {
+            continue;
+        }
+        for &p in ports {
+            match h {
+                IpAddr::V4(a) => v4.push((a, p)),
+                IpAddr::V6(a) => v6.push((a, p)),
+            }
+        }
+    }
+
+    let v4_fut = async {
+        if v4.is_empty() {
+            return Ok::<HashSet<IpAddr>, std::io::Error>(HashSet::new());
+        }
+        tokio::task::spawn_blocking(move || {
+            let lines = crate::syn::parallel_ack_ping_scan_ipv4(
+                v4,
+                timeout,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                max_shards,
+            )?;
+            Ok(port_lines_to_alive_hosts(lines))
+        })
+        .await
+        .map_err(|e| std::io::Error::other(format!("{e}")))?
+    };
+
+    let v6_fut = async {
+        if v6.is_empty() {
+            return Ok::<HashSet<IpAddr>, std::io::Error>(HashSet::new());
+        }
+        tokio::task::spawn_blocking(move || {
+            let lines = crate::syn::parallel_ack_ping_scan_ipv6(
+                v6,
+                timeout,
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                max_shards,
+            )?;
+            Ok(port_lines_to_alive_hosts(lines))
+        })
+        .await
+        .map_err(|e| std::io::Error::other(format!("{e}")))?
+    };
+
+    let (r4, r6) = tokio::join!(v4_fut, v6_fut);
+    let mut out = r4?;
+    out.extend(r6?);
+    Ok(out)
+}
+
 /// `-PS` / default TCP ports: raw SYN when possible, else TCP connect.
 async fn tcp_ps_discovery_or_connect(
     hosts: &[IpAddr],
@@ -173,6 +245,45 @@ async fn tcp_ps_discovery_merge(
 ) {
     let skip = alive.clone();
     let new_up = tcp_ps_discovery_or_connect(
+        hosts,
+        ports,
+        concurrency,
+        Some(&skip),
+        connect_timeout,
+        max_shards,
+    )
+    .await;
+    alive.extend(new_up);
+}
+
+/// `-PA`: raw ACK when possible, else TCP connect.
+async fn tcp_pa_discovery_or_connect(
+    hosts: &[IpAddr],
+    ports: &[u16],
+    concurrency: usize,
+    skip: Option<&HashSet<IpAddr>>,
+    connect_timeout: Duration,
+    max_shards: usize,
+) -> HashSet<IpAddr> {
+    match ack_raw_discovery_collect(hosts, ports, skip, connect_timeout, max_shards).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, "raw TCP ACK discovery failed; using TCP connect");
+            tcp_connect_discovery_collect(hosts, ports, concurrency, skip, connect_timeout).await
+        }
+    }
+}
+
+async fn tcp_pa_discovery_merge(
+    hosts: &[IpAddr],
+    ports: &[u16],
+    concurrency: usize,
+    alive: &mut HashSet<IpAddr>,
+    connect_timeout: Duration,
+    max_shards: usize,
+) {
+    let skip = alive.clone();
+    let new_up = tcp_pa_discovery_or_connect(
         hosts,
         ports,
         concurrency,
@@ -221,19 +332,6 @@ async fn tcp_connect_discovery_collect(
         .filter(|(_, ok)| *ok)
         .map(|(h, _)| h)
         .collect()
-}
-
-async fn tcp_connect_discovery(
-    hosts: &[IpAddr],
-    ports: &[u16],
-    concurrency: usize,
-    alive: &mut HashSet<IpAddr>,
-    connect_timeout: Duration,
-) {
-    let skip = alive.clone();
-    let new_up =
-        tcp_connect_discovery_collect(hosts, ports, concurrency, Some(&skip), connect_timeout).await;
-    alive.extend(new_up);
 }
 
 async fn udp_ping_probe(host: IpAddr, port: u16, wait: Duration) -> bool {
@@ -393,7 +491,7 @@ pub async fn hosts_after_discovery(
         }
         if args.ping_ack.is_some() {
             let ports = ports_from_ping_tcp(&args.ping_ack, TCP_ACK_DEFAULT)?;
-            tcp_connect_discovery(&hosts, &ports, c, &mut alive, connect_timeout).await;
+            tcp_pa_discovery_merge(&hosts, &ports, c, &mut alive, connect_timeout, max_shards).await;
         }
         if args.ping_udp.is_some() {
             let ports = ports_from_ping_udp(&args.ping_udp)?;
