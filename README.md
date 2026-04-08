@@ -7,7 +7,7 @@
 
 # nmaprs
 
-**nmaprs** is a Rust-native network scanner that speaks **nmap’s CLI dialect** (see `nmap --help`) and runs a **highly parallel TCP connect** engine (`tokio` + `futures::stream` + bounded concurrency). It is **not** a byte-for-byte reimplementation of Nmap: NSE (Lua), OS fingerprinting, raw SYN/UDP, traceroute, and ICMP discovery are separate lifetimes of work. This tool **accepts the same flag families**, implements **connect scanning and target/port plumbing** for real workloads, and **fails loudly** on features that are not wired yet.
+**nmaprs** is a Rust-native network scanner that speaks **nmap’s CLI dialect** (see `nmap --help`) and runs **highly parallel** scan engines (`tokio` + `futures::stream` + bounded concurrency). It is **not** a byte-for-byte reimplementation of Nmap: the full **NSE Lua runtime**, **Nmap OS fingerprint database**, and **every** obscure probe path are not embedded. This tool implements **real** TCP connect, UDP probes, ICMP ping discovery, raw IPv4 SYN (privileged), target list / random hosts, IPv6, resume checkpoints, traceroute, TTL-based OS **heuristics**, and **built-in** Rust “scripts” (banner grab) for `--script` / `-sC`.
 
 Created by **MenkeTechnologies**.
 
@@ -15,14 +15,21 @@ Created by **MenkeTechnologies**.
 
 | Area | Status |
 |------|--------|
-| TCP connect scan (`-sT`, default) | **Implemented** — async, parallel, timeout-bound |
-| Port specs (`-p`, `-F`, `--top-ports`, `--exclude-ports`, `--port-ratio`) | **Implemented** — default port order from embedded `nmap-services` TCP frequency list |
-| Targets (IPv4, CIDR, `192.168.1-3.1-20` ranges, DNS names) | **Implemented** — IPv6 (`-6`) not implemented |
-| Output (`-oN`, `-oG`, `-oX`, `-oA`) | **Implemented** — XML is minimal; `-oS` ignored with warning |
-| Timing (`-T0`–`-T5`, parallelism / RTT-ish timeout) | **Partial** — maps to concurrency + connect timeout |
-| Raw SYN (`-sS`), UDP (`-sU`), NSE (`--script`), OS (`-O`), ping (`-sn`) | **Not implemented** — CLI may parse; execution bails or warns (see runtime) |
+| TCP connect (`-sT`, default) | **Implemented** — async, parallel, timeout-bound |
+| UDP (`-sU`) | **Implemented** — reply → `open`; else `open|filtered` (userspace limits vs ICMP) |
+| SYN (`-sS`, IPv4) | **Implemented** via `pnet` raw TCP — **requires privileges**; IPv6 falls back to connect |
+| Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6` |
+| IPv6 (`-6`) | **Implemented** — targets + scans (SYN IPv6 not raw) |
+| `-iL` / `-iR` | **Implemented** |
+| `--resume` | **Implemented** — JSON checkpoint of completed `(host, port)` |
+| `--traceroute` | **Implemented** — system `traceroute` / `tracert` |
+| `-O` / `-A` OS | **Heuristic** — ICMP TTL bucket guess (+ ping after TCP scan when not `-sn`) |
+| `--script` / `-sC` | **Partial** — `default` / `banner` builtins; Lua NSE **not** embedded |
+| `--iflist` | **Implemented** — lists interfaces via `if-addrs` |
+| Port specs (`-p`, `-F`, `--top-ports`, …) | **Implemented** — embedded TCP frequency list |
+| Output (`-oN`, `-oG`, `-oX`, `-oA`) | **Implemented** — XML minimal; `-oS` ignored with warning |
 
-If you need **authoritative** Nmap behavior, use **[Nmap](https://nmap.org/)**. Use **nmaprs** when you want a **fast Rust connect scanner** with **familiar flags** and **room to grow**.
+If you need **authoritative** Nmap NSE/OS DB behavior, use **[Nmap](https://nmap.org/)**.
 
 ## Build
 
@@ -34,26 +41,25 @@ Binary: `target/release/nmaprs`
 
 ## Help (`-h` / `--help`)
 
-Short help and long help match the **nmap-style surface** (combined flags like `-sT`, `-Pn`, `-PS80`, `-T4` are expanded before parsing). Try:
-
-```bash
-cargo run -- -h
-```
+Combined flags like `-sT`, `-Pn`, `-PS80`, `-T4` are expanded before parsing.
 
 ## Examples
 
 ```bash
-# TCP connect scan — top ports from embedded frequency table
+# TCP connect — top ports from embedded frequency table
 nmaprs scanme.nmap.org
 
-# Explicit ports, treat all hosts up, aggressive timing template
-nmaprs -Pn -p 22,80,443 -T4 192.168.0.0/30
+# Ping scan (no port scan)
+nmaprs -sn scanme.nmap.org
 
-# List targets only (no port scan)
-nmaprs -sL 10.0.0.0/29
+# UDP top ports
+nmaprs -sU --top-ports 100 target
 
-# Grepable output
-nmaprs -p 443 -oG - scanme.nmap.org
+# Targets from file + resume
+nmaprs -iL hosts.txt --resume state.json -oN out.txt
+
+# IPv6
+nmaprs -6 -p 80,443 2001:db8::/126
 ```
 
 ## Tests
@@ -62,27 +68,24 @@ nmaprs -p 443 -oG - scanme.nmap.org
 cargo test
 ```
 
-CI (GitHub Actions on `main` and pull requests): `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` on Ubuntu and macOS.
-
 ## Benchmarks
 
 ```bash
 cargo bench --bench scan
 ```
 
-Uses Criterion on a tiny localhost workload (closed ports, short timeout). For wall-clock scans, your network RTT and firewall policy dominate.
+## Architecture
 
-## Architecture (why it is parallel)
-
-1. **Argv expansion** (`src/argv_expand.rs`) normalizes glued nmap tokens (`-sS`, `-PS443`, `-T3`, …) before `clap`.
-2. **Plan** (`src/config.rs`) turns flags into a `ScanPlan` (ports, concurrency, timeout).
-3. **Targets** (`src/target.rs`) expand hostnames / CIDR / nmap-style octet ranges (IPv4) with a hard cap on fan-out.
-4. **Scan** (`src/scan.rs`) schedules one async task per `(host, port)` pair, **`buffer_unordered(concurrency)`** so work stays CPU + syscall bound instead of one-host-at-a-time.
-5. **Output** (`src/output.rs`) streams normal / grepable / minimal XML.
+1. **Argv expansion** (`src/argv_expand.rs`) normalizes glued nmap tokens before `clap`.
+2. **Plan** (`src/config.rs`) → `ScanPlan`.
+3. **Targets** (`src/target.rs`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`.
+4. **Scan** (`src/scan.rs`, `src/syn.rs`) — TCP connect / UDP / raw IPv4 SYN.
+5. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
+6. **Output** (`src/output.rs`).
 
 ## Data
 
-`data/top_ports.txt` is generated from Nmap’s `nmap-services` TCP frequency ordering. Regenerate with `bash scripts/fetch_top_ports.sh` (requires `curl` and `awk`).
+`data/top_ports.txt` — regenerate with `bash scripts/fetch_top_ports.sh`.
 
 ## License
 
@@ -90,4 +93,4 @@ Licensed under either of **Apache License, Version 2.0** or **MIT** at your opti
 
 ## Legal / ethics
 
-Only scan networks you own or are authorized to test. This software is provided as-is for legitimate security research and operations.
+Only scan networks you own or are authorized to test.

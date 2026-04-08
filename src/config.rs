@@ -38,13 +38,14 @@ pub struct ScanPlan {
     pub version_scan_requested: bool,
     pub os_detect_requested: bool,
     pub script_requested: bool,
+    pub traceroute: bool,
+    pub resume_path: Option<PathBuf>,
     pub unimplemented: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanKind {
     TcpConnect,
-    /// Accepted on CLI; raw SYN requires privileges / platform support.
     TcpSyn,
     Udp,
     Other(char),
@@ -55,50 +56,19 @@ impl ScanPlan {
         let mut unimplemented: Vec<String> = Vec::new();
 
         if args.aggressive {
-            // -A enables OS, version, script, traceroute — we note gaps
-            unimplemented.push("-A (traceroute / NSE / full OS FP not implemented)".into());
+            unimplemented.push(
+                "-A: full Nmap OS fingerprint DB and full version DB not embedded; TTL/heuristic OS + banner scripts run instead where applicable".into(),
+            );
         }
 
-        if args.ipv6 {
-            bail!("IPv6 (-6) is not implemented in this build");
-        }
-
-        if args.input_list.is_some() {
-            bail!("-iL input file: use shell xargs or implement in a future release");
-        }
-        if args.random_targets.is_some() {
-            bail!("-iR random targets is not implemented");
-        }
-
-        if args.resume.is_some() {
-            bail!("--resume is not implemented");
+        if args.version_scan {
+            unimplemented.push(
+                "-sV: service/version DB not embedded; use nmap for full version detection".into(),
+            );
         }
 
         if args.ping_only && args.list_scan {
             bail!("-sn and -sL together are ambiguous");
-        }
-
-        // --- Scan kind ---
-        let mut scan_kind = ScanKind::TcpConnect;
-        if let Some(ch) = args.scan_type {
-            match ch {
-                'T' | 't' => scan_kind = ScanKind::TcpConnect,
-                'S' | 's' => {
-                    scan_kind = ScanKind::TcpSyn;
-                    unimplemented
-                        .push("-sS SYN scan needs raw sockets; use -sT or run nmap for SYN".into());
-                }
-                'U' | 'u' => {
-                    bail!("UDP scan (-sU) is not implemented; use nmap for UDP");
-                }
-                'N' | 'F' | 'X' | 'A' | 'W' | 'M' | 'Y' | 'Z' | 'O' | 'I' => {
-                    scan_kind = ScanKind::Other(ch);
-                    unimplemented.push(format!(
-                        "scan type -s{ch} is not implemented (TCP connect only in this release)"
-                    ));
-                }
-                _ => bail!("unknown --scan-type {ch}"),
-            }
         }
 
         if args.ip_proto_scan {
@@ -111,15 +81,30 @@ impl ScanPlan {
             bail!("-b FTP bounce scan is not implemented");
         }
 
-        if args.version_scan || args.script_default || args.script.is_some() || args.aggressive {
-            unimplemented.push("NSE / version probes: not implemented (CLI accepted)".into());
-        }
-        if args.os_detect || args.aggressive {
-            unimplemented.push("OS detection (-O / -A): not implemented (CLI accepted)".into());
+        // --- Scan kind ---
+        let mut scan_kind = ScanKind::TcpConnect;
+        if let Some(ch) = args.scan_type {
+            match ch {
+                'T' | 't' => scan_kind = ScanKind::TcpConnect,
+                'S' | 's' => scan_kind = ScanKind::TcpSyn,
+                'U' | 'u' => scan_kind = ScanKind::Udp,
+                'N' | 'F' | 'X' | 'A' | 'W' | 'M' | 'Y' | 'Z' | 'O' | 'I' => {
+                    scan_kind = ScanKind::Other(ch);
+                    unimplemented.push(format!(
+                        "scan type -s{ch} is not implemented in nmaprs (use nmap for exotic TCP flags)"
+                    ));
+                }
+                _ => bail!("unknown --scan-type {ch}"),
+            }
         }
 
-        // --- Ports ---
-        let mut ports: Vec<u16> = if let Some(p) = &args.ports {
+        // --- Ports (skipped for host-discovery-only) ---
+        let mut ports: Vec<u16> = if args.ping_only {
+            if args.ports.is_some() {
+                warn!("-sn ignores explicit -p port list");
+            }
+            vec![]
+        } else if let Some(p) = &args.ports {
             parse_port_spec(p).map_err(|e| anyhow!(e))?
         } else if args.fast {
             fast_tcp_ports()
@@ -135,17 +120,19 @@ impl ScanPlan {
             default_tcp_ports()
         };
 
-        if let Some(ex) = &args.exclude_ports {
-            let banned = parse_exclude_ports(ex).map_err(|e| anyhow!(e))?;
-            ports.retain(|p| !banned.contains(p));
-        }
+        if !args.ping_only {
+            if let Some(ex) = &args.exclude_ports {
+                let banned = parse_exclude_ports(ex).map_err(|e| anyhow!(e))?;
+                ports.retain(|p| !banned.contains(p));
+            }
 
-        if ports.is_empty() {
-            bail!("no ports to scan after exclusions");
-        }
+            if ports.is_empty() {
+                bail!("no ports to scan after exclusions");
+            }
 
-        if !args.sequential_ports && !args.list_scan {
-            ports.shuffle(&mut rand::thread_rng());
+            if !args.sequential_ports && !args.list_scan {
+                ports.shuffle(&mut rand::thread_rng());
+            }
         }
 
         // --- Timing / concurrency ---
@@ -207,6 +194,8 @@ impl ScanPlan {
             version_scan_requested: args.version_scan || args.aggressive,
             os_detect_requested: args.os_detect || args.aggressive,
             script_requested: args.script_default || args.script.is_some() || args.aggressive,
+            traceroute: args.traceroute,
+            resume_path: args.resume.clone(),
             unimplemented,
         };
 

@@ -1,6 +1,6 @@
 //! Criterion benchmarks for TCP connect scan scheduling (localhost loopback).
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,13 +37,16 @@ fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
         version_scan_requested: false,
         os_detect_requested: false,
         script_requested: false,
+        traceroute: false,
+        resume_path: None,
         unimplemented: vec![],
     });
 
     c.bench_function("tcp_connect_scan_localhost_3_ports", |b| {
         b.iter(|| {
-            let hosts = vec![Ipv4Addr::new(127, 0, 0, 1)];
-            let out = rt.block_on(tcp_connect_scan(black_box(hosts), black_box(plan.clone())));
+            let h = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+            let work: Vec<_> = plan.ports.iter().map(|p| (h, *p)).collect();
+            let out = rt.block_on(tcp_connect_scan(black_box(work), black_box(plan.clone())));
             black_box(out.len());
         });
     });

@@ -1,7 +1,8 @@
-//! Normal (`-oN`) and grepable (`-oG`) writers; minimal XML (`-oX`) for tooling.
+//! Normal (`-oN`), grepable (`-oG`), and minimal XML (`-oX`) writers.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::net::IpAddr;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -70,9 +71,9 @@ pub fn print_stdout(lines: &[PortLine], open_only: bool, show_reason: bool, verb
             continue;
         }
         if show_reason {
-            println!("{}/tcp\t{}\t{}", l.port, l.state, reason_str(l));
+            println!("{}/{}\t{}\t{}", l.port, l.proto, l.state, reason_str(l));
         } else {
-            println!("{}/tcp\t{}", l.port, l.state);
+            println!("{}/{}\t{}", l.port, l.proto, l.state);
         }
     }
 }
@@ -84,33 +85,39 @@ fn reason_str(l: &PortLine) -> &'static str {
         ConnRefused => "conn-refused",
         Timeout => "no-response",
         Error => "error",
+        UdpResponse => "udp-response",
     }
 }
 
-pub fn write_normal(f: &mut File, host: std::net::Ipv4Addr, lines: &[PortLine]) -> Result<()> {
+pub fn write_normal(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> {
     writeln!(f, "Nmap scan report for {host}")?;
     for l in lines {
-        writeln!(f, "{}/tcp\t{}", l.port, l.state)?;
+        writeln!(f, "{}/{}\t{}", l.port, l.proto, l.state)?;
     }
     writeln!(f)?;
     Ok(())
 }
 
-pub fn write_grep(f: &mut File, host: std::net::Ipv4Addr, lines: &[PortLine]) -> Result<()> {
+pub fn write_grep(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> {
     for l in lines {
-        writeln!(f, "Host: {} ()\tPorts: {}/open/tcp////", host, l.port)?;
+        writeln!(
+            f,
+            "Host: {} ()\tPorts: {}/{}/open////",
+            host, l.port, l.proto
+        )?;
     }
     Ok(())
 }
 
-pub fn write_xml_host(f: &mut File, host: std::net::Ipv4Addr, lines: &[PortLine]) -> Result<()> {
-    writeln!(f, r#"  <host><address addr="{}" addrtype="ipv4"/>"#, host)?;
+pub fn write_xml_host(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> {
+    let ty = if host.is_ipv4() { "ipv4" } else { "ipv6" };
+    writeln!(f, r#"  <host><address addr="{}" addrtype="{}"/>"#, host, ty)?;
     writeln!(f, "    <ports>")?;
     for l in lines {
         writeln!(
             f,
-            r#"      <port protocol="tcp" portid="{}"><state state="{}"/></port>"#,
-            l.port, l.state
+            r#"      <port protocol="{}" portid="{}"><state state="{}"/></port>"#,
+            l.proto, l.port, l.state
         )?;
     }
     writeln!(f, "    </ports></host>")?;

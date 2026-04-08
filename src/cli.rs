@@ -18,7 +18,7 @@ const HELP_TEMPLATE: &str = r#"{before-help}{name} {version}
     version,
     author = "MenkeTechnologies",
     about = "NMAPRS // GRID SCANNER — rust-native parallel port probe",
-    long_about = "TCP connect scanning is native. Raw SYN / UDP / NSE / OS fingerprinting require platform hooks; flags are accepted and validated.",
+    long_about = "TCP connect, UDP probes, ICMP ping scan (-sn), IPv6 (-6), -iL/-iR, resume, SYN (-sS) via raw IPv4 (privileged), traceroute, TTL OS guess, and built-in banner scripts. Full Nmap NSE/Lua and OS DB are not embedded.",
     disable_help_flag = true,
     disable_version_flag = true,
     help_template = HELP_TEMPLATE,
