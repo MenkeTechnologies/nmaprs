@@ -65,6 +65,17 @@ cargo build --release
 
 Binaries: `target/release/nmaprs` and `target/release/nms` (same CLI and behavior; `nms` is a short alias).
 
+## Zsh completion
+
+`completions/_nmaprs` completes **`nmaprs`** and **`nms`**. Add the repo’s `completions` directory to **`fpath`** before **`compinit`** (e.g. in `~/.zshrc`):
+
+```zsh
+fpath+=("$HOME/path/to/nmaprs/completions")
+autoload -Uz compinit && compinit
+```
+
+Or symlink `_nmaprs` into a directory already on **`fpath`**.
+
 ## Help (`-h` / `--help`)
 
 Combined flags like `-sT`, `-Pn`, `-PS80`, `-T4` are expanded before parsing.
