@@ -51,9 +51,7 @@ pub(crate) fn split_into_syn_chunks<T>(order: Vec<T>, shards: usize) -> Vec<Vec<
     for i in 0..shards {
         let take = base + usize::from(i < rem);
         let mut chunk = Vec::with_capacity(take);
-        for _ in 0..take {
-            chunk.push(iter.next().expect("split_into_syn_chunks: length mismatch"));
-        }
+        chunk.extend(iter.by_ref().take(take));
         out.push(chunk);
     }
     debug_assert!(iter.next().is_none());

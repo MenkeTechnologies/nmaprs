@@ -64,8 +64,10 @@ fn load_fast_ip_protocols_nmap() -> &'static [u16] {
 /// IP protocol numbers listed in Nmap’s `nmap-protocols` database (embedded copy in
 /// `data/nmap_ip_protocols_fast.txt`). Used for **`-sO -F`**, matching Nmap’s nested `[P:0-]`
 /// selection (only protocols with a registered name).
-pub fn fast_ip_protocols_nmap() -> Vec<u16> {
-    load_fast_ip_protocols_nmap().to_vec()
+///
+/// Returns a sorted, deduplicated static slice (call `.to_vec()` when an owned list is required).
+pub fn fast_ip_protocols_nmap() -> &'static [u16] {
+    load_fast_ip_protocols_nmap()
 }
 
 fn parse_single_range(token: &str, out: &mut Vec<u16>) -> Result<(), PortParseError> {
@@ -151,7 +153,7 @@ mod tests {
 
     #[test]
     fn fast_ip_protocols_sorted_unique_in_range() {
-        let v = fast_ip_protocols_nmap();
+        let v = fast_ip_protocols_nmap().to_vec();
         assert!(
             v.len() > 1,
             "embedded nmap IP protocol list must not be empty"

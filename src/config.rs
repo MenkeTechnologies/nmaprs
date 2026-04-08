@@ -396,7 +396,7 @@ impl ScanPlan {
             let v = if let Some(p) = &args.ports {
                 parse_port_spec(p).map_err(|e| anyhow!(e))?
             } else if args.fast {
-                fast_ip_protocols_nmap()
+                Vec::from(fast_ip_protocols_nmap())
             } else {
                 (0u16..=255).collect()
             };
@@ -844,7 +844,7 @@ mod rate_validation_tests {
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.scan_kind, ScanKind::IpProto);
         let mut got = plan.ports.clone();
-        let mut want = crate::ports::fast_ip_protocols_nmap();
+        let mut want = crate::ports::fast_ip_protocols_nmap().to_vec();
         got.sort_unstable();
         want.sort_unstable();
         assert_eq!(got, want);

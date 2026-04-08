@@ -295,6 +295,15 @@ fn parse_q_field(s: &str) -> Option<Vec<u8>> {
     Some(decode_nmap_escape_bytes(&inner[..end]))
 }
 
+fn hex_nibble(c: char) -> Option<u8> {
+    match c {
+        '0'..='9' => Some(c as u8 - b'0'),
+        'a'..='f' => Some(c as u8 - b'a' + 10),
+        'A'..='F' => Some(c as u8 - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn decode_nmap_escape_bytes(s: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(s.len());
     let mut it = s.chars().peekable();
@@ -305,11 +314,10 @@ fn decode_nmap_escape_bytes(s: &str) -> Vec<u8> {
         }
         match it.next() {
             Some('x') | Some('X') => {
-                let mut hex = String::with_capacity(2);
-                hex.push(it.next().unwrap_or('0'));
-                hex.push(it.next().unwrap_or('0'));
-                if let Ok(v) = u8::from_str_radix(&hex, 16) {
-                    out.push(v);
+                let a = it.next().unwrap_or('0');
+                let b = it.next().unwrap_or('0');
+                if let (Some(hi), Some(lo)) = (hex_nibble(a), hex_nibble(b)) {
+                    out.push(hi << 4 | lo);
                 }
             }
             Some('0') => out.push(0),
@@ -326,10 +334,11 @@ fn decode_nmap_escape_bytes(s: &str) -> Vec<u8> {
 
 fn parse_match_line(line: &str) -> Result<Option<ServiceMatch>> {
     let soft = line.starts_with("softmatch ");
+    // `apply_probe_line_*` only calls here after `match ` / `softmatch ` prefix check.
     let rest = if soft {
-        line.strip_prefix("softmatch ").unwrap()
+        &line["softmatch ".len()..]
     } else {
-        line.strip_prefix("match ").unwrap()
+        &line["match ".len()..]
     };
     let (service_token, after_svc) = split_first_token(rest);
     if service_token.is_empty() {
