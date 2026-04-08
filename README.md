@@ -19,6 +19,7 @@ Created by **MenkeTechnologies**.
 | UDP (`-sU`) | **Implemented** — reply → `open`; short post-timeout window for ICMP; raw listeners (privileged) classify **destination unreachable** probes: **port unreachable** → `closed`; **other unreachable codes** → `filtered` (IPv4 type 3 / ICMPv6 type 1); **Unix** uses one `poll(2)`+burst-recv thread when both IPv4 and IPv6 targets; `closed` wins over `filtered`. With `--min-hostgroup` / `--max-hostgroup`, ICMP listener threads are started **once** for the whole scan (not per batch) |
 | SYN (`-sS`) | **Implemented** — raw IPv4 + **separate** raw IPv6 TCP path via `pnet` — **requires privileges**; **pipelined** per family: dedicated recv thread + main-thread sends (keys registered **before** each send to avoid races); work is **sharded** across up to **16** concurrent pipelines per family (bounded by `effective_probe_concurrency()`); **mixed v4+v6 targets** run both SYN scans **concurrently** (`tokio::join`); falls back to TCP connect per address family on failure |
 | Ping scan (`-sn`) | **Implemented** — system `ping` / `ping6` |
+| Host discovery (before port scan) | **Implemented** — skipped with `-Pn` / `--no-ping`. Default: ICMP echo plus TCP connects to **443** and **80** (Nmap uses raw SYN/ACK to those ports; we treat connect success or `ECONNREFUSED` as “up”). Explicit `-PE` / `-PS` / `-PA` with optional port lists; `-PP`, `-PM`, `-PU`, `-PY`, `-PO` logged and ignored (use Nmap for those) |
 | IPv6 (`-6`) | **Implemented** — targets + scans (including raw SYN when privileged) |
 | `-iL` / `-iR` | **Implemented** |
 | `--resume` | **Implemented** — JSON checkpoint of completed `(host, port)`; applies to TCP connect, UDP, and **raw SYN** (SYN scans only the remaining pairs after the checkpoint) |
@@ -86,9 +87,10 @@ cargo bench --bench scan
 1. **Argv expansion** (`src/argv_expand.rs`) normalizes glued nmap tokens before `clap`.
 2. **Plan** (`src/config.rs`) → `ScanPlan`.
 3. **Targets** (`src/target.rs`, `src/lib.rs` `expand_specs_ordered`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`; **parallel** `expand_target` with stable ordering.
-4. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — optional `--min-hostgroup` / `--max-hostgroup` batching in `src/lib.rs` (`host_batches`); UDP ICMP listeners are **one session per scan** (shared `DashMap` across batches). TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 SYN (recv thread pipelined with sends; optional multi-shard parallel pipelines per family).
-5. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
-6. **Output** (`src/output.rs`).
+4. **Discovery** (`src/discovery.rs`) — before port scan (unless `-Pn`), parallel ICMP + optional TCP connect probes; same `effective_probe_concurrency` cap as scans.
+5. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — optional `--min-hostgroup` / `--max-hostgroup` batching in `src/lib.rs` (`host_batches`); UDP ICMP listeners are **one session per scan** (shared `DashMap` across batches). TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 SYN (recv thread pipelined with sends; optional multi-shard parallel pipelines per family).
+6. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs`), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`).
+7. **Output** (`src/output.rs`).
 
 ## Data
 
