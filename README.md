@@ -115,14 +115,50 @@ cargo test
 
 ### nmaprs vs nmap (wall clock)
 
-Both tools perform **identical logical work** on **127.0.0.1** — TCP connect, `-n -Pn`, `--min-rtt-timeout 50ms`, `--max-retries 0`, 256-way parallelism, `-oN /dev/null`. Measured with **[hyperfine](https://github.com/sharkdp/hyperfine)** (warmup + 25–30 runs).
+All runs on **127.0.0.1**, TCP connect (`-sT`), `-n -Pn`, `--min-rtt-timeout 50ms`, `--max-retries 0`, output to `/dev/null`. Measured with **[hyperfine](https://github.com/sharkdep/hyperfine)** (warmup + 15–30 runs). macOS arm64, nmap 7.99.
 
-| Test | nmap 7.99 | nmaprs | Speedup |
-|------|-----------|--------|---------|
-| 3 closed high ports (65533–65535) | 13.1 ms | 2.5 ms | **5.2×** |
-| `--top-ports 100` | 16.8 ms | 5.5 ms | **3.0×** |
+#### By port count (M=256)
 
-The startup advantage comes from Rust's zero-cost async runtime vs nmap's heavier process initialization (Lua/NSE, libpcap). On real networks, latency dominates and the gap narrows, but nmaprs's tokio engine still wins on high-parallelism workloads.
+| Test | nmap | nmaprs | Speedup |
+|------|------|--------|---------|
+| 2 ports (`-p 80,443`) | 12.3 ms | 2.9 ms | **4.3× faster** |
+| 3 closed high ports (65533–65535) | 13.1 ms | 2.5 ms | **5.2× faster** |
+| `-F` (fast, ~100 ports) | 18.5 ms | 7.3 ms | **2.5× faster** |
+| `--top-ports 100` | 16.8 ms | 5.5 ms | **3.0× faster** |
+| `--top-ports 1000` | 38.9 ms | 33.6 ms | **1.2× faster** |
+| `-p-` (all 65535) | 2.05 s | 2.50 s | nmap 1.2× faster |
+
+#### By parallelism (`--top-ports 1000`)
+
+| Parallelism | nmap | nmaprs | Speedup |
+|-------------|------|--------|---------|
+| M=64 | 39.2 ms | 30.3 ms | **1.3× faster** |
+| M=256 | 38.9 ms | 33.6 ms | **1.2× faster** |
+
+#### By parallelism (`-p-`, all 65535)
+
+| Parallelism | nmap | nmaprs | Speedup |
+|-------------|------|--------|---------|
+| M=256 | 2.05 s | 2.50 s | nmap 1.2× faster |
+| M=1024 | 1.90 s | 2.06 s | nmap 1.1× faster |
+
+#### By output format (`--top-ports 100`, M=256)
+
+| Output | nmap | nmaprs | Speedup |
+|--------|------|--------|---------|
+| `-oN` | 16.8 ms | 5.5 ms | **3.0× faster** |
+| `-oG` | 16.1 ms | 6.4 ms | **2.5× faster** |
+| `-oX` | 17.2 ms | 6.4 ms | **2.7× faster** |
+
+#### Ping scan (`-sn`, no `-Pn`)
+
+| Test | nmap | nmaprs | Speedup |
+|------|------|--------|---------|
+| `-sn 127.0.0.1` | 4.8 ms | 4.6 ms | **~1× (parity)** |
+
+#### Analysis
+
+nmaprs is **2–5× faster** on small-to-medium port counts where **startup overhead dominates** — nmap loads Lua/NSE, libpcap, and service databases before the first probe. As port count grows toward 65535 the gap closes and nmap's mature C `connect()` loop pulls slightly ahead (~1.2×) at full-sweep scale. Ping scan is at parity since both hit the same ICMP syscall floor. Output format has negligible impact on either tool.
 
 ### Criterion (Rust internals)
 
