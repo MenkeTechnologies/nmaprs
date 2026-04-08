@@ -160,14 +160,14 @@ pub async fn ftp_bounce_scan(
             let pass = pass.clone();
             async move {
                 if host.is_ipv6() {
-                    return Some(PortLine {
+                    return Some(PortLine::new(
                         host,
                         port,
-                        proto: "tcp",
-                        state: "filtered",
-                        reason: PortReason::Error,
-                        latency_ms: None,
-                    });
+                        "tcp",
+                        "filtered",
+                        PortReason::Error,
+                        None,
+                    ));
                 }
                 let victim = match host {
                     IpAddr::V4(a) => a,
@@ -178,14 +178,14 @@ pub async fn ftp_bounce_scan(
                 loop {
                     if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
                         if host_over_deadline(hs.as_ref(), host, limit) {
-                            return Some(PortLine {
+                            return Some(PortLine::new(
                                 host,
                                 port,
-                                proto: "tcp",
-                                state: "filtered",
-                                reason: PortReason::HostTimeout,
-                                latency_ms: None,
-                            });
+                                "tcp",
+                                "filtered",
+                                PortReason::HostTimeout,
+                                None,
+                            ));
                         }
                     }
                     if failures == 0 {
@@ -197,40 +197,40 @@ pub async fn ftp_bounce_scan(
 
                     match bounce_one_port(server, &user, &pass, victim, port, timeout).await {
                         Ok((true, ms)) => {
-                            return Some(PortLine {
+                            return Some(PortLine::new(
                                 host,
                                 port,
-                                proto: "tcp",
-                                state: "open",
-                                reason: PortReason::FtpBounceOpen,
-                                latency_ms: Some(ms),
-                            });
+                                "tcp",
+                                "open",
+                                PortReason::FtpBounceOpen,
+                                Some(ms),
+                            ));
                         }
                         Ok((false, ms)) => {
-                            return Some(PortLine {
+                            return Some(PortLine::new(
                                 host,
                                 port,
-                                proto: "tcp",
-                                state: "closed",
-                                reason: PortReason::FtpBounceClosed,
-                                latency_ms: Some(ms),
-                            });
+                                "tcp",
+                                "closed",
+                                PortReason::FtpBounceClosed,
+                                Some(ms),
+                            ));
                         }
                         Err(_) => {
                             failures += 1;
                             if failures >= max_tries {
-                                return Some(PortLine {
+                                return Some(PortLine::new(
                                     host,
                                     port,
-                                    proto: "tcp",
-                                    state: if no_ping {
+                                    "tcp",
+                                    if no_ping {
                                         "open|filtered"
                                     } else {
                                         "filtered"
                                     },
-                                    reason: PortReason::Timeout,
-                                    latency_ms: None,
-                                });
+                                    PortReason::Timeout,
+                                    None,
+                                ));
                             }
                         }
                     }

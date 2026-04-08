@@ -588,14 +588,14 @@ fn sctp_scan_ipv6_inner(
             Some(SctpOutcome::HostTimeout) => ("filtered", PortReason::HostTimeout),
             None => ("filtered", PortReason::Timeout),
         };
-        out.push(PortLine {
-            host: IpAddr::V6(host),
+        out.push(PortLine::new(
+            IpAddr::V6(host),
             port,
-            proto: "sctp",
+            "sctp",
             state,
             reason,
-            latency_ms: None,
-        });
+            None,
+        ));
     }
 
     Ok(out)
@@ -673,14 +673,14 @@ fn sctp_scan_ipv4_inner(
             Some(SctpOutcome::HostTimeout) => ("filtered", PortReason::HostTimeout),
             None => ("filtered", PortReason::Timeout),
         };
-        out.push(PortLine {
-            host: IpAddr::V4(host),
+        out.push(PortLine::new(
+            IpAddr::V4(host),
             port,
-            proto: "sctp",
+            "sctp",
             state,
             reason,
-            latency_ms: None,
-        });
+            None,
+        ));
     }
 
     Ok(out)

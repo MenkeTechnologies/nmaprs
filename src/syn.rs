@@ -163,14 +163,7 @@ fn port_line_from_syn_outcome(
         (_, Some(SynOutcome::HostTimeout)) => ("filtered", PortReason::HostTimeout),
         (_, None) => ("filtered", PortReason::Timeout),
     };
-    PortLine {
-        host,
-        port,
-        proto: "tcp",
-        state,
-        reason,
-        latency_ms: None,
-    }
+    PortLine::new(host, port, "tcp", state, reason, None)
 }
 
 /// Raw TCP packet for port scans vs Nmap-style **TCP ACK ping** (`AckPing`) for `-PA` discovery.

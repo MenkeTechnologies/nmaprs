@@ -203,14 +203,14 @@ pub fn idle_scan_ipv4(
         let host = IpAddr::V4(dst_ip);
         if let (Some(limit), Some(ref hs)) = (host_limit, host_start.as_ref()) {
             if host_over_deadline(hs.as_ref(), host, limit) {
-                out.push(PortLine {
+                out.push(PortLine::new(
                     host,
-                    port: dport,
-                    proto: "tcp",
-                    state: "filtered",
-                    reason: PortReason::HostTimeout,
-                    latency_ms: None,
-                });
+                    dport,
+                    "tcp",
+                    "filtered",
+                    PortReason::HostTimeout,
+                    None,
+                ));
                 continue;
             }
         }
@@ -238,14 +238,14 @@ pub fn idle_scan_ipv4(
                 Err(_) => {
                     failures += 1;
                     if failures >= max_tries {
-                        line = Some(PortLine {
+                        line = Some(PortLine::new(
                             host,
-                            port: dport,
-                            proto: "tcp",
-                            state: "filtered",
-                            reason: PortReason::IdleProbeFailed,
-                            latency_ms: None,
-                        });
+                            dport,
+                            "tcp",
+                            "filtered",
+                            PortReason::IdleProbeFailed,
+                            None,
+                        ));
                     }
                     continue;
                 }
@@ -263,14 +263,14 @@ pub fn idle_scan_ipv4(
             {
                 failures += 1;
                 if failures >= max_tries {
-                    line = Some(PortLine {
+                    line = Some(PortLine::new(
                         host,
-                        port: dport,
-                        proto: "tcp",
-                        state: "filtered",
-                        reason: PortReason::IdleProbeFailed,
-                        latency_ms: None,
-                    });
+                        dport,
+                        "tcp",
+                        "filtered",
+                        PortReason::IdleProbeFailed,
+                        None,
+                    ));
                 }
                 continue;
             }
@@ -290,14 +290,14 @@ pub fn idle_scan_ipv4(
                 Err(_) => {
                     failures += 1;
                     if failures >= max_tries {
-                        line = Some(PortLine {
+                        line = Some(PortLine::new(
                             host,
-                            port: dport,
-                            proto: "tcp",
-                            state: "filtered",
-                            reason: PortReason::IdleProbeFailed,
-                            latency_ms: None,
-                        });
+                            dport,
+                            "tcp",
+                            "filtered",
+                            PortReason::IdleProbeFailed,
+                            None,
+                        ));
                     }
                     continue;
                 }
@@ -306,30 +306,30 @@ pub fn idle_scan_ipv4(
             let delta = ipid2.wrapping_sub(ipid1);
             let open = delta >= 2;
             let elapsed = t0.elapsed().as_millis();
-            line = Some(PortLine {
+            line = Some(PortLine::new(
                 host,
-                port: dport,
-                proto: "tcp",
-                state: if open { "open" } else { "closed" },
-                reason: if open {
+                dport,
+                "tcp",
+                if open { "open" } else { "closed" },
+                if open {
                     PortReason::IdleIpIdOpen
                 } else {
                     PortReason::IdleIpIdClosed
                 },
-                latency_ms: Some(elapsed),
-            });
+                Some(elapsed),
+            ));
         }
 
         out.push(match line {
             Some(l) => l,
-            None => PortLine {
+            None => PortLine::new(
                 host,
-                port: dport,
-                proto: "tcp",
-                state: "filtered",
-                reason: PortReason::IdleProbeFailed,
-                latency_ms: None,
-            },
+                dport,
+                "tcp",
+                "filtered",
+                PortReason::IdleProbeFailed,
+                None,
+            ),
         });
     }
 

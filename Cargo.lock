@@ -677,6 +677,7 @@ dependencies = [
  "pnet_sys",
  "predicates",
  "rand",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

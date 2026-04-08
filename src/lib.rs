@@ -12,7 +12,10 @@ pub mod ip_proto;
 pub mod ipv6_l4;
 pub mod nse;
 pub mod os_detect;
+pub mod os_db;
 pub mod output;
+pub mod skiddie;
+pub mod vscan;
 pub mod ping;
 pub mod ports;
 pub mod resume;
@@ -40,6 +43,24 @@ use crate::config::{ScanKind, ScanPlan};
 use crate::output::{print_stdout, OutputSet};
 use crate::scan::{tcp_connect_scan, udp_scan, PortLine, ProbeRatePacer, UdpIcmpNotes};
 use crate::target::{apply_exclude, expand_target, random_addresses, read_input_list, ExpandOpts};
+
+async fn try_load_os_db(plan: &ScanPlan) -> Option<Arc<crate::os_db::OsDb>> {
+    let path = plan.data_file("nmap-os-db");
+    if !path.exists() {
+        return None;
+    }
+    match tokio::task::spawn_blocking(move || crate::os_db::OsDb::load(&path)).await {
+        Ok(Ok(db)) => Some(Arc::new(db)),
+        Ok(Err(e)) => {
+            warn!("nmap-os-db: {e}");
+            None
+        }
+        Err(e) => {
+            warn!("nmap-os-db load: {e}");
+            None
+        }
+    }
+}
 
 fn build_work(hosts: &[IpAddr], ports: &[u16]) -> Vec<(IpAddr, u16)> {
     hosts
@@ -525,10 +546,6 @@ async fn collect_hosts(args: &Args, concurrency: usize) -> Result<Vec<IpAddr>> {
 
 /// Run the full pipeline: parse → plan → expand targets → scan → emit output.
 pub async fn run(args: Args) -> Result<i32> {
-    if args.output_script_kiddie.is_some() {
-        warn!("-oS (script kiddie) output is not implemented; ignoring");
-    }
-
     if args.iflist {
         for iface in if_addrs::get_if_addrs()? {
             println!("{}: {:?}", iface.name, iface.addr);
@@ -538,6 +555,12 @@ pub async fn run(args: Args) -> Result<i32> {
 
     let plan = ScanPlan::from_args(&args)?;
     let plan = Arc::new(plan);
+
+    let os_db = if plan.os_detect_requested {
+        try_load_os_db(&plan).await
+    } else {
+        None
+    };
 
     if args.targets.is_empty()
         && args.input_list.is_none()
@@ -603,7 +626,10 @@ pub async fn run(args: Args) -> Result<i32> {
             if o.up {
                 println!("Nmap scan report for {} - Host is up", o.host);
                 if plan.os_detect_requested {
-                    println!("OS guess: {}", crate::os_detect::guess_from_ttl(o.ttl));
+                    println!(
+                        "OS guess: {}",
+                        crate::os_db::format_os_guess(o.ttl, os_db.as_deref())
+                    );
                 }
             }
         }
@@ -680,6 +706,55 @@ pub async fn run(args: Args) -> Result<i32> {
         }
     }
 
+    if plan.version_scan_requested {
+        let path = plan.data_file("nmap-service-probes");
+        if path.exists() {
+            let intensity = plan.version_intensity;
+            let connect_timeout = plan.connect_timeout;
+            let conc = plan.effective_probe_concurrency();
+            let probes = match tokio::task::spawn_blocking(move || crate::vscan::load_tcp_probes(&path))
+                .await
+            {
+                Ok(Ok(p)) => Arc::new(p),
+                Ok(Err(e)) => {
+                    warn!("-sV: {e}");
+                    Arc::new(vec![])
+                }
+                Err(e) => {
+                    warn!("-sV: load task: {e}");
+                    Arc::new(vec![])
+                }
+            };
+            if !probes.is_empty() {
+                let open_tcp: Vec<_> = lines
+                    .iter()
+                    .filter(|l| l.proto == "tcp" && l.state == "open")
+                    .map(|l| (l.host, l.port))
+                    .collect();
+                let vmap = crate::vscan::run_tcp_version_scan(
+                    open_tcp,
+                    probes,
+                    intensity,
+                    connect_timeout,
+                    conc,
+                )
+                .await;
+                for l in &mut lines {
+                    if l.proto == "tcp" && l.state == "open" {
+                        if let Some(v) = vmap.get(&(l.host, l.port)) {
+                            l.version_info = Some(v.clone());
+                        }
+                    }
+                }
+            }
+        } else {
+            warn!(
+                "-sV: {} not found; install Nmap's nmap-service-probes under data/ or run scripts/fetch_nmap_data.sh",
+                path.display()
+            );
+        }
+    }
+
     let mut by_host: HashMap<IpAddr, Vec<PortLine>> = HashMap::new();
     for l in lines.iter().cloned() {
         by_host.entry(l.host).or_default().push(l);
@@ -690,6 +765,7 @@ pub async fn run(args: Args) -> Result<i32> {
         plan.output_normal.as_deref(),
         plan.output_grepable.as_deref(),
         plan.output_xml.as_deref(),
+        plan.output_script_kiddie.as_deref(),
         plan.append_output,
     )?;
     outs.write_headers(&cmdline)?;
@@ -698,9 +774,13 @@ pub async fn run(args: Args) -> Result<i32> {
         let hl = by_host.get(host).cloned().unwrap_or_default();
         println!("Nmap scan report for {host}");
         print_stdout(&hl, plan.open_only, plan.show_reason, plan.verbosity);
-        if let Some(f) = &mut outs.normal {
-            crate::output::write_normal(f, *host, &hl)?;
-        }
+        crate::output::write_normal_files(
+            outs.normal.as_mut(),
+            outs.skiddie.as_mut(),
+            *host,
+            &hl,
+            plan.show_reason,
+        )?;
         if let Some(f) = &mut outs.grep {
             crate::output::write_grep(f, *host, &hl)?;
         }
@@ -718,7 +798,7 @@ pub async fn run(args: Args) -> Result<i32> {
                 println!(
                     "OS guess for {}: {}",
                     o.host,
-                    crate::os_detect::guess_from_ttl(o.ttl)
+                    crate::os_db::format_os_guess(o.ttl, os_db.as_deref())
                 );
             }
         }

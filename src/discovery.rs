@@ -929,22 +929,22 @@ mod tests {
     #[test]
     fn port_lines_to_alive_filters_timeouts() {
         let lines = vec![
-            PortLine {
-                host: IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)),
-                port: 80,
-                proto: "tcp",
-                state: "closed",
-                reason: crate::scan::PortReason::ConnRefused,
-                latency_ms: None,
-            },
-            PortLine {
-                host: IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 2)),
-                port: 80,
-                proto: "tcp",
-                state: "filtered",
-                reason: crate::scan::PortReason::Timeout,
-                latency_ms: None,
-            },
+            PortLine::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)),
+                80,
+                "tcp",
+                "closed",
+                crate::scan::PortReason::ConnRefused,
+                None,
+            ),
+            PortLine::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 2)),
+                80,
+                "tcp",
+                "filtered",
+                crate::scan::PortReason::Timeout,
+                None,
+            ),
         ];
         let a = port_lines_to_alive_hosts(lines);
         assert_eq!(a.len(), 1);

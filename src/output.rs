@@ -13,6 +13,8 @@ pub struct OutputSet {
     pub normal: Option<File>,
     pub grep: Option<File>,
     pub xml: Option<File>,
+    /// Mirrors `-oN`-style lines in script-kiddie form (Nmap `-oS`).
+    pub skiddie: Option<File>,
 }
 
 impl OutputSet {
@@ -20,6 +22,7 @@ impl OutputSet {
         normal: Option<&Path>,
         grep: Option<&Path>,
         xml: Option<&Path>,
+        skiddie: Option<&Path>,
         append: bool,
     ) -> Result<Self> {
         let open = |p: &Path| {
@@ -33,6 +36,7 @@ impl OutputSet {
             normal: normal.map(open).transpose().with_context(|| "oN")?,
             grep: grep.map(open).transpose().with_context(|| "oG")?,
             xml: xml.map(open).transpose().with_context(|| "oX")?,
+            skiddie: skiddie.map(open).transpose().with_context(|| "oS")?,
         })
     }
 
@@ -62,6 +66,19 @@ fn xml_escape(s: &str) -> String {
         .replace('\"', "&quot;")
 }
 
+/// Single port line as printed / written to `-oN` (tab-separated).
+pub fn port_line_text(l: &PortLine, show_reason: bool) -> String {
+    let mut s = if let Some(ref v) = l.version_info {
+        format!("{}/{}\t{}\t{}", l.port, l.proto, l.state, v)
+    } else {
+        format!("{}/{}\t{}", l.port, l.proto, l.state)
+    };
+    if show_reason {
+        s.push_str(&format!("\t{}", reason_str(l)));
+    }
+    s
+}
+
 pub fn print_stdout(lines: &[PortLine], open_only: bool, show_reason: bool, verbosity: u8) {
     for l in lines {
         if open_only && l.state != "open" {
@@ -70,11 +87,7 @@ pub fn print_stdout(lines: &[PortLine], open_only: bool, show_reason: bool, verb
         if verbosity == 0 && l.state == "closed" {
             continue;
         }
-        if show_reason {
-            println!("{}/{}\t{}\t{}", l.port, l.proto, l.state, reason_str(l));
-        } else {
-            println!("{}/{}\t{}", l.port, l.proto, l.state);
-        }
+        println!("{}", port_line_text(l, show_reason));
     }
 }
 
@@ -103,12 +116,39 @@ fn reason_str(l: &PortLine) -> &'static str {
     }
 }
 
-pub fn write_normal(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> {
-    writeln!(f, "Nmap scan report for {host}")?;
-    for l in lines {
-        writeln!(f, "{}/{}\t{}", l.port, l.proto, l.state)?;
+/// Write `-oN` and/or `-oS` host sections (same tab-separated lines; `-oS` is script-kiddie transformed).
+pub fn write_normal_files(
+    mut normal: Option<&mut File>,
+    mut skiddie: Option<&mut File>,
+    host: IpAddr,
+    lines: &[PortLine],
+    show_reason: bool,
+) -> Result<()> {
+    if normal.is_none() && skiddie.is_none() {
+        return Ok(());
     }
-    writeln!(f)?;
+    let hdr = format!("Nmap scan report for {host}");
+    if let Some(f) = normal.as_mut() {
+        writeln!(f, "{}", hdr)?;
+    }
+    if let Some(sf) = skiddie.as_mut() {
+        writeln!(sf, "{}", crate::skiddie::skid_line(&hdr))?;
+    }
+    for l in lines {
+        let line = port_line_text(l, show_reason);
+        if let Some(f) = normal.as_mut() {
+            writeln!(f, "{}", line)?;
+        }
+        if let Some(sf) = skiddie.as_mut() {
+            writeln!(sf, "{}", crate::skiddie::skid_line(&line))?;
+        }
+    }
+    if let Some(f) = normal.as_mut() {
+        writeln!(f)?;
+    }
+    if let Some(sf) = skiddie.as_mut() {
+        writeln!(sf)?;
+    }
     Ok(())
 }
 

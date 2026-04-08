@@ -217,6 +217,29 @@ pub struct PortLine {
     pub state: &'static str,
     pub reason: PortReason,
     pub latency_ms: Option<u128>,
+    /// Filled after scan when `-sV` matches `nmap-service-probes`.
+    pub version_info: Option<String>,
+}
+
+impl PortLine {
+    pub(crate) fn new(
+        host: IpAddr,
+        port: u16,
+        proto: &'static str,
+        state: &'static str,
+        reason: PortReason,
+        latency_ms: Option<u128>,
+    ) -> Self {
+        Self {
+            host,
+            port,
+            proto,
+            state,
+            reason,
+            latency_ms,
+            version_info: None,
+        }
+    }
 }
 
 /// TCP connect scan with `buffer_unordered(concurrency)` (no extra semaphore: same cap).
@@ -244,14 +267,14 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
                 loop {
                     if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
                         if host_over_deadline(hs.as_ref(), host, limit) {
-                            return Some(PortLine {
+                            return Some(PortLine::new(
                                 host,
                                 port,
-                                proto: "tcp",
-                                state: "filtered",
-                                reason: PortReason::HostTimeout,
-                                latency_ms: None,
-                            });
+                                "tcp",
+                                "filtered",
+                                PortReason::HostTimeout,
+                                None,
+                            ));
                         }
                     }
                     if timeouts == 0 {
@@ -266,14 +289,14 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
                     match res {
                         Ok(Ok(stream)) => {
                             drop(stream);
-                            return Some(PortLine {
+                            return Some(PortLine::new(
                                 host,
                                 port,
-                                proto: "tcp",
-                                state: "open",
-                                reason: PortReason::SynAck,
-                                latency_ms: Some(elapsed),
-                            });
+                                "tcp",
+                                "open",
+                                PortReason::SynAck,
+                                Some(elapsed),
+                            ));
                         }
                         Ok(Err(e)) => {
                             let kind = e.kind();
@@ -283,26 +306,26 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
                                 } else {
                                     ("filtered", PortReason::Error)
                                 };
-                            return Some(PortLine {
+                            return Some(PortLine::new(
                                 host,
                                 port,
-                                proto: "tcp",
+                                "tcp",
                                 state,
                                 reason,
-                                latency_ms: Some(elapsed),
-                            });
+                                Some(elapsed),
+                            ));
                         }
                         Err(_) => {
                             timeouts += 1;
                             if timeouts >= max_tries {
-                                return Some(PortLine {
+                                return Some(PortLine::new(
                                     host,
                                     port,
-                                    proto: "tcp",
-                                    state: if no_ping { "open|filtered" } else { "filtered" },
-                                    reason: PortReason::Timeout,
-                                    latency_ms: None,
-                                });
+                                    "tcp",
+                                    if no_ping { "open|filtered" } else { "filtered" },
+                                    PortReason::Timeout,
+                                    None,
+                                ));
                             }
                         }
                     }
@@ -342,14 +365,14 @@ pub async fn udp_scan(
             async move {
                 if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
                     if host_over_deadline(hs.as_ref(), host, limit) {
-                        return Some(PortLine {
+                        return Some(PortLine::new(
                             host,
                             port,
-                            proto: "udp",
-                            state: "filtered",
-                            reason: PortReason::HostTimeout,
-                            latency_ms: None,
-                        });
+                            "udp",
+                            "filtered",
+                            PortReason::HostTimeout,
+                            None,
+                        ));
                     }
                 }
 
@@ -363,14 +386,14 @@ pub async fn udp_scan(
                 let mut timeouts = 0u32;
 
                 let Some(socket) = UdpSocket::bind(bind_addr).await.ok() else {
-                    return Some(PortLine {
+                    return Some(PortLine::new(
                         host,
                         port,
-                        proto: "udp",
-                        state: "filtered",
-                        reason: PortReason::Error,
-                        latency_ms: Some(overall_start.elapsed().as_millis()),
-                    });
+                        "udp",
+                        "filtered",
+                        PortReason::Error,
+                        Some(overall_start.elapsed().as_millis()),
+                    ));
                 };
 
                 loop {
@@ -382,14 +405,14 @@ pub async fn udp_scan(
                     }
                     let start = Instant::now();
                     if socket.send_to(&payload, dst).await.is_err() {
-                        return Some(PortLine {
+                        return Some(PortLine::new(
                             host,
                             port,
-                            proto: "udp",
-                            state: "filtered",
-                            reason: PortReason::Error,
-                            latency_ms: Some(overall_start.elapsed().as_millis()),
-                        });
+                            "udp",
+                            "filtered",
+                            PortReason::Error,
+                            Some(overall_start.elapsed().as_millis()),
+                        ));
                     }
                     let mut buf = [0u8; 512];
                     let recv = socket.recv_from(&mut buf);
@@ -397,24 +420,24 @@ pub async fn udp_scan(
                     let elapsed = start.elapsed().as_millis();
                     match res {
                         Ok(Ok((n, _))) if n > 0 => {
-                            return Some(PortLine {
+                            return Some(PortLine::new(
                                 host,
                                 port,
-                                proto: "udp",
-                                state: "open",
-                                reason: PortReason::UdpResponse,
-                                latency_ms: Some(elapsed),
-                            });
+                                "udp",
+                                "open",
+                                PortReason::UdpResponse,
+                                Some(elapsed),
+                            ));
                         }
                         Ok(_) => {
-                            return Some(PortLine {
+                            return Some(PortLine::new(
                                 host,
                                 port,
-                                proto: "udp",
-                                state: "open|filtered",
-                                reason: PortReason::Error,
-                                latency_ms: Some(elapsed),
-                            });
+                                "udp",
+                                "open|filtered",
+                                PortReason::Error,
+                                Some(elapsed),
+                            ));
                         }
                         Err(_) => {
                             timeouts += 1;
@@ -424,33 +447,33 @@ pub async fn udp_scan(
                                         .await;
                                     if let Some(out) = notes.get(&(host, port)).as_deref().copied() {
                                         return Some(match out {
-                                            UdpIcmpOutcome::Closed => PortLine {
+                                            UdpIcmpOutcome::Closed => PortLine::new(
                                                 host,
                                                 port,
-                                                proto: "udp",
-                                                state: "closed",
-                                                reason: PortReason::IcmpPortUnreachable,
-                                                latency_ms: None,
-                                            },
-                                            UdpIcmpOutcome::Filtered => PortLine {
+                                                "udp",
+                                                "closed",
+                                                PortReason::IcmpPortUnreachable,
+                                                None,
+                                            ),
+                                            UdpIcmpOutcome::Filtered => PortLine::new(
                                                 host,
                                                 port,
-                                                proto: "udp",
-                                                state: "filtered",
-                                                reason: PortReason::IcmpUnreachableFiltered,
-                                                latency_ms: None,
-                                            },
+                                                "udp",
+                                                "filtered",
+                                                PortReason::IcmpUnreachableFiltered,
+                                                None,
+                                            ),
                                         });
                                     }
                                 }
-                                return Some(PortLine {
+                                return Some(PortLine::new(
                                     host,
                                     port,
-                                    proto: "udp",
-                                    state: "open|filtered",
-                                    reason: PortReason::Timeout,
-                                    latency_ms: None,
-                                });
+                                    "udp",
+                                    "open|filtered",
+                                    PortReason::Timeout,
+                                    None,
+                                ));
                             }
                         }
                     }

@@ -115,13 +115,19 @@ pub struct ScanPlan {
     pub output_normal: Option<PathBuf>,
     pub output_grepable: Option<PathBuf>,
     pub output_xml: Option<PathBuf>,
+    /// Script-kiddie (`-oS`) — same content as normal output, transformed (mirrors `-oN` style lines).
+    pub output_script_kiddie: Option<PathBuf>,
     pub output_all_base: Option<PathBuf>,
+    /// Nmap data directory (`--datadir`); defaults to `./data` when resolving `nmap-service-probes` / `nmap-os-db`.
+    pub datadir: Option<PathBuf>,
     pub append_output: bool,
     pub show_reason: bool,
     pub open_only: bool,
     pub randomize_ports: bool,
     pub aggressive: bool,
     pub version_scan_requested: bool,
+    /// Nmap `--version-intensity` (0–9), after `--version-light` / `--version-all` overrides.
+    pub version_intensity: u8,
     pub os_detect_requested: bool,
     pub script_requested: bool,
     pub traceroute: bool,
@@ -186,6 +192,14 @@ impl ScanKind {
 }
 
 impl ScanPlan {
+    /// Resolve `name` (e.g. `nmap-service-probes`) under `--datadir` or `./data`.
+    pub fn data_file(&self, name: &str) -> PathBuf {
+        self.datadir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("data"))
+            .join(name)
+    }
+
     /// Parallel slots for TCP connect, UDP, ping, and target expansion (`buffer_unordered` / semaphores).
     ///
     /// When `--min-rate` is set and `--max-parallelism` was **not** used, raises the floor toward
@@ -208,13 +222,7 @@ impl ScanPlan {
 
         if args.aggressive {
             unimplemented.push(
-                "-A: full Nmap OS fingerprint DB and full version DB not embedded; TTL/heuristic OS + banner scripts run instead where applicable".into(),
-            );
-        }
-
-        if args.version_scan {
-            unimplemented.push(
-                "-sV: service/version DB not embedded; use nmap for full version detection".into(),
+                "-A: NSE coverage is not full Nmap parity; OS detection uses TTL + nmap-os-db hints when the DB file is present; version detection uses nmap-service-probes when present".into(),
             );
         }
 
@@ -451,6 +459,14 @@ impl ScanPlan {
             output_xml = Some(base.with_extension("xml"));
         }
 
+        let mut version_intensity = args.version_intensity.unwrap_or(7).min(9);
+        if args.version_light {
+            version_intensity = version_intensity.min(2);
+        }
+        if args.version_all {
+            version_intensity = 9;
+        }
+
         let plan = ScanPlan {
             ports,
             concurrency,
@@ -467,13 +483,16 @@ impl ScanPlan {
             output_normal,
             output_grepable,
             output_xml,
+            output_script_kiddie: args.output_script_kiddie.clone(),
             output_all_base: args.output_all.clone(),
+            datadir: args.datadir.clone(),
             append_output: args.append_output,
             show_reason: args.reason,
             open_only: args.open_only,
             randomize_ports: !args.sequential_ports,
             aggressive: args.aggressive,
             version_scan_requested: args.version_scan || args.aggressive,
+            version_intensity,
             os_detect_requested: args.os_detect || args.aggressive,
             script_requested: args.script_default || args.script.is_some() || args.aggressive,
             traceroute: args.traceroute,
