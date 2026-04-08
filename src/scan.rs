@@ -136,6 +136,7 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
     let sem = Arc::new(Semaphore::new(plan.concurrency.max(1)));
     let timeout = plan.connect_timeout;
     let no_ping = plan.no_ping;
+    let connect_retries = plan.connect_retries;
     let pacer = plan
         .max_probe_rate
         .map(|n| Arc::new(MaxRatePacer::new(n as f64)));
@@ -148,65 +149,77 @@ pub async fn tcp_connect_scan(work: Vec<(IpAddr, u16)>, plan: Arc<ScanPlan>) -> 
             let pacer = pacer.clone();
             let host_deadline = host_deadline.clone();
             async move {
-                if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
-                    if host_over_deadline(hs.as_ref(), host, limit) {
-                        return Some(PortLine {
-                            host,
-                            port,
-                            proto: "tcp",
-                            state: "filtered",
-                            reason: PortReason::HostTimeout,
-                            latency_ms: None,
-                        });
-                    }
-                }
-                if let Some(p) = pacer.as_ref() {
-                    p.wait_turn().await;
-                }
-                let _p = sem.acquire().await.ok()?;
                 let addr = SocketAddr::new(host, port);
-                let start = Instant::now();
-                let fut = TcpStream::connect(addr);
-                let res = tokio::time::timeout(timeout, fut).await;
-                let elapsed = start.elapsed().as_millis();
-                Some(match res {
-                    Ok(Ok(stream)) => {
-                        drop(stream);
-                        PortLine {
-                            host,
-                            port,
-                            proto: "tcp",
-                            state: "open",
-                            reason: PortReason::SynAck,
-                            latency_ms: Some(elapsed),
+                let overall_start = Instant::now();
+                let max_tries = 1u32.saturating_add(connect_retries);
+                let mut timeouts = 0u32;
+
+                loop {
+                    if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
+                        if host_over_deadline(hs.as_ref(), host, limit) {
+                            return Some(PortLine {
+                                host,
+                                port,
+                                proto: "tcp",
+                                state: "filtered",
+                                reason: PortReason::HostTimeout,
+                                latency_ms: None,
+                            });
                         }
                     }
-                    Ok(Err(e)) => {
-                        let kind = e.kind();
-                        let (state, reason): (&'static str, PortReason) =
-                            if kind == io::ErrorKind::ConnectionRefused {
-                                ("closed", PortReason::ConnRefused)
-                            } else {
-                                ("filtered", PortReason::Error)
-                            };
-                        PortLine {
-                            host,
-                            port,
-                            proto: "tcp",
-                            state,
-                            reason,
-                            latency_ms: Some(elapsed),
+                    if timeouts == 0 {
+                        if let Some(p) = pacer.as_ref() {
+                            p.wait_turn().await;
                         }
                     }
-                    Err(_) => PortLine {
-                        host,
-                        port,
-                        proto: "tcp",
-                        state: if no_ping { "open|filtered" } else { "filtered" },
-                        reason: PortReason::Timeout,
-                        latency_ms: None,
-                    },
-                })
+                    let _p = sem.acquire().await.ok()?;
+                    let fut = TcpStream::connect(addr);
+                    let res = tokio::time::timeout(timeout, fut).await;
+                    let elapsed = overall_start.elapsed().as_millis();
+                    match res {
+                        Ok(Ok(stream)) => {
+                            drop(stream);
+                            return Some(PortLine {
+                                host,
+                                port,
+                                proto: "tcp",
+                                state: "open",
+                                reason: PortReason::SynAck,
+                                latency_ms: Some(elapsed),
+                            });
+                        }
+                        Ok(Err(e)) => {
+                            let kind = e.kind();
+                            let (state, reason): (&'static str, PortReason) =
+                                if kind == io::ErrorKind::ConnectionRefused {
+                                    ("closed", PortReason::ConnRefused)
+                                } else {
+                                    ("filtered", PortReason::Error)
+                                };
+                            return Some(PortLine {
+                                host,
+                                port,
+                                proto: "tcp",
+                                state,
+                                reason,
+                                latency_ms: Some(elapsed),
+                            });
+                        }
+                        Err(_) => {
+                            timeouts += 1;
+                            if timeouts >= max_tries {
+                                return Some(PortLine {
+                                    host,
+                                    port,
+                                    proto: "tcp",
+                                    state: if no_ping { "open|filtered" } else { "filtered" },
+                                    reason: PortReason::Timeout,
+                                    latency_ms: None,
+                                });
+                            }
+                        }
+                    }
+                }
             }
         })
         .buffer_unordered(plan.concurrency.max(1))
