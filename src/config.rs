@@ -154,6 +154,30 @@ pub struct ScanPlan {
     pub ftp_bounce: Option<FtpBounceTarget>,
     /// `-sI zombie[:probeport]` — idle (IP ID) scan (IPv4 only).
     pub idle_scan: Option<IdleScanTarget>,
+    /// Nmap `--resolve-all` (see [`crate::target::ExpandOpts::resolve_all`]).
+    pub resolve_all: bool,
+    /// Nmap `--randomize-hosts` / `--rH`.
+    pub randomize_hosts: bool,
+    /// Nmap `--unique` — deduplicate target list.
+    pub unique: bool,
+    /// Nmap `--max-os-tries` (1–50; probe rounds — full TCP/IP OS scan not implemented).
+    pub max_os_tries: u8,
+    pub osscan_limit: bool,
+    pub osscan_guess: bool,
+    pub defeat_rst_ratelimit: bool,
+    pub defeat_icmp_ratelimit: bool,
+    pub discovery_ignore_rst: bool,
+    pub disable_arp_ping: bool,
+    pub stats_every: Option<Duration>,
+    pub script_timeout: Option<Duration>,
+    /// Override path for `nmap-service-probes` (Nmap `--versiondb`).
+    pub versiondb: Option<PathBuf>,
+    /// Override path for `nmap-services` (reserved; custom top-ports list not yet loaded).
+    pub servicedb: Option<PathBuf>,
+    /// Nmap `-oM` machine-parseable output.
+    pub output_machine: Option<PathBuf>,
+    /// Nmap `-oH` hex output (placeholder file when set).
+    pub output_hex: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,6 +225,13 @@ impl ScanPlan {
             .join(name)
     }
 
+    /// Path to `nmap-service-probes` (`--versiondb` or `--datadir`).
+    pub fn service_probes_path(&self) -> PathBuf {
+        self.versiondb
+            .clone()
+            .unwrap_or_else(|| self.data_file("nmap-service-probes"))
+    }
+
     /// Parallel slots for TCP connect, UDP, ping, and target expansion (`buffer_unordered` / semaphores).
     ///
     /// When `--min-rate` is set and `--max-parallelism` was **not** used, raises the floor toward
@@ -220,6 +251,10 @@ impl ScanPlan {
 
     pub fn from_args(args: &Args) -> Result<Self> {
         let unimplemented: Vec<String> = Vec::new();
+
+        if args.privileged && args.unprivileged {
+            bail!("--privileged and --unprivileged are mutually exclusive");
+        }
 
         if args.ping_only && args.list_scan {
             bail!("-sn and -sL together are ambiguous");
@@ -333,6 +368,21 @@ impl ScanPlan {
             tcp_scan_flags = None;
         }
 
+        if args.unprivileged {
+            if matches!(
+                scan_kind,
+                ScanKind::IpProto | ScanKind::Idle | ScanKind::SctpInit | ScanKind::SctpCookieEcho
+            ) {
+                bail!(
+                    "--unprivileged: this scan type requires raw sockets (omit or use TCP connect)"
+                );
+            }
+            if scan_kind.tcp_port_raw_kind().is_some() {
+                warn!("--unprivileged: using TCP connect scan instead of raw half-open");
+                scan_kind = ScanKind::TcpConnect;
+            }
+        }
+
         // --- Ports (skipped for host-discovery-only) ---
         let mut ports: Vec<u16> = if args.ping_only {
             if args.ports.is_some() {
@@ -377,8 +427,10 @@ impl ScanPlan {
 
         if !args.ping_only {
             if let Some(ex) = &args.exclude_ports {
-                let banned = parse_exclude_ports(ex).map_err(|e| anyhow!(e))?;
-                ports.retain(|p| !banned.contains(p));
+                if !args.allports {
+                    let banned = parse_exclude_ports(ex).map_err(|e| anyhow!(e))?;
+                    ports.retain(|p| !banned.contains(p));
+                }
             }
 
             if ports.is_empty() {
@@ -445,6 +497,23 @@ impl ScanPlan {
             None
         };
 
+        let max_os_tries = args.max_os_tries.unwrap_or(5);
+        if !(1..=50).contains(&max_os_tries) {
+            bail!("--max-os-tries must be between 1 and 50");
+        }
+
+        let stats_every = if let Some(s) = &args.stats_every {
+            Some(parse_duration(s).with_context(|| "stats-every")?)
+        } else {
+            None
+        };
+
+        let script_timeout = if let Some(s) = &args.script_timeout {
+            Some(parse_duration(s).with_context(|| "script-timeout")?)
+        } else {
+            None
+        };
+
         let mut output_normal = args.output_normal.clone();
         let mut output_grepable = args.output_grepable.clone();
         let mut output_xml = args.output_xml.clone();
@@ -453,6 +522,9 @@ impl ScanPlan {
             output_grepable = Some(base.with_extension("gnmap"));
             output_xml = Some(base.with_extension("xml"));
         }
+
+        let output_machine = args.output_machine.clone();
+        let output_hex = args.output_hex.clone();
 
         let mut version_intensity = args.version_intensity.unwrap_or(7).min(9);
         if args.version_light {
@@ -470,8 +542,8 @@ impl ScanPlan {
             no_ping: args.no_ping,
             scan_kind,
             tcp_scan_flags,
-            verbosity: args.verbosity,
-            debug: args.debug,
+            verbosity: args.effective_verbosity(),
+            debug: args.effective_debug(),
             sequential_ports: args.sequential_ports,
             list_scan: args.list_scan,
             ping_only: args.ping_only,
@@ -503,6 +575,22 @@ impl ScanPlan {
             unimplemented,
             ftp_bounce,
             idle_scan,
+            resolve_all: args.resolve_all,
+            randomize_hosts: args.effective_randomize_hosts(),
+            unique: args.unique,
+            max_os_tries,
+            osscan_limit: args.osscan_limit,
+            osscan_guess: args.effective_osscan_guess(),
+            defeat_rst_ratelimit: args.defeat_rst_ratelimit || args.open_only,
+            defeat_icmp_ratelimit: args.defeat_icmp_ratelimit,
+            discovery_ignore_rst: args.discovery_ignore_rst,
+            disable_arp_ping: args.disable_arp_ping,
+            stats_every,
+            script_timeout,
+            versiondb: args.versiondb.clone(),
+            servicedb: args.servicedb.clone(),
+            output_machine,
+            output_hex,
         };
 
         for msg in &plan.unimplemented {
@@ -575,6 +663,24 @@ mod rate_validation_tests {
         let err = ScanPlan::from_args(&args).unwrap_err();
         assert!(
             err.to_string().contains("max-rate") && err.to_string().contains("min-rate"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn privileged_and_unprivileged_conflict() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--privileged",
+            "--unprivileged",
+            "-p",
+            "80",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        assert!(
+            err.to_string().contains("mutually exclusive"),
             "{err}"
         );
     }

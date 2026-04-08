@@ -11,7 +11,11 @@ use tracing::warn;
 use crate::cli::Args;
 
 /// Run banner / default-style probes on open TCP `(host, port)` pairs.
-pub async fn run_scripts(args: &Args, open_tcp: &[(IpAddr, u16)]) -> Result<()> {
+pub async fn run_scripts(
+    args: &Args,
+    open_tcp: &[(IpAddr, u16)],
+    script_timeout: Option<Duration>,
+) -> Result<()> {
     let mut names: Vec<String> = Vec::new();
     if args.script_default {
         names.push("default".into());
@@ -28,11 +32,13 @@ pub async fn run_scripts(args: &Args, open_tcp: &[(IpAddr, u16)]) -> Result<()> 
         return Ok(());
     }
 
+    let connect_to = script_timeout.unwrap_or(Duration::from_secs(3));
+
     for name in names {
         match name.as_str() {
             "default" | "banner" => {
                 for &(host, port) in open_tcp {
-                    match grab_tcp_banner(host, port).await {
+                    match grab_tcp_banner(host, port, connect_to).await {
                         Ok(Some(b)) => {
                             println!("NSE[{name}] {host}:{port} banner: {}", b.trim());
                         }
@@ -49,9 +55,9 @@ pub async fn run_scripts(args: &Args, open_tcp: &[(IpAddr, u16)]) -> Result<()> 
     Ok(())
 }
 
-async fn grab_tcp_banner(host: IpAddr, port: u16) -> Result<Option<String>> {
+async fn grab_tcp_banner(host: IpAddr, port: u16, connect_to: Duration) -> Result<Option<String>> {
     let addr = SocketAddr::new(host, port);
-    let mut s = match tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(addr)).await {
+    let mut s = match tokio::time::timeout(connect_to, TcpStream::connect(addr)).await {
         Ok(Ok(s)) => s,
         _ => return Ok(None),
     };

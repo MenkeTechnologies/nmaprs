@@ -1,5 +1,5 @@
-//! nmap-compatible CLI surface. Parsing accepts the same flags as `nmap --help`; behavior
-//! parity is documented in README (implementation status).
+//! nmap-compatible CLI surface. Parsing accepts the union of `nmap --help` and Nmap’s `long_options`
+//! table (`nmap.cc`); behavior parity is documented in README.
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -189,7 +189,7 @@ pub struct Args {
     #[arg(long = "min-parallelism", value_name = "N")]
     pub min_parallelism: Option<u32>,
 
-    #[arg(long = "max-parallelism", value_name = "N")]
+    #[arg(short = 'M', long = "max-parallelism", value_name = "N")]
     pub max_parallelism: Option<u32>,
 
     #[arg(long = "min-rtt-timeout", value_name = "TIME")]
@@ -238,7 +238,7 @@ pub struct Args {
     #[arg(short = 'g', long = "source-port", value_name = "PORT")]
     pub source_port: Option<u16>,
 
-    #[arg(long = "proxies", value_name = "URLS")]
+    #[arg(long = "proxies", visible_alias = "proxy", value_name = "URLS")]
     pub proxies: Option<String>,
 
     #[arg(long = "data", value_name = "HEX")]
@@ -277,6 +277,14 @@ pub struct Args {
 
     #[arg(long = "oA", value_name = "BASE")]
     pub output_all: Option<PathBuf>,
+
+    /// Machine-parseable output (Nmap `-oM`; same line family as `-oG` in nmaprs).
+    #[arg(long = "oM", value_name = "FILE")]
+    pub output_machine: Option<PathBuf>,
+
+    /// Hex dump output (Nmap `-oH`; reserved — file opened when set, minimal placeholder).
+    #[arg(long = "oH", value_name = "FILE")]
+    pub output_hex: Option<PathBuf>,
 
     #[arg(long = "verbosity", value_name = "N", default_value = "0")]
     pub verbosity: u8,
@@ -337,6 +345,86 @@ pub struct Args {
     #[arg(long = "unprivileged")]
     pub unprivileged: bool,
 
+    // --- Extended options (see Nmap `nmap.cc` / man page; not all in `nmap --help`) ---
+    #[arg(long = "resolve-all")]
+    pub resolve_all: bool,
+
+    #[arg(long = "max-os-tries", value_name = "N")]
+    pub max_os_tries: Option<u8>,
+
+    #[arg(long = "defeat-rst-ratelimit")]
+    pub defeat_rst_ratelimit: bool,
+
+    #[arg(long = "defeat-icmp-ratelimit")]
+    pub defeat_icmp_ratelimit: bool,
+
+    #[arg(long = "randomize-hosts")]
+    pub randomize_hosts: bool,
+
+    /// Alias for `--randomize-hosts` (Nmap compatibility).
+    #[arg(long = "rH")]
+    pub r_h: bool,
+
+    #[arg(long = "stats-every", value_name = "TIME")]
+    pub stats_every: Option<String>,
+
+    #[arg(long = "nsock-engine", value_name = "NAME")]
+    pub nsock_engine: Option<String>,
+
+    #[arg(long = "discovery-ignore-rst")]
+    pub discovery_ignore_rst: bool,
+
+    /// Same as `--osscan-guess` (Nmap `--fuzzy`).
+    #[arg(long = "fuzzy")]
+    pub fuzzy: bool,
+
+    #[arg(long = "unique")]
+    pub unique: bool,
+
+    #[arg(long = "log-errors")]
+    pub log_errors: bool,
+
+    #[arg(long = "deprecated-xml-osclass")]
+    pub deprecated_xml_osclass: bool,
+
+    #[arg(long = "adler32")]
+    pub adler32: bool,
+
+    #[arg(long = "disable-arp-ping")]
+    pub disable_arp_ping: bool,
+
+    #[arg(long = "route-dst", value_name = "HOST")]
+    pub route_dst: Option<String>,
+
+    #[arg(long = "servicedb", value_name = "FILE")]
+    pub servicedb: Option<PathBuf>,
+
+    #[arg(long = "versiondb", value_name = "FILE")]
+    pub versiondb: Option<PathBuf>,
+
+    #[arg(long = "release-memory")]
+    pub release_memory: bool,
+
+    #[arg(long = "nogcc")]
+    pub nogcc: bool,
+
+    #[arg(long = "allports")]
+    pub allports: bool,
+
+    #[arg(long = "script-timeout", value_name = "TIME")]
+    pub script_timeout: Option<String>,
+
+    #[arg(long = "thc")]
+    pub thc: bool,
+
+    /// Nmap hidden alias: extra verbosity (equivalent to `-vv` increment).
+    #[arg(long = "vv")]
+    pub vv: bool,
+
+    /// Nmap hidden alias: extra debug (equivalent to `-dd` increment).
+    #[arg(long = "ff")]
+    pub ff: bool,
+
     /// Trailing targets (hostnames, IPs, CIDR, nmap-style ranges).
     #[arg(value_name = "TARGET")]
     pub targets: Vec<String>,
@@ -347,5 +435,21 @@ impl Args {
         let raw: Vec<String> = std::env::args().collect();
         let expanded = crate::argv_expand::expand_nmap_style_argv(raw);
         Self::parse_from(expanded)
+    }
+
+    pub fn effective_verbosity(&self) -> u8 {
+        self.verbosity.saturating_add(if self.vv { 2 } else { 0 })
+    }
+
+    pub fn effective_debug(&self) -> u8 {
+        self.debug.saturating_add(if self.ff { 2 } else { 0 })
+    }
+
+    pub fn effective_randomize_hosts(&self) -> bool {
+        self.randomize_hosts || self.r_h
+    }
+
+    pub fn effective_osscan_guess(&self) -> bool {
+        self.osscan_guess || self.fuzzy
     }
 }

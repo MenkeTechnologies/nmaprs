@@ -120,12 +120,13 @@ fn parse_class_family(line: &str) -> Option<String> {
 }
 
 /// Human-readable OS line combining TTL heuristic and optional DB examples.
-pub fn format_os_guess(ttl: Option<u8>, db: Option<&OsDb>) -> String {
+pub fn format_os_guess(ttl: Option<u8>, db: Option<&OsDb>, max_examples: usize) -> String {
     let base = crate::os_detect::guess_from_ttl(ttl);
     let Some(db) = db else {
         return base.to_string();
     };
-    let ex = db.examples_for_ttl(ttl, 3);
+    let cap = max_examples.max(1);
+    let ex = db.examples_for_ttl(ttl, cap);
     if ex.is_empty() {
         return format!(
             "{base} (nmap-os-db loaded; full probe matching not implemented)"

@@ -7,7 +7,7 @@
 
 # nmaprs
 
-**nmaprs** is a Rust-native network scanner that speaks **nmap’s CLI dialect** (see `nmap --help`) and runs **highly parallel** scan engines (`tokio` + `futures::stream` + bounded concurrency). Multiple `-iL` lines and CLI targets resolve **in parallel** (order preserved) with the same **`--max-parallelism` / `--min-parallelism` / timing template** cap as port probes. It is **not** a byte-for-byte reimplementation of Nmap: the full **NSE Lua runtime** and **Nmap’s TCP/IP OS probe suite** (SEQ, OPS, T1–T7, etc.) are **not** implemented. With Nmap’s **`nmap-service-probes`** and **`nmap-os-db`** files under `--datadir` (default `./data`), **`-sV`** runs TCP and UDP probes with `ports` / `sslports` filtering, `tls` (**rustls**) for probe `sslports`, `rarity` vs `--version-intensity`, and `match` / `softmatch` handling (Rust `regex`; Perl-only patterns skipped). **`-O`** enriches ICMP TTL heuristics with example fingerprint titles from the DB. This tool implements **real** TCP connect, UDP probes, ICMP ping discovery, raw IPv4/IPv6 half-open TCP including SYN / NULL / FIN / Xmas / ACK / Window / Maimon (privileged), target list / random hosts, IPv6, resume checkpoints, traceroute, and **built-in** Rust “scripts” (banner grab) for `--script` / `-sC`.
+**nmaprs** is a Rust-native network scanner that speaks **nmap’s CLI dialect** (`nmap --help` **plus** the long-option set from upstream **`nmap.cc`**, e.g. `--resolve-all`, `--defeat-rst-ratelimit`, `--versiondb`, `--oM` / `--oH`, `--vv`, `--proxy` as an alias of `--proxies`). Flags are **accepted for parity**; packet-forging, decoys, proxies, custom DNS, and several other options are **not** fully implemented at the wire layer (the scanner logs **debug** when those categories are used). Multiple `-iL` lines and CLI targets resolve **in parallel** (order preserved) with the same **`--max-parallelism` / `--min-parallelism` / timing template** cap as port probes. It is **not** a byte-for-byte reimplementation of Nmap: the full **NSE Lua runtime** and **Nmap’s TCP/IP OS probe suite** (SEQ, OPS, T1–T7, etc.) are **not** implemented. With Nmap’s **`nmap-service-probes`** and **`nmap-os-db`** files under `--datadir` (default `./data`), **`-sV`** runs TCP and UDP probes with `ports` / `sslports` filtering, `tls` (**rustls**) for probe `sslports`, `rarity` vs `--version-intensity`, and `match` / `softmatch` handling (Rust `regex`; Perl-only patterns skipped). **`-O`** enriches ICMP TTL heuristics with example fingerprint titles from the DB. This tool implements **real** TCP connect, UDP probes, ICMP ping discovery, raw IPv4/IPv6 half-open TCP including SYN / NULL / FIN / Xmas / ACK / Window / Maimon (privileged), target list / random hosts, IPv6, resume checkpoints, traceroute, and **built-in** Rust “scripts” (banner grab) for `--script` / `-sC`.
 
 Created by **MenkeTechnologies**.
 
@@ -46,6 +46,14 @@ Created by **MenkeTechnologies**.
 | `--scanflags` | **Implemented** — custom TCP flag set for **raw** TCP scans (`-sS` / `-sN` / `-sF` / `-sX` / `-sM` / `-sA` / `-sW`); names `SYN` `ACK` `FIN` `RST` `PSH` `URG` `ECE` `CWR` (space, comma, pipe, or glued e.g. `SYNACK`); sequence/ack numbers follow Nmap-style rules for SYN vs ACK probes; recv classification still follows the selected scan type; **ignored** (with warning) if the scan type is not raw TCP |
 | Port specs (`-p`, `-F`, `--top-ports`, …) | **Implemented** — embedded TCP frequency list |
 | Output (`-oN`, `-oG`, `-oX`, `-oA`, `-oS`) | **Implemented** — XML minimal; **`-oS`** writes script-kiddie text mirroring `-oN` lines (stdout stays normal); works for **`-sn`** as well as port scans |
+| `-oM` / `-oH` | **Partial** — **`-oM`** writes the same grepable-style machine lines as **`-oG`**; **`-oH`** creates a placeholder file (full hex capture not implemented) |
+| `--stylesheet` / `--webxml` / `--no-stylesheet` | **Partial** — XML preamble / `xml-stylesheet` PI when `-oX` is used |
+| `--resolve-all` | **Implemented** — forward DNS returns **one** address by default (Nmap “first only”); **`--resolve-all`** scans every resolved address |
+| `--unprivileged` / `--privileged` | **Partial** — **`--unprivileged`** forces **TCP connect** instead of raw half-open TCP; rejects raw-only modes (`-sO`, `-sI`, SCTP). **`--privileged`** is accepted (behavior follows process capabilities) |
+| `--allports` | **Implemented** — ignores **`--exclude-ports`** when set |
+| `--max-os-tries`, `--osscan-limit`, `--osscan-guess` / `--fuzzy` | **Partial** — limits OS DB example titles / skips OS pass when **`--osscan-limit`** and no open TCP ports; full OS probe retries not implemented |
+| `--script-timeout` | **Partial** — applies to built-in script TCP connects |
+| Man-only timing / stats | **`--stats-every`** is parsed into the plan (periodic live stats not wired yet) |
 
 If you need **authoritative** Nmap NSE/OS DB behavior, use **[Nmap](https://nmap.org/)**.
 
@@ -101,7 +109,7 @@ cargo bench --bench scan
 4. **Discovery** (`src/discovery.rs`, `src/icmp_ping.rs`) — before port scan (unless `-Pn`); default ICMP + raw SYN (`syn.rs`) run concurrently; `-PS` raw SYN, `-PA` connect, `-PU` UDP, `-PY` SCTP, `-PO` IP protocol (`ip_proto.rs`), `-PP`/`-PM` legacy ICMP on Unix (`icmp_ping.rs`); `connect_timeout` from `--min-rtt-timeout` / timing template.
 5. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/sctp.rs`, `src/ip_proto.rs`, `src/ftp_bounce.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — optional `--min-hostgroup` / `--max-hostgroup` batching in `src/lib.rs` (`host_batches`); UDP ICMP listeners are **one session per scan** (shared `DashMap` across batches). TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 half-open TCP + **SCTP** (`-sY`/`-sZ`, CRC32c, IPv4 Layer3 + IPv6 raw SCTP, sharded blocking pool, mixed v4+v6 `tokio::join`) + **IP protocol** (`-sO`: IPv4 ICMP + Unix IPv6 raw + ICMPv6 Parameter Problem, sharded, mixed v4+v6 `tokio::join`) + **FTP bounce** (`-b`, Tokio parallel FTP sessions).
 6. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs` — bounded parallel `traceroute` / `tracert`, ordered output), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`, `src/os_db.rs`), **version scan** (`src/vscan.rs`), **script-kiddie output** (`src/skiddie.rs`).
-7. **Output** (`src/output.rs`).
+7. **Output** (`src/output.rs`) — optional **`-oM`** / **`-oH`**, XML stylesheet options.
 
 ## Data
 

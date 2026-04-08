@@ -41,6 +41,16 @@ fn version_flag() {
 }
 
 #[test]
+fn script_help_exits_without_targets() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["--script-help", "default"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("script-help"));
+}
+
+#[test]
 fn list_scan_localhost() {
     Command::cargo_bin("nmaprs")
         .expect("binary")

@@ -19,6 +19,8 @@ pub struct ExpandOpts {
     pub ipv6: bool,
     /// `-n`: no DNS.
     pub no_dns: bool,
+    /// Nmap `--resolve-all`: include every A/AAAA from forward DNS (default: first address only).
+    pub resolve_all: bool,
 }
 
 #[derive(Debug, Error)]
@@ -190,6 +192,9 @@ async fn resolve_host(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr>, Targ
             "no matching addresses for this address family".into(),
         ));
     }
+    if !opts.resolve_all && out.len() > 1 {
+        out.truncate(1);
+    }
     Ok(out)
 }
 
@@ -211,6 +216,9 @@ pub fn resolve_host_blocking(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr
             host.to_string(),
             "no matching addresses for this address family".into(),
         ));
+    }
+    if !opts.resolve_all && out.len() > 1 {
+        out.truncate(1);
     }
     Ok(out)
 }
@@ -299,6 +307,7 @@ mod tests {
         let opts = ExpandOpts {
             ipv6: false,
             no_dns: true,
+            resolve_all: false,
         };
         let ips = rt.block_on(expand_target("10.0.0.0/31", &opts)).unwrap();
         assert_eq!(ips.len(), 2);

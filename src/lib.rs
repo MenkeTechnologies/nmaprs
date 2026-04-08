@@ -26,7 +26,7 @@ pub mod syn;
 pub mod target;
 pub mod trace;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -35,6 +35,7 @@ use std::time::Instant;
 use anyhow::{anyhow, bail, Context, Result};
 use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
+use rand::seq::SliceRandom;
 use rand::Rng;
 use tracing::{info, warn};
 
@@ -43,6 +44,55 @@ use crate::config::{ScanKind, ScanPlan};
 use crate::output::{print_stdout, OutputSet};
 use crate::scan::{tcp_connect_scan, udp_scan, PortLine, ProbeRatePacer, UdpIcmpNotes};
 use crate::target::{apply_exclude, expand_target, random_addresses, read_input_list, ExpandOpts};
+
+fn expand_opts(args: &Args) -> ExpandOpts {
+    ExpandOpts {
+        ipv6: args.ipv6,
+        no_dns: args.no_dns,
+        resolve_all: args.resolve_all,
+    }
+}
+
+fn trace_nmap_compat(args: &Args) {
+    if !(args.fragment
+        || args.mtu.is_some()
+        || args.decoys.is_some()
+        || args.spoof_source.is_some()
+        || args.interface.is_some()
+        || args.source_port.is_some()
+        || args.proxies.is_some()
+        || args.data_hex.is_some()
+        || args.data_string.is_some()
+        || args.data_length.is_some()
+        || args.ip_options.is_some()
+        || args.ttl.is_some()
+        || args.spoof_mac.is_some()
+        || args.badsum
+        || args.packet_trace
+        || args.send_eth
+        || args.send_ip
+        || args.dns_servers.is_some()
+        || args.system_dns
+        || args.always_resolve
+        || args.noninteractive
+        || args.privileged
+        || args.route_dst.is_some()
+        || args.nsock_engine.is_some()
+        || args.servicedb.is_some()
+        || args.release_memory
+        || args.nogcc
+        || args.adler32
+        || args.log_errors
+        || args.deprecated_xml_osclass
+        || args.thc
+        || args.stats_every.is_some())
+    {
+        return;
+    }
+    tracing::debug!(
+        "nmaprs: one or more packet-level / resolver / nsock options are set; not all are fully implemented (flags accepted for CLI parity)"
+    );
+}
 
 async fn try_load_os_db(plan: &ScanPlan) -> Option<Arc<crate::os_db::OsDb>> {
     let path = plan.data_file("nmap-os-db");
@@ -524,10 +574,7 @@ async fn expand_specs_ordered(
 }
 
 async fn collect_hosts(args: &Args, concurrency: usize) -> Result<Vec<IpAddr>> {
-    let opts = ExpandOpts {
-        ipv6: args.ipv6,
-        no_dns: args.no_dns,
-    };
+    let opts = expand_opts(args);
     let mut hosts = Vec::new();
     if let Some(path) = &args.input_list {
         let lines = read_input_list(path)?;
@@ -546,6 +593,16 @@ async fn collect_hosts(args: &Args, concurrency: usize) -> Result<Vec<IpAddr>> {
 
 /// Run the full pipeline: parse → plan → expand targets → scan → emit output.
 pub async fn run(args: Args) -> Result<i32> {
+    if let Some(expr) = &args.script_help {
+        println!("nmaprs --script-help: {expr}");
+        println!("Built-in scripts only (Lua NSE is not embedded). Use --script / -sC.");
+        return Ok(0);
+    }
+    if args.script_updatedb {
+        println!("nmaprs: --script-updatedb acknowledged (no bundled NSE database).");
+        return Ok(0);
+    }
+
     if args.iflist {
         for iface in if_addrs::get_if_addrs()? {
             println!("{}: {:?}", iface.name, iface.addr);
@@ -562,6 +619,14 @@ pub async fn run(args: Args) -> Result<i32> {
         None
     };
 
+    trace_nmap_compat(&args);
+    if args.servicedb.is_some() {
+        warn!("--servicedb: custom nmap-services path accepted; embedded top-ports list still used until full parser is wired");
+    }
+    if args.script_trace {
+        tracing::info!("--script-trace: script I/O tracing not implemented for builtins");
+    }
+
     if args.targets.is_empty()
         && args.input_list.is_none()
         && args.random_targets.is_none()
@@ -571,10 +636,7 @@ pub async fn run(args: Args) -> Result<i32> {
     }
 
     if args.list_scan {
-        let opts = ExpandOpts {
-            ipv6: args.ipv6,
-            no_dns: args.no_dns,
-        };
+        let opts = expand_opts(&args);
         let mut tokens: Vec<String> = args.targets.clone();
         if let Some(path) = &args.input_list {
             for line in read_input_list(path)? {
@@ -598,12 +660,17 @@ pub async fn run(args: Args) -> Result<i32> {
         hosts,
         args.exclude.as_deref(),
         args.exclude_file.as_deref(),
-        &ExpandOpts {
-            ipv6: args.ipv6,
-            no_dns: args.no_dns,
-        },
+        &expand_opts(&args),
     )
     .map_err(|e| anyhow!("{e}"))?;
+
+    if plan.unique {
+        let mut seen = HashSet::new();
+        hosts.retain(|h| seen.insert(*h));
+    }
+    if plan.randomize_hosts {
+        hosts.shuffle(&mut rand::thread_rng());
+    }
 
     if hosts.is_empty() {
         bail!("no hosts to scan after exclusions");
@@ -627,10 +694,25 @@ pub async fn run(args: Args) -> Result<i32> {
             plan.output_grepable.as_deref(),
             plan.output_xml.as_deref(),
             plan.output_script_kiddie.as_deref(),
+            plan.output_machine.as_deref(),
+            plan.output_hex.as_deref(),
             plan.append_output,
         )?;
-        outs.write_headers(&cmdline)?;
+        outs.write_headers(
+            &cmdline,
+            args.stylesheet.as_deref(),
+            args.webxml,
+            args.no_stylesheet,
+        )?;
+        if let Some(hf) = &mut outs.hex {
+            use std::io::Write;
+            writeln!(
+                hf,
+                "# nmaprs -oH: full hex packet capture not implemented; placeholder header"
+            )?;
+        }
 
+        let ex_cap = (plan.max_os_tries as usize).min(10);
         let ping_out = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
         for o in &ping_out {
             if !o.up {
@@ -640,7 +722,7 @@ pub async fn run(args: Args) -> Result<i32> {
             let os_line = if plan.os_detect_requested {
                 let s = format!(
                     "OS guess: {}",
-                    crate::os_db::format_os_guess(o.ttl, os_db.as_deref())
+                    crate::os_db::format_os_guess(o.ttl, os_db.as_deref(), ex_cap)
                 );
                 println!("{}", s);
                 Some(s)
@@ -655,6 +737,10 @@ pub async fn run(args: Args) -> Result<i32> {
                 o.host,
                 os_line.as_deref(),
             )?;
+            if let Some(mf) = &mut outs.machine {
+                use std::io::Write;
+                writeln!(mf, "Host: {} ()\tStatus: Up", o.host)?;
+            }
         }
         outs.write_footer()?;
         if plan.traceroute {
@@ -731,7 +817,10 @@ pub async fn run(args: Args) -> Result<i32> {
     }
 
     if plan.version_scan_requested {
-        let path = plan.data_file("nmap-service-probes");
+        let path = plan.service_probes_path();
+        if args.version_trace {
+            tracing::info!("--version-trace: loading {}", path.display());
+        }
         if path.exists() {
             let intensity = plan.version_intensity;
             let connect_timeout = plan.connect_timeout;
@@ -814,10 +903,25 @@ pub async fn run(args: Args) -> Result<i32> {
         plan.output_grepable.as_deref(),
         plan.output_xml.as_deref(),
         plan.output_script_kiddie.as_deref(),
+        plan.output_machine.as_deref(),
+        plan.output_hex.as_deref(),
         plan.append_output,
     )?;
-    outs.write_headers(&cmdline)?;
+    outs.write_headers(
+        &cmdline,
+        args.stylesheet.as_deref(),
+        args.webxml,
+        args.no_stylesheet,
+    )?;
+    if let Some(hf) = &mut outs.hex {
+        use std::io::Write;
+        writeln!(
+            hf,
+            "# nmaprs -oH: full hex packet capture not implemented; placeholder header"
+        )?;
+    }
 
+    let ex_cap = (plan.max_os_tries as usize).min(10);
     for host in &hosts {
         let hl = by_host.get(host).cloned().unwrap_or_default();
         println!("Nmap scan report for {host}");
@@ -832,6 +936,9 @@ pub async fn run(args: Args) -> Result<i32> {
         if let Some(f) = &mut outs.grep {
             crate::output::write_grep(f, *host, &hl)?;
         }
+        if let Some(f) = &mut outs.machine {
+            crate::output::write_grep(f, *host, &hl)?;
+        }
         if let Some(f) = &mut outs.xml {
             crate::output::write_xml_host(f, *host, &hl)?;
         }
@@ -840,14 +947,23 @@ pub async fn run(args: Args) -> Result<i32> {
     outs.write_footer()?;
 
     if plan.os_detect_requested && !plan.ping_only {
-        let ping_out = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
-        for o in ping_out {
-            if o.up {
-                println!(
-                    "OS guess for {}: {}",
-                    o.host,
-                    crate::os_db::format_os_guess(o.ttl, os_db.as_deref())
-                );
+        let any_open_tcp = lines
+            .iter()
+            .any(|l| l.proto == "tcp" && l.state == "open");
+        if plan.osscan_limit && !any_open_tcp {
+            if plan.verbosity >= 1 {
+                info!("--osscan-limit: skipping OS detection (no open TCP ports)");
+            }
+        } else {
+            let ping_out = crate::ping::ping_hosts(&hosts, plan.effective_probe_concurrency()).await;
+            for o in ping_out {
+                if o.up {
+                    println!(
+                        "OS guess for {}: {}",
+                        o.host,
+                        crate::os_db::format_os_guess(o.ttl, os_db.as_deref(), ex_cap)
+                    );
+                }
             }
         }
     }
@@ -858,7 +974,7 @@ pub async fn run(args: Args) -> Result<i32> {
             .filter(|l| l.proto == "tcp" && l.state == "open")
             .map(|l| (l.host, l.port))
             .collect();
-        crate::nse::run_scripts(&args, &open_tcp).await?;
+        crate::nse::run_scripts(&args, &open_tcp, plan.script_timeout).await?;
     }
 
     if plan.traceroute && !plan.ping_only {
@@ -903,6 +1019,7 @@ mod expand_specs_tests {
         let opts = ExpandOpts {
             ipv6: false,
             no_dns: true,
+            resolve_all: false,
         };
         let v = expand_specs_ordered(vec![], opts, 4).await.unwrap();
         assert!(v.is_empty());
@@ -913,6 +1030,7 @@ mod expand_specs_tests {
         let opts = ExpandOpts {
             ipv6: false,
             no_dns: true,
+            resolve_all: false,
         };
         let specs = vec!["127.0.0.2".to_string(), "127.0.0.1".to_string()];
         let v = expand_specs_ordered(specs, opts, 8).await.unwrap();

@@ -15,6 +15,10 @@ pub struct OutputSet {
     pub xml: Option<File>,
     /// Mirrors `-oN`-style lines in script-kiddie form (Nmap `-oS`).
     pub skiddie: Option<File>,
+    /// Nmap `-oM` machine-parseable (same content family as `-oG` in nmaprs).
+    pub machine: Option<File>,
+    /// Nmap `-oH` hex dump (placeholder).
+    pub hex: Option<File>,
 }
 
 impl OutputSet {
@@ -23,6 +27,8 @@ impl OutputSet {
         grep: Option<&Path>,
         xml: Option<&Path>,
         skiddie: Option<&Path>,
+        machine: Option<&Path>,
+        hex: Option<&Path>,
         append: bool,
     ) -> Result<Self> {
         let open = |p: &Path| {
@@ -37,14 +43,37 @@ impl OutputSet {
             grep: grep.map(open).transpose().with_context(|| "oG")?,
             xml: xml.map(open).transpose().with_context(|| "oX")?,
             skiddie: skiddie.map(open).transpose().with_context(|| "oS")?,
+            machine: machine.map(open).transpose().with_context(|| "oM")?,
+            hex: hex.map(open).transpose().with_context(|| "oH")?,
         })
     }
 
-    pub fn write_headers(&mut self, cmdline: &str) -> Result<()> {
+    pub fn write_headers(
+        &mut self,
+        cmdline: &str,
+        stylesheet: Option<&str>,
+        webxml: bool,
+        no_stylesheet: bool,
+    ) -> Result<()> {
         if let Some(f) = &mut self.xml {
+            writeln!(f, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
+            if !no_stylesheet {
+                if let Some(s) = stylesheet {
+                    writeln!(
+                        f,
+                        r#"<?xml-stylesheet href="{}" type="text/xsl"?>"#,
+                        xml_escape(s)
+                    )?;
+                } else if webxml {
+                    writeln!(
+                        f,
+                        r#"<?xml-stylesheet href="https://svn.nmap.org/nmap/docs/nmap.xsl" type="text/xsl"?>"#
+                    )?;
+                }
+            }
             writeln!(
                 f,
-                r#"<?xml version="1.0" encoding="UTF-8"?><nmaprs><cmdline>{}</cmdline>"#,
+                r#"<nmaprs><cmdline>{}</cmdline>"#,
                 xml_escape(cmdline)
             )?;
         }

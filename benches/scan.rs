@@ -55,6 +55,22 @@ fn bench_scan_localhost_closed_ports(c: &mut Criterion) {
         unimplemented: vec![],
         ftp_bounce: None,
         idle_scan: None,
+        resolve_all: false,
+        randomize_hosts: false,
+        unique: false,
+        max_os_tries: 5,
+        osscan_limit: false,
+        osscan_guess: false,
+        defeat_rst_ratelimit: false,
+        defeat_icmp_ratelimit: false,
+        discovery_ignore_rst: false,
+        disable_arp_ping: false,
+        stats_every: None,
+        script_timeout: None,
+        versiondb: None,
+        servicedb: None,
+        output_machine: None,
+        output_hex: None,
     });
 
     c.bench_function("tcp_connect_scan_localhost_3_ports", |b| {
