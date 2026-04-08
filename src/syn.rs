@@ -1,7 +1,9 @@
 //! Raw TCP SYN scan via `pnet` (requires elevated privileges on most OSes).
 //!
 //! **Batched + pipelined**: a receiver thread drains TCP replies while the main thread sends SYNs,
-//! overlapping RTT with the send phase.
+//! overlapping RTT with the send phase. `--max-retries` runs additional full rounds (new raw socket
+//! each round) for probes still unresolved, omitting scan-delay / rate pacing on later rounds (TCP
+//! connect parity).
 
 use std::io;
 use std::mem;
@@ -79,16 +81,30 @@ enum SynOutcome {
     HostTimeout,
 }
 
-/// Half-open SYN scan for IPv4: receiver thread + main-thread send pipeline.
-pub fn syn_scan_ipv4(
-    order: Vec<(Ipv4Addr, u16)>,
+#[derive(Hash, Eq, PartialEq, Clone, Copy)]
+struct SynKeyV4 {
+    dst: Ipv4Addr,
+    dport: u16,
+    sport: u16,
+}
+
+/// One pipelined IPv4 SYN round: recv thread + main-thread sends for `subset` (global indices).
+#[allow(clippy::too_many_arguments)]
+fn syn_ipv4_one_round(
+    subset: &[(usize, Ipv4Addr, u16)],
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
     host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
-) -> io::Result<Vec<PortLine>> {
+    apply_probe_delays: bool,
+    global_results: Arc<Mutex<Vec<Option<SynOutcome>>>>,
+) -> io::Result<()> {
+    if subset.is_empty() {
+        return Ok(());
+    }
+
     let (mut tx, mut rx) = transport_channel(
         RX_BUF,
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Tcp)),
@@ -96,24 +112,11 @@ pub fn syn_scan_ipv4(
     let src_ip = local_ipv4_for_checksum()?;
     let mut rng = rand::thread_rng();
 
-    #[derive(Hash, Eq, PartialEq, Clone, Copy)]
-    struct Key {
-        dst: Ipv4Addr,
-        dport: u16,
-        sport: u16,
-    }
-
-    let total = order.len();
-    if total == 0 {
-        return Ok(vec![]);
-    }
-
-    let pending: Arc<DashMap<Key, (Instant, usize)>> = Arc::new(DashMap::new());
-    let results: Arc<Mutex<Vec<Option<SynOutcome>>>> = Arc::new(Mutex::new(vec![None; total]));
+    let pending: Arc<DashMap<SynKeyV4, (Instant, usize)>> = Arc::new(DashMap::new());
     let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
     let pending_r = Arc::clone(&pending);
-    let results_r = Arc::clone(&results);
+    let results_r = Arc::clone(&global_results);
     let global_end_r = Arc::clone(&global_end);
 
     let recv_handle = thread::spawn(move || -> io::Result<()> {
@@ -136,20 +139,20 @@ pub fn syn_scan_ipv4(
                     };
                     let sport = pkt.get_destination();
                     let dport = pkt.get_source();
-                    let key = Key {
+                    let key = SynKeyV4 {
                         dst,
                         dport,
                         sport,
                     };
-                    let Some((_, idx)) = pending_r.get(&key).map(|e| *e.value()) else {
+                    let Some((_, gidx)) = pending_r.get(&key).map(|e| *e.value()) else {
                         continue;
                     };
                     let f = pkt.get_flags();
                     if f & TcpFlags::RST != 0 {
-                        results_r.lock().expect("results")[idx] = Some(SynOutcome::Closed);
+                        results_r.lock().expect("results")[gidx] = Some(SynOutcome::Closed);
                         pending_r.remove(&key);
                     } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
-                        results_r.lock().expect("results")[idx] = Some(SynOutcome::Open);
+                        results_r.lock().expect("results")[gidx] = Some(SynOutcome::Open);
                         pending_r.remove(&key);
                     }
                 }
@@ -164,23 +167,25 @@ pub fn syn_scan_ipv4(
     let tcp_len = MutableTcpPacket::minimum_packet_size();
     let mut pkt_buf = vec![0u8; tcp_len];
     let mut ge_max = Instant::now();
-    for (idx, (dst_ip, port)) in order.iter().enumerate() {
+    for &(gidx, dst_ip, port) in subset {
         if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
-            let ip = IpAddr::V4(*dst_ip);
+            let ip = IpAddr::V4(dst_ip);
             if host_over_deadline(hs.as_ref(), ip, limit) {
-                results.lock().expect("results")[idx] = Some(SynOutcome::HostTimeout);
+                global_results.lock().expect("results")[gidx] = Some(SynOutcome::HostTimeout);
                 continue;
             }
         }
-        sleep_inter_probe_delay_sync(scan_delay, max_scan_delay);
-        if let Some(p) = pacer.as_ref() {
-            p.wait_turn_sync();
+        if apply_probe_delays {
+            sleep_inter_probe_delay_sync(scan_delay, max_scan_delay);
+            if let Some(p) = pacer.as_ref() {
+                p.wait_turn_sync();
+            }
         }
         let sport = loop {
             let s: u16 = rng.gen_range(32768..65535);
-            let k = Key {
-                dst: *dst_ip,
-                dport: *port,
+            let k = SynKeyV4 {
+                dst: dst_ip,
+                dport: port,
                 sport: s,
             };
             if !pending.contains_key(&k) {
@@ -191,18 +196,18 @@ pub fn syn_scan_ipv4(
         let deadline = Instant::now() + per_probe_timeout;
         ge_max = ge_max.max(deadline);
         pending.insert(
-            Key {
-                dst: *dst_ip,
-                dport: *port,
+            SynKeyV4 {
+                dst: dst_ip,
+                dport: port,
                 sport,
             },
-            (deadline, idx),
+            (deadline, gidx),
         );
         {
             let buf = &mut pkt_buf[..];
             let mut tcp = MutableTcpPacket::new(buf).expect("tcp buffer");
             tcp.set_source(sport);
-            tcp.set_destination(*port);
+            tcp.set_destination(port);
             tcp.set_sequence(seq);
             tcp.set_acknowledgement(0);
             tcp.set_data_offset(5);
@@ -211,9 +216,9 @@ pub fn syn_scan_ipv4(
             tcp.set_window(64240);
             tcp.set_checksum(0);
             tcp.set_urgent_ptr(0);
-            let cks = ipv4_checksum(&tcp.to_immutable(), &src_ip, dst_ip);
+            let cks = ipv4_checksum(&tcp.to_immutable(), &src_ip, &dst_ip);
             tcp.set_checksum(cks);
-            tx.send_to(tcp.to_immutable(), IpAddr::V4(*dst_ip))?;
+            tx.send_to(tcp.to_immutable(), IpAddr::V4(dst_ip))?;
         }
     }
 
@@ -221,8 +226,60 @@ pub fn syn_scan_ipv4(
 
     let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
     recv_res?;
+    Ok(())
+}
 
-    let results = results.lock().expect("results");
+/// Half-open SYN scan for IPv4: receiver thread + main-thread send pipeline; optional `--max-retries` rounds.
+#[allow(clippy::too_many_arguments)]
+pub fn syn_scan_ipv4(
+    order: Vec<(Ipv4Addr, u16)>,
+    per_probe_timeout: Duration,
+    pacer: Option<Arc<ProbeRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+    connect_retries: u32,
+) -> io::Result<Vec<PortLine>> {
+    let total = order.len();
+    if total == 0 {
+        return Ok(vec![]);
+    }
+
+    let global_results = Arc::new(Mutex::new(vec![None; total]));
+
+    for pass in 0..=connect_retries {
+        let mut subset: Vec<(usize, Ipv4Addr, u16)> = Vec::new();
+        for (idx, &(dst, port)) in order.iter().enumerate() {
+            if global_results.lock().expect("global_results")[idx].is_some() {
+                continue;
+            }
+            if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
+                let ip = IpAddr::V4(dst);
+                if host_over_deadline(hs.as_ref(), ip, limit) {
+                    global_results.lock().expect("global_results")[idx] = Some(SynOutcome::HostTimeout);
+                    continue;
+                }
+            }
+            subset.push((idx, dst, port));
+        }
+        if subset.is_empty() {
+            break;
+        }
+        syn_ipv4_one_round(
+            &subset,
+            per_probe_timeout,
+            pacer.clone(),
+            host_timeout,
+            host_start.clone(),
+            scan_delay,
+            max_scan_delay,
+            pass == 0,
+            Arc::clone(&global_results),
+        )?;
+    }
+
+    let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
         let (state, reason) = match results[i] {
@@ -244,16 +301,29 @@ pub fn syn_scan_ipv4(
     Ok(out)
 }
 
-/// Half-open SYN scan for IPv6 (separate raw path from IPv4).
-pub fn syn_scan_ipv6(
-    order: Vec<(Ipv6Addr, u16)>,
+#[derive(Hash, Eq, PartialEq, Clone, Copy)]
+struct SynKeyV6 {
+    dst: Ipv6Addr,
+    dport: u16,
+    sport: u16,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn syn_ipv6_one_round(
+    subset: &[(usize, Ipv6Addr, u16)],
     per_probe_timeout: Duration,
     pacer: Option<Arc<ProbeRatePacer>>,
     host_timeout: Option<Duration>,
     host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
     scan_delay: Option<Duration>,
     max_scan_delay: Option<Duration>,
-) -> io::Result<Vec<PortLine>> {
+    apply_probe_delays: bool,
+    global_results: Arc<Mutex<Vec<Option<SynOutcome>>>>,
+) -> io::Result<()> {
+    if subset.is_empty() {
+        return Ok(());
+    }
+
     let (mut tx, mut rx) = transport_channel(
         RX_BUF,
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Tcp)),
@@ -261,24 +331,11 @@ pub fn syn_scan_ipv6(
     let src_ip = local_ipv6_for_checksum()?;
     let mut rng = rand::thread_rng();
 
-    #[derive(Hash, Eq, PartialEq, Clone, Copy)]
-    struct Key {
-        dst: Ipv6Addr,
-        dport: u16,
-        sport: u16,
-    }
-
-    let total = order.len();
-    if total == 0 {
-        return Ok(vec![]);
-    }
-
-    let pending: Arc<DashMap<Key, (Instant, usize)>> = Arc::new(DashMap::new());
-    let results: Arc<Mutex<Vec<Option<SynOutcome>>>> = Arc::new(Mutex::new(vec![None; total]));
+    let pending: Arc<DashMap<SynKeyV6, (Instant, usize)>> = Arc::new(DashMap::new());
     let global_end: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
     let pending_r = Arc::clone(&pending);
-    let results_r = Arc::clone(&results);
+    let results_r = Arc::clone(&global_results);
     let global_end_r = Arc::clone(&global_end);
 
     let recv_handle = thread::spawn(move || -> io::Result<()> {
@@ -300,20 +357,20 @@ pub fn syn_scan_ipv6(
                     };
                     let sport = pkt.get_destination();
                     let dport = pkt.get_source();
-                    let key = Key {
+                    let key = SynKeyV6 {
                         dst,
                         dport,
                         sport,
                     };
-                    let Some((_, idx)) = pending_r.get(&key).map(|e| *e.value()) else {
+                    let Some((_, gidx)) = pending_r.get(&key).map(|e| *e.value()) else {
                         continue;
                     };
                     let f = pkt.get_flags();
                     if f & TcpFlags::RST != 0 {
-                        results_r.lock().expect("results")[idx] = Some(SynOutcome::Closed);
+                        results_r.lock().expect("results")[gidx] = Some(SynOutcome::Closed);
                         pending_r.remove(&key);
                     } else if f & TcpFlags::SYN != 0 && f & TcpFlags::ACK != 0 {
-                        results_r.lock().expect("results")[idx] = Some(SynOutcome::Open);
+                        results_r.lock().expect("results")[gidx] = Some(SynOutcome::Open);
                         pending_r.remove(&key);
                     }
                 }
@@ -328,23 +385,25 @@ pub fn syn_scan_ipv6(
     let tcp_len = MutableTcpPacket::minimum_packet_size();
     let mut pkt_buf = vec![0u8; tcp_len];
     let mut ge_max = Instant::now();
-    for (idx, (dst_ip, port)) in order.iter().enumerate() {
+    for &(gidx, dst_ip, port) in subset {
         if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
-            let ip = IpAddr::V6(*dst_ip);
+            let ip = IpAddr::V6(dst_ip);
             if host_over_deadline(hs.as_ref(), ip, limit) {
-                results.lock().expect("results")[idx] = Some(SynOutcome::HostTimeout);
+                global_results.lock().expect("results")[gidx] = Some(SynOutcome::HostTimeout);
                 continue;
             }
         }
-        sleep_inter_probe_delay_sync(scan_delay, max_scan_delay);
-        if let Some(p) = pacer.as_ref() {
-            p.wait_turn_sync();
+        if apply_probe_delays {
+            sleep_inter_probe_delay_sync(scan_delay, max_scan_delay);
+            if let Some(p) = pacer.as_ref() {
+                p.wait_turn_sync();
+            }
         }
         let sport = loop {
             let s: u16 = rng.gen_range(32768..65535);
-            let k = Key {
-                dst: *dst_ip,
-                dport: *port,
+            let k = SynKeyV6 {
+                dst: dst_ip,
+                dport: port,
                 sport: s,
             };
             if !pending.contains_key(&k) {
@@ -355,18 +414,18 @@ pub fn syn_scan_ipv6(
         let deadline = Instant::now() + per_probe_timeout;
         ge_max = ge_max.max(deadline);
         pending.insert(
-            Key {
-                dst: *dst_ip,
-                dport: *port,
+            SynKeyV6 {
+                dst: dst_ip,
+                dport: port,
                 sport,
             },
-            (deadline, idx),
+            (deadline, gidx),
         );
         {
             let buf = &mut pkt_buf[..];
             let mut tcp = MutableTcpPacket::new(buf).expect("tcp buffer");
             tcp.set_source(sport);
-            tcp.set_destination(*port);
+            tcp.set_destination(port);
             tcp.set_sequence(seq);
             tcp.set_acknowledgement(0);
             tcp.set_data_offset(5);
@@ -375,9 +434,9 @@ pub fn syn_scan_ipv6(
             tcp.set_window(64240);
             tcp.set_checksum(0);
             tcp.set_urgent_ptr(0);
-            let cks = ipv6_checksum(&tcp.to_immutable(), &src_ip, dst_ip);
+            let cks = ipv6_checksum(&tcp.to_immutable(), &src_ip, &dst_ip);
             tcp.set_checksum(cks);
-            tx.send_to(tcp.to_immutable(), IpAddr::V6(*dst_ip))?;
+            tx.send_to(tcp.to_immutable(), IpAddr::V6(dst_ip))?;
         }
     }
 
@@ -385,8 +444,60 @@ pub fn syn_scan_ipv6(
 
     let recv_res = recv_handle.join().map_err(|e| io::Error::other(format!("recv thread: {e:?}")))?;
     recv_res?;
+    Ok(())
+}
 
-    let results = results.lock().expect("results");
+/// Half-open SYN scan for IPv6 (separate raw path from IPv4); optional `--max-retries` rounds.
+#[allow(clippy::too_many_arguments)]
+pub fn syn_scan_ipv6(
+    order: Vec<(Ipv6Addr, u16)>,
+    per_probe_timeout: Duration,
+    pacer: Option<Arc<ProbeRatePacer>>,
+    host_timeout: Option<Duration>,
+    host_start: Option<Arc<DashMap<IpAddr, Instant>>>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+    connect_retries: u32,
+) -> io::Result<Vec<PortLine>> {
+    let total = order.len();
+    if total == 0 {
+        return Ok(vec![]);
+    }
+
+    let global_results = Arc::new(Mutex::new(vec![None; total]));
+
+    for pass in 0..=connect_retries {
+        let mut subset: Vec<(usize, Ipv6Addr, u16)> = Vec::new();
+        for (idx, &(dst, port)) in order.iter().enumerate() {
+            if global_results.lock().expect("global_results")[idx].is_some() {
+                continue;
+            }
+            if let (Some(limit), Some(ref hs)) = (host_timeout, host_start.as_ref()) {
+                let ip = IpAddr::V6(dst);
+                if host_over_deadline(hs.as_ref(), ip, limit) {
+                    global_results.lock().expect("global_results")[idx] = Some(SynOutcome::HostTimeout);
+                    continue;
+                }
+            }
+            subset.push((idx, dst, port));
+        }
+        if subset.is_empty() {
+            break;
+        }
+        syn_ipv6_one_round(
+            &subset,
+            per_probe_timeout,
+            pacer.clone(),
+            host_timeout,
+            host_start.clone(),
+            scan_delay,
+            max_scan_delay,
+            pass == 0,
+            Arc::clone(&global_results),
+        )?;
+    }
+
+    let results = global_results.lock().expect("global_results");
     let mut out = Vec::with_capacity(total);
     for (i, (host, port)) in order.into_iter().enumerate() {
         let (state, reason) = match results[i] {

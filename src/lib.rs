@@ -264,6 +264,7 @@ pub async fn run(args: Args) -> Result<i32> {
             let syn_host_limit = plan.host_timeout;
             let syn_scan_delay = plan.scan_delay;
             let syn_max_scan_delay = plan.max_scan_delay;
+            let syn_connect_retries = plan.connect_retries;
 
             let v4_fut = async {
                 if work_v4.is_empty() {
@@ -280,6 +281,7 @@ pub async fn run(args: Args) -> Result<i32> {
                         host_start,
                         syn_scan_delay,
                         syn_max_scan_delay,
+                        syn_connect_retries,
                     )
                 })
                 .await
@@ -303,6 +305,7 @@ pub async fn run(args: Args) -> Result<i32> {
                         host_start,
                         syn_scan_delay,
                         syn_max_scan_delay,
+                        syn_connect_retries,
                     )
                 })
                 .await

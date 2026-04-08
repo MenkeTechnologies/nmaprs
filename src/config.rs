@@ -50,7 +50,8 @@ pub struct ScanPlan {
     pub min_probe_rate: Option<u64>,
     /// Max wall-clock time per host for the port scan phase (`--host-timeout`).
     pub host_timeout: Option<Duration>,
-    /// Extra TCP connect attempts after timeout (`--max-retries`); total tries = `1 + connect_retries`.
+    /// Extra probe attempts after timeout (`--max-retries`); total tries = `1 + connect_retries`
+    /// (TCP connect, UDP, raw SYN).
     pub connect_retries: u32,
     /// Minimum delay before each probe (`--scan-delay`); with `--max-scan-delay`, delay is uniform in `[min, max]`.
     pub scan_delay: Option<Duration>,
@@ -144,10 +145,6 @@ impl ScanPlan {
                 }
                 _ => bail!("unknown --scan-type {ch}"),
             }
-        }
-
-        if args.max_retries.is_some() && scan_kind == ScanKind::Udp {
-            warn!("--max-retries applies to TCP connect only; ignored for UDP");
         }
 
         // --- Ports (skipped for host-discovery-only) ---

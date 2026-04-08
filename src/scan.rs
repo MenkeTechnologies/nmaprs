@@ -315,9 +315,11 @@ pub async fn udp_scan(
     let host_limit = plan.host_timeout;
     let scan_delay = plan.scan_delay;
     let max_scan_delay = plan.max_scan_delay;
+    let connect_retries = plan.connect_retries;
+    let max_tries = 1u32.saturating_add(connect_retries);
 
     stream::iter(work)
-        .map(|(host, port)| {
+        .map(move |(host, port)| {
             let sem = sem.clone();
             let icmp_notes = icmp_notes.clone();
             let pacer = pacer.clone();
@@ -335,84 +337,100 @@ pub async fn udp_scan(
                         });
                     }
                 }
-                sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
-                if let Some(p) = pacer.as_ref() {
-                    p.wait_turn().await;
-                }
-                let _p = sem.acquire().await.ok()?;
+
                 let bind_addr: SocketAddr = match host {
                     IpAddr::V4(_) => "0.0.0.0:0".parse().unwrap(),
                     IpAddr::V6(_) => "[::]:0".parse().unwrap(),
                 };
-                let socket = UdpSocket::bind(bind_addr).await.ok()?;
                 let dst = SocketAddr::new(host, port);
-                let start = Instant::now();
                 let payload = [0x00u8];
-                if socket.send_to(&payload, dst).await.is_err() {
-                    return Some(PortLine {
-                        host,
-                        port,
-                        proto: "udp",
-                        state: "filtered",
-                        reason: PortReason::Error,
-                        latency_ms: Some(start.elapsed().as_millis()),
-                    });
-                }
-                let mut buf = [0u8; 512];
-                let recv = socket.recv_from(&mut buf);
-                let res = tokio::time::timeout(timeout, recv).await;
-                let elapsed = start.elapsed().as_millis();
-                Some(match res {
-                    Ok(Ok((n, _))) if n > 0 => PortLine {
-                        host,
-                        port,
-                        proto: "udp",
-                        state: "open",
-                        reason: PortReason::UdpResponse,
-                        latency_ms: Some(elapsed),
-                    },
-                    Ok(_) => PortLine {
-                        host,
-                        port,
-                        proto: "udp",
-                        state: "open|filtered",
-                        reason: PortReason::Error,
-                        latency_ms: Some(elapsed),
-                    },
-                    Err(_) => {
-                        if let Some(ref notes) = icmp_notes {
-                            tokio::time::sleep(Duration::from_millis(UDP_ICMP_DRAIN_MS)).await;
-                            if let Some(out) = notes.get(&(host, port)).as_deref().copied() {
-                                return Some(match out {
-                                    UdpIcmpOutcome::Closed => PortLine {
-                                        host,
-                                        port,
-                                        proto: "udp",
-                                        state: "closed",
-                                        reason: PortReason::IcmpPortUnreachable,
-                                        latency_ms: None,
-                                    },
-                                    UdpIcmpOutcome::Filtered => PortLine {
-                                        host,
-                                        port,
-                                        proto: "udp",
-                                        state: "filtered",
-                                        reason: PortReason::IcmpUnreachableFiltered,
-                                        latency_ms: None,
-                                    },
-                                });
-                            }
+                let overall_start = Instant::now();
+                let mut timeouts = 0u32;
+
+                loop {
+                    if timeouts == 0 {
+                        sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
+                        if let Some(p) = pacer.as_ref() {
+                            p.wait_turn().await;
                         }
-                        PortLine {
+                    }
+                    let _p = sem.acquire().await.ok()?;
+                    let socket = UdpSocket::bind(bind_addr).await.ok()?;
+                    let start = Instant::now();
+                    if socket.send_to(&payload, dst).await.is_err() {
+                        return Some(PortLine {
                             host,
                             port,
                             proto: "udp",
-                            state: "open|filtered",
-                            reason: PortReason::Timeout,
-                            latency_ms: None,
+                            state: "filtered",
+                            reason: PortReason::Error,
+                            latency_ms: Some(overall_start.elapsed().as_millis()),
+                        });
+                    }
+                    let mut buf = [0u8; 512];
+                    let recv = socket.recv_from(&mut buf);
+                    let res = tokio::time::timeout(timeout, recv).await;
+                    let elapsed = start.elapsed().as_millis();
+                    match res {
+                        Ok(Ok((n, _))) if n > 0 => {
+                            return Some(PortLine {
+                                host,
+                                port,
+                                proto: "udp",
+                                state: "open",
+                                reason: PortReason::UdpResponse,
+                                latency_ms: Some(elapsed),
+                            });
+                        }
+                        Ok(_) => {
+                            return Some(PortLine {
+                                host,
+                                port,
+                                proto: "udp",
+                                state: "open|filtered",
+                                reason: PortReason::Error,
+                                latency_ms: Some(elapsed),
+                            });
+                        }
+                        Err(_) => {
+                            timeouts += 1;
+                            if timeouts >= max_tries {
+                                if let Some(ref notes) = icmp_notes {
+                                    tokio::time::sleep(Duration::from_millis(UDP_ICMP_DRAIN_MS))
+                                        .await;
+                                    if let Some(out) = notes.get(&(host, port)).as_deref().copied() {
+                                        return Some(match out {
+                                            UdpIcmpOutcome::Closed => PortLine {
+                                                host,
+                                                port,
+                                                proto: "udp",
+                                                state: "closed",
+                                                reason: PortReason::IcmpPortUnreachable,
+                                                latency_ms: None,
+                                            },
+                                            UdpIcmpOutcome::Filtered => PortLine {
+                                                host,
+                                                port,
+                                                proto: "udp",
+                                                state: "filtered",
+                                                reason: PortReason::IcmpUnreachableFiltered,
+                                                latency_ms: None,
+                                            },
+                                        });
+                                    }
+                                }
+                                return Some(PortLine {
+                                    host,
+                                    port,
+                                    proto: "udp",
+                                    state: "open|filtered",
+                                    reason: PortReason::Timeout,
+                                    latency_ms: None,
+                                });
+                            }
                         }
                     }
-                })
+                }
             }
         })
         .buffer_unordered(conc)
