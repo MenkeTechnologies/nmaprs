@@ -1,6 +1,6 @@
 [package]
 name = "nmaprs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "High-performance parallel network scanner with nmap-compatible CLI surface"
 license = "MIT OR Apache-2.0"

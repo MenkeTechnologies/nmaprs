@@ -123,51 +123,51 @@ All runs on **127.0.0.1**, TCP connect (`-sT`), `-n -Pn`, `--min-rtt-timeout 50m
 
 | Test | nmap | nmaprs | Speedup |
 |------|------|--------|---------|
-| 2 ports (`-p 80,443`) | 12.7 ms | 2.4 ms | **5.3× faster** |
-| 3 closed high ports (65533–65535) | 13.3 ms | 2.7 ms | **5.0× faster** |
-| `-F` (fast, ~100 ports) | 15.6 ms | 5.1 ms | **3.0× faster** |
-| `--top-ports 100` | 16.4 ms | 5.3 ms | **3.1× faster** |
-| `--top-ports 1000` | 44.7 ms | 22.3 ms | **2.0× faster** |
-| `-p-` (all 65535) | 1.81 s | 1.27 s | **1.4× faster** |
+| 2 ports (`-p 80,443`) | 12.3 ms | 2.4 ms | **5.1× faster** |
+| 3 closed high ports (65533–65535) | 12.6 ms | 2.7 ms | **4.6× faster** |
+| `-F` (fast, ~100 ports) | 15.4 ms | 5.6 ms | **2.8× faster** |
+| `--top-ports 100` | 15.9 ms | 5.4 ms | **2.9× faster** |
+| `--top-ports 1000` | 40.3 ms | 23.7 ms | **1.7× faster** |
+| `-p-` (all 65535) | 1.81 s | 1.15 s | **1.6× faster** |
 
 #### By parallelism (`--top-ports 1000`)
 
 | Parallelism | nmap | nmaprs | Speedup |
 |-------------|------|--------|---------|
-| M=64 | 39.4 ms | 20.7 ms | **1.9× faster** |
-| M=256 | 44.7 ms | 22.3 ms | **2.0× faster** |
+| M=64 | 39.1 ms | 19.2 ms | **2.0× faster** |
+| M=256 | 40.3 ms | 23.7 ms | **1.7× faster** |
 
 #### By parallelism (`-p-`, all 65535)
 
 | Parallelism | nmap | nmaprs | Speedup |
 |-------------|------|--------|---------|
-| M=256 | 1.81 s | 1.27 s | **1.4× faster** |
-| M=1024 | 1.79 s | 1.20 s | **1.5× faster** |
+| M=256 | 1.81 s | 1.15 s | **1.6× faster** |
+| M=1024 | 1.82 s | 1.21 s | **1.5× faster** |
 
 #### By output format (`--top-ports 100`, M=256)
 
 | Output | nmap | nmaprs | Speedup |
 |--------|------|--------|---------|
-| `-oN` | 16.4 ms | 5.3 ms | **3.1× faster** |
-| `-oG` | 15.3 ms | 5.6 ms | **2.7× faster** |
-| `-oX` | 16.1 ms | 5.6 ms | **2.9× faster** |
+| `-oN` | 15.9 ms | 5.4 ms | **2.9× faster** |
+| `-oG` | 15.8 ms | 6.1 ms | **2.6× faster** |
+| `-oX` | 15.8 ms | 6.0 ms | **2.6× faster** |
 
 #### Ping scan (`-sn`, no `-Pn`)
 
 | Test | nmap | nmaprs | Speedup |
 |------|------|--------|---------|
-| `-sn 127.0.0.1` | 4.5 ms | 4.4 ms | **~1× (parity)** |
+| `-sn 127.0.0.1` | 7.2 ms | 4.9 ms | **1.5× faster** |
 
 #### Analysis
 
-nmaprs is **1.4–5.3× faster** across all port counts. Small scans (2–100 ports) see the largest gains (**3–5×**) because nmap's startup overhead (Lua/NSE, libpcap, service databases) dominates. Full 65535-port sweeps still show **1.4–1.5×** speedup thanks to `tokio::spawn` per probe with work-stealing across all CPU cores (vs `buffer_unordered` single-task polling). Ping scan is at parity since both hit the same ICMP syscall floor. Output format has negligible impact on either tool.
+nmaprs is **1.5–5.1× faster** across all port counts. Small scans (2–100 ports) see the largest gains (**3–5×**) because nmap's startup overhead (Lua/NSE, libpcap, service databases) dominates. Full 65535-port sweeps show **1.5–1.6×** speedup thanks to a worker-pool architecture with blocking `std::net::TcpStream::connect_timeout` (fewer syscalls than tokio async — no per-socket `ioctl`/`fcntl` non-blocking setup) plus lock-free `UnsafeCell` result slots indexed by atomic work counter. Ping scan shows **1.5×** improvement. Output format has negligible impact on either tool.
 
 ### Criterion (Rust internals)
 
 TCP connect scan to three closed localhost ports — measures pure scan-loop overhead:
 
 ```
-tcp_connect_scan_localhost_3_ports  time: [74.8 µs 78.3 µs 82.4 µs]
+tcp_connect_scan_localhost_3_ports  time: [74.0 µs 77.4 µs 81.7 µs]
 ```
 
 ### Running benchmarks
@@ -187,7 +187,7 @@ cargo build --release
 2. **Plan** (`src/config.rs`, `src/scanflags.rs`) → `ScanPlan` (optional `--scanflags` TCP byte for raw scans).
 3. **Targets** (`src/target.rs`, `src/lib.rs` `expand_specs_ordered`) — IPv4/IPv6, CIDR, nmap-style IPv4 ranges, DNS, `-iL`, `-iR`; **parallel** `expand_target` with stable ordering.
 4. **Discovery** (`src/discovery.rs`, `src/icmp_ping.rs`) — before port scan (unless `-Pn`); default ICMP + raw SYN (`syn.rs`) run concurrently; `-PS` raw SYN, `-PA` connect, `-PU` UDP, `-PY` SCTP, `-PO` IP protocol (`ip_proto.rs`), `-PP`/`-PM` legacy ICMP on Unix (`icmp_ping.rs`); `connect_timeout` from `--min-rtt-timeout` / timing template.
-5. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/sctp.rs`, `src/ip_proto.rs`, `src/ftp_bounce.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — optional `--min-hostgroup` / `--max-hostgroup` batching in `src/lib.rs` (`host_batches`); UDP ICMP listeners are **one session per scan** (shared `DashMap` across batches). TCP connect / UDP / ping use `futures::stream` + `buffer_unordered(effective concurrency)` (single cap; no duplicate semaphores) / raw IPv4 + IPv6 half-open TCP + **SCTP** (`-sY`/`-sZ`, CRC32c, IPv4 Layer3 + IPv6 raw SCTP, sharded blocking pool, mixed v4+v6 `tokio::join`) + **IP protocol** (`-sO`: IPv4 ICMP + Unix IPv6 raw + ICMPv6 Parameter Problem, sharded, mixed v4+v6 `tokio::join`) + **FTP bounce** (`-b`, Tokio parallel FTP sessions).
+5. **Scan** (`src/scan.rs`, `src/syn.rs`, `src/sctp.rs`, `src/ip_proto.rs`, `src/ftp_bounce.rs`, `src/icmp_listen.rs`, `src/ipv6_l4.rs`) — optional `--min-hostgroup` / `--max-hostgroup` batching in `src/lib.rs` (`host_batches`); UDP ICMP listeners are **one session per scan** (shared `DashMap` across batches). TCP connect uses a **worker-pool** of `conc` OS threads (blocking `std::net::TcpStream::connect_timeout` — fewer syscalls than async) draining a shared atomic work index into lock-free `UnsafeCell` result slots; falls back to async tokio tasks when `--proxies` are configured. UDP / ping use `tokio::spawn` + `Semaphore` / raw IPv4 + IPv6 half-open TCP + **SCTP** (`-sY`/`-sZ`, CRC32c, IPv4 Layer3 + IPv6 raw SCTP, sharded blocking pool, mixed v4+v6 `tokio::join`) + **IP protocol** (`-sO`: IPv4 ICMP + Unix IPv6 raw + ICMPv6 Parameter Problem, sharded, mixed v4+v6 `tokio::join`) + **FTP bounce** (`-b`, Tokio parallel FTP sessions).
 6. **Ping** (`src/ping.rs`), **trace** (`src/trace.rs` — bounded parallel `traceroute` / `tracert`, ordered output), **resume** (`src/resume.rs`), **NSE builtins** (`src/nse.rs`), **OS guess** (`src/os_detect.rs`, `src/os_db.rs`, `src/os_fp_db.rs`, `src/os_scan.rs`, `src/fp_match.rs`), **version scan** (`src/vscan.rs`), **script-kiddie output** (`src/skiddie.rs`).
 7. **Output** (`src/output.rs`) — optional **`-oM`** / **`-oH`**, XML stylesheet options.
 

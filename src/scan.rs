@@ -285,123 +285,265 @@ async fn connect_via_proxy(proxy: &ProxySpec, target: SocketAddr) -> io::Result<
     }
 }
 
-/// TCP connect scan: each probe is `tokio::spawn`ed for multi-core work-stealing;
-/// an `Arc<Semaphore>` caps in-flight connects to `effective_probe_concurrency()`.
+/// Shared context for worker-pool TCP connect probes (one `Arc` clone per worker instead of per probe).
+struct TcpConnectCtx {
+    work: Vec<(IpAddr, u16)>,
+    next_idx: AtomicUsize,
+    timeout: Duration,
+    no_ping: bool,
+    max_tries: u32,
+    pacer: Option<Arc<ProbeRatePacer>>,
+    host_deadline: Option<Arc<DashMap<IpAddr, Instant>>>,
+    host_limit: Option<Duration>,
+    scan_delay: Option<Duration>,
+    max_scan_delay: Option<Duration>,
+    proxies: Vec<ProxySpec>,
+    progress: Option<Arc<AtomicUsize>>,
+}
+
+/// Pre-allocated, lock-free result array — each slot written exactly once by a unique worker index.
+struct ResultSlots {
+    slots: Vec<std::cell::UnsafeCell<std::mem::MaybeUninit<PortLine>>>,
+}
+// Safety: each slot is written by exactly one worker (unique index via atomic fetch_add)
+// and read only after all workers have joined.
+unsafe impl Send for ResultSlots {}
+unsafe impl Sync for ResultSlots {}
+
+/// TCP connect scan: `conc` long-lived worker tasks drain a shared work queue via atomic index.
+/// When no proxies are configured, workers use blocking `std::net::TcpStream::connect_timeout`
+/// (fewer syscalls: no ioctl/fcntl non-blocking setup per probe). Falls back to async tokio
+/// connect when proxies need the async I/O path.
 /// `progress` is an optional atomic counter incremented after each probe completes (for `--stats-every`).
 pub async fn tcp_connect_scan(
     work: Vec<(IpAddr, u16)>,
     plan: Arc<ScanPlan>,
     progress: Option<Arc<AtomicUsize>>,
 ) -> Vec<PortLine> {
-    let conc = plan.effective_probe_concurrency();
-    let timeout = plan.connect_timeout;
-    let no_ping = plan.no_ping;
-    let connect_retries = plan.connect_retries;
-    let pacer = ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate);
-    let host_deadline = plan.host_timeout.map(|_| Arc::new(DashMap::new()));
-    let host_limit = plan.host_timeout;
-    let scan_delay = plan.scan_delay;
-    let max_scan_delay = plan.max_scan_delay;
-    let proxies: Arc<Vec<ProxySpec>> = Arc::new(plan.proxies.clone());
-
-    let sem = Arc::new(Semaphore::new(conc));
     let n = work.len();
-    let mut handles = Vec::with_capacity(n);
+    if n == 0 {
+        return Vec::new();
+    }
+    let conc = plan.effective_probe_concurrency().min(n);
+    let max_tries = 1u32.saturating_add(plan.connect_retries);
+    // Blocking OS threads win for large scans (fewer syscalls per probe) but have higher
+    // fixed cost (thread::scope setup). Use async path for small work or when proxies need it.
+    let use_blocking = plan.proxies.is_empty() && n >= 64;
 
-    for (host, port) in work {
-        let sem = sem.clone();
-        let pacer = pacer.clone();
-        let host_deadline = host_deadline.clone();
-        let proxies = proxies.clone();
-        let progress = progress.clone();
+    let ctx = Arc::new(TcpConnectCtx {
+        work,
+        next_idx: AtomicUsize::new(0),
+        timeout: plan.connect_timeout,
+        no_ping: plan.no_ping,
+        max_tries,
+        pacer: ProbeRatePacer::maybe_new(plan.max_probe_rate, plan.min_probe_rate),
+        host_deadline: plan.host_timeout.map(|_| Arc::new(DashMap::new())),
+        host_limit: plan.host_timeout,
+        scan_delay: plan.scan_delay,
+        max_scan_delay: plan.max_scan_delay,
+        proxies: plan.proxies.clone(),
+        progress,
+    });
 
-        handles.push(tokio::spawn(async move {
-            let result = async {
-                let addr = SocketAddr::new(host, port);
-                let overall_start = Instant::now();
-                let max_tries = 1u32.saturating_add(connect_retries);
-                let mut timeouts = 0u32;
+    let results = Arc::new(ResultSlots {
+        slots: (0..n)
+            .map(|_| std::cell::UnsafeCell::new(std::mem::MaybeUninit::uninit()))
+            .collect(),
+    });
 
-                loop {
-                    if let (Some(limit), Some(ref hs)) = (host_limit, host_deadline.as_ref()) {
-                        if host_over_deadline(hs.as_ref(), host, limit) {
-                            return PortLine::new(
-                                host,
-                                port,
-                                "tcp",
-                                "filtered",
-                                PortReason::HostTimeout,
-                                None,
-                            );
-                        }
-                    }
-                    if timeouts == 0 {
-                        sleep_inter_probe_delay(scan_delay, max_scan_delay).await;
-                        if let Some(p) = pacer.as_ref() {
-                            p.wait_turn().await;
-                        }
-                    }
-
-                    let _permit = sem.acquire().await.expect("semaphore closed");
-                    let res = if let Some(proxy) = proxies.first() {
-                        tokio::time::timeout(timeout, connect_via_proxy(proxy, addr)).await
-                    } else {
-                        tokio::time::timeout(timeout, TcpStream::connect(addr)).await
-                    };
-                    drop(_permit);
-
-                    let elapsed = overall_start.elapsed().as_millis();
-                    match res {
-                        Ok(Ok(stream)) => {
-                            drop(stream);
-                            return PortLine::new(
-                                host,
-                                port,
-                                "tcp",
-                                "open",
-                                PortReason::SynAck,
-                                Some(elapsed),
-                            );
-                        }
-                        Ok(Err(e)) => {
-                            let kind = e.kind();
-                            let (state, reason): (&'static str, PortReason) =
-                                if kind == io::ErrorKind::ConnectionRefused {
-                                    ("closed", PortReason::ConnRefused)
-                                } else {
-                                    ("filtered", PortReason::Error)
-                                };
-                            return PortLine::new(host, port, "tcp", state, reason, Some(elapsed));
-                        }
-                        Err(_) => {
-                            timeouts += 1;
-                            if timeouts >= max_tries {
-                                return PortLine::new(
-                                    host,
-                                    port,
-                                    "tcp",
-                                    if no_ping { "open|filtered" } else { "filtered" },
-                                    PortReason::Timeout,
-                                    None,
-                                );
+    if use_blocking {
+        // Blocking path: OS threads with std::net::TcpStream::connect_timeout — avoids
+        // tokio's per-socket ioctl(FIONBIO) + kqueue registration overhead.
+        let ctx2 = ctx.clone();
+        let results2 = results.clone();
+        tokio::task::spawn_blocking(move || {
+            thread::scope(|s| {
+                for _ in 0..conc {
+                    let ctx = &ctx2;
+                    let results = &results2;
+                    s.spawn(move || {
+                        loop {
+                            let i = ctx.next_idx.fetch_add(1, Ordering::Relaxed);
+                            if i >= ctx.work.len() {
+                                break;
+                            }
+                            let (host, port) = ctx.work[i];
+                            let line = tcp_connect_one_probe_blocking(ctx, host, port);
+                            unsafe { (*results.slots[i].get()).write(line) };
+                            if let Some(ref p) = ctx.progress {
+                                p.fetch_add(1, Ordering::Relaxed);
                             }
                         }
+                    });
+                }
+            });
+        })
+        .await
+        .expect("blocking tcp connect pool");
+    } else {
+        // Async path: tokio tasks — required for proxy connections.
+        let mut workers = Vec::with_capacity(conc);
+        for _ in 0..conc {
+            let ctx = ctx.clone();
+            let results = results.clone();
+            workers.push(tokio::spawn(async move {
+                loop {
+                    let i = ctx.next_idx.fetch_add(1, Ordering::Relaxed);
+                    if i >= ctx.work.len() {
+                        break;
+                    }
+                    let (host, port) = ctx.work[i];
+                    let line = tcp_connect_one_probe_async(&ctx, host, port).await;
+                    unsafe { (*results.slots[i].get()).write(line) };
+                    if let Some(ref p) = ctx.progress {
+                        p.fetch_add(1, Ordering::Relaxed);
                     }
                 }
-            }
-            .await;
-            if let Some(ref p) = progress {
-                p.fetch_add(1, Ordering::Relaxed);
-            }
-            result
-        }));
+            }));
+        }
+        for w in workers {
+            let _ = w.await;
+        }
     }
 
-    let mut results = Vec::with_capacity(n);
-    for handle in handles {
-        results.push(handle.await.expect("probe task panicked"));
+    // Safety: every slot [0..n) was written exactly once; all workers have joined.
+    let slots = Arc::try_unwrap(results).unwrap_or_else(|_| panic!("workers still hold results"));
+    slots
+        .slots
+        .into_iter()
+        .map(|cell| unsafe { cell.into_inner().assume_init() })
+        .collect()
+}
+
+/// Blocking TCP connect probe — uses `std::net::TcpStream::connect_timeout` (3 syscalls:
+/// socket + connect + close) instead of tokio's async path (4+ syscalls: socket + ioctl + connect + close).
+fn tcp_connect_one_probe_blocking(ctx: &TcpConnectCtx, host: IpAddr, port: u16) -> PortLine {
+    let addr = SocketAddr::new(host, port);
+    let mut timeouts = 0u32;
+
+    loop {
+        if let (Some(limit), Some(ref hs)) = (ctx.host_limit, ctx.host_deadline.as_ref()) {
+            if host_over_deadline(hs.as_ref(), host, limit) {
+                return PortLine::new(host, port, "tcp", "filtered", PortReason::HostTimeout, None);
+            }
+        }
+        if timeouts == 0 {
+            sleep_inter_probe_delay_sync(ctx.scan_delay, ctx.max_scan_delay);
+            if let Some(p) = ctx.pacer.as_ref() {
+                p.wait_turn_sync();
+            }
+        }
+
+        let start = Instant::now();
+        let res = std::net::TcpStream::connect_timeout(&addr, ctx.timeout);
+        let elapsed = start.elapsed().as_millis();
+
+        match res {
+            Ok(stream) => {
+                drop(stream);
+                return PortLine::new(host, port, "tcp", "open", PortReason::SynAck, Some(elapsed));
+            }
+            Err(e) => {
+                let kind = e.kind();
+                if kind == io::ErrorKind::ConnectionRefused {
+                    return PortLine::new(
+                        host,
+                        port,
+                        "tcp",
+                        "closed",
+                        PortReason::ConnRefused,
+                        Some(elapsed),
+                    );
+                } else if kind == io::ErrorKind::TimedOut || kind == io::ErrorKind::WouldBlock {
+                    timeouts += 1;
+                    if timeouts >= ctx.max_tries {
+                        return PortLine::new(
+                            host,
+                            port,
+                            "tcp",
+                            if ctx.no_ping {
+                                "open|filtered"
+                            } else {
+                                "filtered"
+                            },
+                            PortReason::Timeout,
+                            None,
+                        );
+                    }
+                } else {
+                    return PortLine::new(
+                        host,
+                        port,
+                        "tcp",
+                        "filtered",
+                        PortReason::Error,
+                        Some(elapsed),
+                    );
+                }
+            }
+        }
     }
-    results
+}
+
+/// Async TCP connect probe — used when proxies are configured (needs tokio I/O).
+async fn tcp_connect_one_probe_async(ctx: &TcpConnectCtx, host: IpAddr, port: u16) -> PortLine {
+    let addr = SocketAddr::new(host, port);
+    let mut timeouts = 0u32;
+
+    loop {
+        if let (Some(limit), Some(ref hs)) = (ctx.host_limit, ctx.host_deadline.as_ref()) {
+            if host_over_deadline(hs.as_ref(), host, limit) {
+                return PortLine::new(host, port, "tcp", "filtered", PortReason::HostTimeout, None);
+            }
+        }
+        if timeouts == 0 {
+            sleep_inter_probe_delay(ctx.scan_delay, ctx.max_scan_delay).await;
+            if let Some(p) = ctx.pacer.as_ref() {
+                p.wait_turn().await;
+            }
+        }
+
+        let start = Instant::now();
+        let res = if let Some(proxy) = ctx.proxies.first() {
+            tokio::time::timeout(ctx.timeout, connect_via_proxy(proxy, addr)).await
+        } else {
+            tokio::time::timeout(ctx.timeout, TcpStream::connect(addr)).await
+        };
+        let elapsed = start.elapsed().as_millis();
+
+        match res {
+            Ok(Ok(stream)) => {
+                drop(stream);
+                return PortLine::new(host, port, "tcp", "open", PortReason::SynAck, Some(elapsed));
+            }
+            Ok(Err(e)) => {
+                let (state, reason): (&'static str, PortReason) =
+                    if e.kind() == io::ErrorKind::ConnectionRefused {
+                        ("closed", PortReason::ConnRefused)
+                    } else {
+                        ("filtered", PortReason::Error)
+                    };
+                return PortLine::new(host, port, "tcp", state, reason, Some(elapsed));
+            }
+            Err(_) => {
+                timeouts += 1;
+                if timeouts >= ctx.max_tries {
+                    return PortLine::new(
+                        host,
+                        port,
+                        "tcp",
+                        if ctx.no_ping {
+                            "open|filtered"
+                        } else {
+                            "filtered"
+                        },
+                        PortReason::Timeout,
+                        None,
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// UDP scan: send a minimal datagram and treat any UDP reply as `open`; timeout → `open|filtered`.
