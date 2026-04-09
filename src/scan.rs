@@ -361,18 +361,16 @@ pub async fn tcp_connect_scan(
                 for _ in 0..conc {
                     let ctx = &ctx2;
                     let results = &results2;
-                    s.spawn(move || {
-                        loop {
-                            let i = ctx.next_idx.fetch_add(1, Ordering::Relaxed);
-                            if i >= ctx.work.len() {
-                                break;
-                            }
-                            let (host, port) = ctx.work[i];
-                            let line = tcp_connect_one_probe_blocking(ctx, host, port);
-                            unsafe { (*results.slots[i].get()).write(line) };
-                            if let Some(ref p) = ctx.progress {
-                                p.fetch_add(1, Ordering::Relaxed);
-                            }
+                    s.spawn(move || loop {
+                        let i = ctx.next_idx.fetch_add(1, Ordering::Relaxed);
+                        if i >= ctx.work.len() {
+                            break;
+                        }
+                        let (host, port) = ctx.work[i];
+                        let line = tcp_connect_one_probe_blocking(ctx, host, port);
+                        unsafe { (*results.slots[i].get()).write(line) };
+                        if let Some(ref p) = ctx.progress {
+                            p.fetch_add(1, Ordering::Relaxed);
                         }
                     });
                 }
