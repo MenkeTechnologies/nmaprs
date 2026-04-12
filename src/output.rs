@@ -414,3 +414,48 @@ fn split_version_info(v: &str) -> (&str, &str) {
         None => (v, ""),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use crate::scan::{PortLine, PortReason};
+
+    use super::{port_line_text, split_version_info, xml_escape};
+
+    #[test]
+    fn xml_escape_escapes_markup_and_quotes() {
+        assert_eq!(
+            xml_escape(r#"x & y < z > q "r""#),
+            "x &amp; y &lt; z &gt; q &quot;r&quot;"
+        );
+    }
+
+    #[test]
+    fn split_version_info_first_token() {
+        assert_eq!(
+            split_version_info("OpenSSH 8.2p1 Debian"),
+            ("OpenSSH", "8.2p1 Debian")
+        );
+        assert_eq!(split_version_info("single"), ("single", ""));
+    }
+
+    #[test]
+    fn port_line_text_tabs_and_optional_reason() {
+        let line = PortLine {
+            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: 443,
+            proto: "tcp",
+            state: "open",
+            reason: PortReason::SynAck,
+            latency_ms: Some(3),
+            version_info: Some("https Apache/2.4".to_string()),
+        };
+        assert_eq!(
+            port_line_text(&line, false),
+            "443/tcp\topen\thttps Apache/2.4"
+        );
+        let with_reason = port_line_text(&line, true);
+        assert_eq!(with_reason, "443/tcp\topen\thttps Apache/2.4\tsyn-ack");
+    }
+}

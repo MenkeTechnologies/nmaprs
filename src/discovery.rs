@@ -977,6 +977,8 @@ pub async fn hosts_after_discovery(
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
+
     use super::*;
 
     #[test]
@@ -1046,5 +1048,89 @@ mod tests {
         let a = port_lines_to_alive_hosts(lines);
         assert_eq!(a.len(), 1);
         assert!(a.contains(&IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))));
+    }
+
+    #[test]
+    fn has_explicit_discovery_flags_false_by_default() {
+        let args = crate::cli::Args::try_parse_from(["nmaprs", "-p", "80", "127.0.0.1"]).unwrap();
+        assert!(!has_explicit_discovery_flags(&args));
+    }
+
+    #[test]
+    fn has_explicit_discovery_flags_ping_echo() {
+        let args =
+            crate::cli::Args::try_parse_from(["nmaprs", "-p", "80", "--ping-E", "127.0.0.1"])
+                .unwrap();
+        assert!(has_explicit_discovery_flags(&args));
+        assert!(has_implemented_explicit_probes(&args));
+    }
+
+    #[test]
+    fn has_explicit_discovery_flags_ping_syn_some() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-S",
+            "443",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_explicit_discovery_flags(&args));
+    }
+
+    #[test]
+    fn has_explicit_discovery_flags_ip_proto_without_timestamp_mask_gap() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-ip-proto",
+            "6",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_explicit_discovery_flags(&args));
+        assert!(has_implemented_explicit_probes(&args));
+    }
+
+    #[test]
+    fn parse_ping_ip_proto_list_sorts_and_dedupes() {
+        assert_eq!(
+            parse_ping_ip_proto_list("17,1,17,6").unwrap(),
+            vec![1, 6, 17]
+        );
+    }
+
+    #[test]
+    fn port_lines_to_alive_includes_open_and_closed() {
+        let ip = IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 5));
+        let open = PortLine::new(
+            ip,
+            443,
+            "tcp",
+            "open",
+            crate::scan::PortReason::SynAck,
+            None,
+        );
+        let closed = PortLine::new(
+            ip,
+            444,
+            "tcp",
+            "closed",
+            crate::scan::PortReason::ConnRefused,
+            None,
+        );
+        let filtered = PortLine::new(
+            ip,
+            445,
+            "tcp",
+            "filtered",
+            crate::scan::PortReason::Timeout,
+            None,
+        );
+        let a = port_lines_to_alive_hosts(vec![open, closed, filtered]);
+        assert_eq!(a.len(), 1);
+        assert!(a.contains(&ip));
     }
 }

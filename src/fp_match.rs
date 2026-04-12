@@ -55,4 +55,10 @@ mod tests {
     fn both_empty() {
         assert!(expr_match("", "", false));
     }
+
+    #[test]
+    fn greater_than_numeric() {
+        assert!(expr_match("15", ">10", false));
+        assert!(!expr_match("5", ">10", false));
+    }
 }

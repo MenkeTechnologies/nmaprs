@@ -212,4 +212,135 @@ mod tests {
         let v = expand_nmap_style_argv(vec!["nmaprs".into(), "-PO6".into()]);
         assert_eq!(v, vec!["nmaprs", "--ping-ip-proto", "6"]);
     }
+
+    #[test]
+    fn expands_version_and_script_default_short_flags() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sV".into()]),
+            vec!["nmaprs", "--version-scan"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sC".into()]),
+            vec!["nmaprs", "--script-default"]
+        );
+    }
+
+    #[test]
+    fn expands_sl_sn_il_ir() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sL".into()]),
+            vec!["nmaprs", "--sL"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sn".into()]),
+            vec!["nmaprs", "--sn"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-iL".into()]),
+            vec!["nmaprs", "--iL"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-iR".into()]),
+            vec!["nmaprs", "--iR"]
+        );
+    }
+
+    #[test]
+    fn expands_si_consumes_following_non_flag() {
+        let v = expand_nmap_style_argv(vec![
+            "nmaprs".into(),
+            "-sI".into(),
+            "192.0.2.1:443".into(),
+            "10.0.0.1".into(),
+        ]);
+        assert_eq!(v, vec!["nmaprs", "--sI", "192.0.2.1:443", "10.0.0.1",]);
+    }
+
+    #[test]
+    fn expands_output_short_flags() {
+        let v = expand_nmap_style_argv(vec![
+            "nmaprs".into(),
+            "-oN".into(),
+            "out.txt".into(),
+            "-oA".into(),
+            "base".into(),
+        ]);
+        assert_eq!(v, vec!["nmaprs", "--oN", "out.txt", "--oA", "base"]);
+    }
+
+    #[test]
+    fn expands_verbosity_and_debug_counts() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-vvv".into()]),
+            vec!["nmaprs", "--verbosity=3"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-dd".into()]),
+            vec!["nmaprs", "--debug=2"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_ack_udp_sctp_tails() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PA443".into()]),
+            vec!["nmaprs", "--ping-A", "443"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PU53".into()]),
+            vec!["nmaprs", "--ping-U", "53"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PY38412".into()]),
+            vec!["nmaprs", "--ping-Y", "38412"]
+        );
+    }
+
+    #[test]
+    fn passes_through_double_dash_long_options() {
+        let v = expand_nmap_style_argv(vec![
+            "nmaprs".into(),
+            "--no-ping".into(),
+            "-p".into(),
+            "22".into(),
+            "127.0.0.1".into(),
+        ]);
+        assert_eq!(v, vec!["nmaprs", "--no-ping", "-p", "22", "127.0.0.1"]);
+    }
+
+    #[test]
+    fn expand_only_binary_is_unchanged() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into()]),
+            vec!["nmaprs"]
+        );
+    }
+
+    #[test]
+    fn expand_empty_argv_stays_empty() {
+        assert!(expand_nmap_style_argv(Vec::<String>::new()).is_empty());
+    }
+
+    #[test]
+    fn expand_pe_pm_icmp_short_flags() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PE".into()]),
+            vec!["nmaprs", "--ping-E"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PM".into()]),
+            vec!["nmaprs", "--ping-M"]
+        );
+    }
+
+    #[test]
+    fn expand_timing_t0_through_t5() {
+        for n in 0u8..=5 {
+            let v = expand_nmap_style_argv(vec!["nmaprs".into(), format!("-T{n}")]);
+            assert_eq!(
+                v,
+                vec!["nmaprs".to_string(), "--timing".to_string(), n.to_string(),]
+            );
+        }
+    }
 }

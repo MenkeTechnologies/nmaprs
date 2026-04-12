@@ -167,4 +167,60 @@ mod tests {
         }
         assert!(v.iter().all(|&p| p <= 255));
     }
+
+    #[test]
+    fn parse_port_dash_is_all_ports() {
+        let p = parse_port_spec("-").expect("dash");
+        assert_eq!(p.len(), 65536);
+        assert_eq!(p.first().copied(), Some(0));
+        assert_eq!(p.last().copied(), Some(65535));
+    }
+
+    #[test]
+    fn parse_port_t_u_s_prefixes_sort_dedup() {
+        let p = parse_port_spec("U:53,T:80,S:22,443").unwrap();
+        assert_eq!(p, vec![22, 53, 80, 443]);
+    }
+
+    #[test]
+    fn parse_port_reversed_range_errors() {
+        let e = parse_port_spec("10-5").unwrap_err();
+        assert!(
+            matches!(e, PortParseError::InvalidToken(_)),
+            "expected InvalidToken, got {e:?}"
+        );
+    }
+
+    #[test]
+    fn parse_port_empty_spec_errors() {
+        assert!(matches!(parse_port_spec(""), Err(PortParseError::Empty)));
+        assert!(matches!(parse_port_spec("   "), Err(PortParseError::Empty)));
+    }
+
+    #[test]
+    fn parse_port_only_commas_errors_empty() {
+        assert!(matches!(parse_port_spec(",,,"), Err(PortParseError::Empty)));
+    }
+
+    #[test]
+    fn parse_exclude_ports_same_as_spec_set() {
+        let ex = parse_exclude_ports("22,80-81").unwrap();
+        assert!(ex.contains(&22));
+        assert!(ex.contains(&80));
+        assert!(ex.contains(&81));
+        assert!(!ex.contains(&443));
+    }
+
+    #[test]
+    fn default_and_top_ports_subset_relation() {
+        let d = default_tcp_ports();
+        let t10 = top_ports(10);
+        assert_eq!(d.len(), 1000);
+        for p in &t10 {
+            assert!(
+                d.contains(p),
+                "top 10 port {p} must appear in default top-1000 set"
+            );
+        }
+    }
 }

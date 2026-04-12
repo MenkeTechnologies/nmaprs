@@ -323,18 +323,92 @@ fn expand_target_blocking(token: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr>,
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use tempfile::NamedTempFile;
+
     use super::*;
 
-    #[test]
-    fn cidr_expands_v4() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let opts = ExpandOpts {
+    fn opts_no_dns_v4() -> ExpandOpts {
+        ExpandOpts {
             ipv6: false,
             no_dns: true,
             resolve_all: false,
             dns_servers: vec![],
-        };
-        let ips = rt.block_on(expand_target("10.0.0.0/31", &opts)).unwrap();
+        }
+    }
+
+    #[test]
+    fn cidr_expands_v4() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ips = rt
+            .block_on(expand_target("10.0.0.0/31", &opts_no_dns_v4()))
+            .unwrap();
         assert_eq!(ips.len(), 2);
+    }
+
+    #[test]
+    fn read_input_list_skips_comments_and_blanks() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "# skip").unwrap();
+        writeln!(f).unwrap();
+        writeln!(f, "  10.0.0.1  ").unwrap();
+        writeln!(f, "10.0.0.2").unwrap();
+        f.flush().unwrap();
+        let lines = read_input_list(f.path()).unwrap();
+        assert_eq!(lines, vec!["10.0.0.1", "10.0.0.2"]);
+    }
+
+    #[test]
+    fn read_input_list_empty_file_errors() {
+        let f = NamedTempFile::new().unwrap();
+        let err = read_input_list(f.path()).unwrap_err();
+        assert!(err.to_string().contains("empty") || err.to_string().contains("-iL"));
+    }
+
+    #[tokio::test]
+    async fn expand_ipv4_octet_range_last_octet() {
+        let ips = expand_target("192.0.2.1-2", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips.len(), 2);
+        assert!(ips.contains(&IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))));
+        assert!(ips.contains(&IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))));
+    }
+
+    #[tokio::test]
+    async fn expand_empty_token_errors() {
+        let e = expand_target("   ", &opts_no_dns_v4()).await.unwrap_err();
+        assert!(matches!(e, TargetError::Invalid(_)), "{e:?}");
+    }
+
+    #[tokio::test]
+    async fn ipv6_cidr_without_dash6_flag_errors() {
+        let e = expand_target("2001:db8::/126", &opts_no_dns_v4())
+            .await
+            .unwrap_err();
+        let s = e.to_string();
+        assert!(s.contains("-6") || s.contains("IPv6"), "unexpected: {s}");
+    }
+
+    #[test]
+    fn apply_exclude_single_ip() {
+        let hosts = vec![
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+        ];
+        let out = apply_exclude(hosts, Some("10.0.0.1"), None, &opts_no_dns_v4()).unwrap();
+        assert_eq!(out, vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))]);
+    }
+
+    #[test]
+    fn random_addresses_count_and_family() {
+        let v4 = random_addresses(7, false);
+        assert_eq!(v4.len(), 7);
+        assert!(v4.iter().all(|a| a.is_ipv4()));
+        let v6 = random_addresses(4, true);
+        assert_eq!(v6.len(), 4);
+        assert!(v6.iter().all(|a| a.is_ipv6()));
     }
 }

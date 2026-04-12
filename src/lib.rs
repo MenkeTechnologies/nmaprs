@@ -1231,6 +1231,52 @@ mod syn_work_tests {
 }
 
 #[cfg(test)]
+mod build_work_tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use super::build_work;
+
+    #[test]
+    fn build_work_cartesian_order_hosts_then_ports() {
+        let hosts = vec![
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+        ];
+        let ports = vec![22u16, 80u16];
+        let w = build_work(&hosts, &ports);
+        assert_eq!(w.len(), 4);
+        assert_eq!(
+            w,
+            vec![
+                (hosts[0], 22),
+                (hosts[0], 80),
+                (hosts[1], 22),
+                (hosts[1], 80),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_work_mixed_v4_v6() {
+        let hosts = vec![
+            IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ];
+        let ports = vec![443u16];
+        let w = build_work(&hosts, &ports);
+        assert_eq!(w, vec![(hosts[0], 443), (hosts[1], 443)]);
+    }
+
+    #[test]
+    fn build_work_empty_inputs() {
+        let h = [IpAddr::V4(Ipv4Addr::LOCALHOST)];
+        assert!(build_work(&[], &[80]).is_empty());
+        assert!(build_work(&h, &[]).is_empty());
+        assert!(build_work(&[], &[]).is_empty());
+    }
+}
+
+#[cfg(test)]
 mod host_batch_tests {
     use std::net::{IpAddr, Ipv4Addr};
 

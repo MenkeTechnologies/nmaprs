@@ -72,4 +72,29 @@ mod tests {
         assert!(parse_scanflags("").is_err());
         assert!(parse_scanflags("   ").is_err());
     }
+
+    #[test]
+    fn unknown_token_errors() {
+        let e = parse_scanflags("SYN,QXYZ").unwrap_err();
+        let s = e.to_string();
+        assert!(
+            s.contains("unknown") || s.contains("scanflags"),
+            "unexpected error: {s}"
+        );
+    }
+
+    #[test]
+    fn parses_rst_syn_ece_cwr() {
+        let f = parse_scanflags("RST,SYN,ECE,CWR").unwrap();
+        assert_eq!(
+            f,
+            TcpFlags::RST | TcpFlags::SYN | TcpFlags::ECE | TcpFlags::CWR
+        );
+    }
+
+    #[test]
+    fn parses_comma_separated_mixed_case() {
+        let f = parse_scanflags("syn,fin").unwrap();
+        assert_eq!(f, TcpFlags::SYN | TcpFlags::FIN);
+    }
 }

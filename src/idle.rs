@@ -327,3 +327,31 @@ pub fn idle_scan_ipv4(
 
     Ok(out)
 }
+
+#[cfg(test)]
+mod tcp_flags_tests {
+    use pnet::packet::tcp::{MutableTcpPacket, TcpFlags};
+
+    use super::tcp_flags_rst;
+
+    #[test]
+    fn tcp_flags_rst_true_when_rst_set() {
+        let mut b = vec![0u8; MutableTcpPacket::minimum_packet_size()];
+        let mut t = MutableTcpPacket::new(&mut b).expect("tcp");
+        t.set_flags(TcpFlags::RST);
+        assert!(tcp_flags_rst(&b));
+    }
+
+    #[test]
+    fn tcp_flags_rst_false_for_syn_only() {
+        let mut b = vec![0u8; MutableTcpPacket::minimum_packet_size()];
+        let mut t = MutableTcpPacket::new(&mut b).expect("tcp");
+        t.set_flags(TcpFlags::SYN);
+        assert!(!tcp_flags_rst(&b));
+    }
+
+    #[test]
+    fn tcp_flags_rst_false_for_truncated_slice() {
+        assert!(!tcp_flags_rst(&[0u8; 4]));
+    }
+}

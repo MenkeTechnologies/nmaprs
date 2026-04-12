@@ -72,3 +72,52 @@ async fn grab_tcp_banner(host: IpAddr, port: u16, connect_to: Duration) -> Resul
     buf.truncate(n);
     Ok(String::from_utf8(buf).ok())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use clap::Parser;
+
+    use crate::cli::Args;
+
+    use super::run_scripts;
+
+    #[tokio::test]
+    async fn run_scripts_no_names_is_noop() {
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "127.0.0.1"]).expect("parse");
+        run_scripts(&args, &[], None).await.expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_trims_and_skips_empty_csv_tokens() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "  , banner ,  , ",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_unknown_builtin_warns_but_ok() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "nonexistent-nse-name",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
+}

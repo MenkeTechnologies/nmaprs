@@ -1280,4 +1280,210 @@ mod rate_validation_tests {
         assert_eq!(plan.scan_kind, ScanKind::TcpSyn);
         assert_eq!(plan.tcp_scan_flags, Some(TcpFlags::FIN | TcpFlags::ACK));
     }
+
+    #[test]
+    fn data_hex_populates_evasion_payload() {
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--data", "0x4142", "127.0.0.1"])
+            .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.evasion.data_payload, vec![0x41, 0x42]);
+    }
+
+    #[test]
+    fn data_string_overrides_hex_when_both_set_is_not_allowed_by_cli() {
+        // clap: only one typically; data_string alone
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--data-string", "OK", "127.0.0.1"])
+            .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.evasion.data_payload, b"OK".to_vec());
+    }
+
+    #[test]
+    fn spoof_mac_parses_colon_form() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "22",
+            "--spoof-mac",
+            "aa-bb-cc-dd-ee-ff",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.spoof_mac, Some([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]));
+    }
+
+    #[test]
+    fn proxies_default_scheme_socks4_and_ports() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--proxies",
+            "socks4://10.0.0.1:9999,http://proxy.example",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.proxies.len(), 2);
+        assert_eq!(plan.proxies[0].port, 9999);
+        assert_eq!(plan.proxies[1].port, 8080);
+    }
+
+    #[test]
+    fn dns_servers_parsed_from_csv() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--dns-servers",
+            "8.8.8.8,2001:4860:4860::8888",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.dns_servers.len(), 2);
+    }
+
+    #[test]
+    fn scan_delay_max_scan_delay_order_validated() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--scan-delay",
+            "100ms",
+            "--max-scan-delay",
+            "50ms",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        assert!(err.to_string().contains("max-scan-delay"), "{err}");
+    }
+
+    #[test]
+    fn max_os_tries_out_of_range_errors() {
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--max-os-tries", "99", "127.0.0.1"])
+                .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        assert!(err.to_string().contains("max-os-tries"), "{err}");
+    }
+
+    #[test]
+    fn data_file_respects_datadir() {
+        use std::path::PathBuf;
+
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--datadir",
+            "/tmp/nmaprs-data-test",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(
+            plan.data_file("nmap-os-db"),
+            PathBuf::from("/tmp/nmaprs-data-test/nmap-os-db")
+        );
+    }
+
+    #[test]
+    fn service_probes_path_versiondb_override() {
+        use std::path::PathBuf;
+
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--versiondb",
+            "/custom/probes.txt",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(
+            plan.service_probes_path(),
+            PathBuf::from("/custom/probes.txt")
+        );
+    }
+
+    #[test]
+    fn fragment_mtu_must_be_multiple_of_eight() {
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "-f", "--mtu", "9", "127.0.0.1"])
+            .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("mtu") && s.contains('8'), "{s}");
+    }
+
+    #[test]
+    fn data_hex_odd_length_errors() {
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--data", "0xabc", "127.0.0.1"])
+            .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        let s = err.to_string().to_lowercase();
+        assert!(
+            s.contains("hex") || s.contains("even"),
+            "unexpected error: {s}"
+        );
+    }
+
+    #[test]
+    fn dns_servers_all_empty_tokens_errors() {
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--dns-servers", " , , ", "127.0.0.1"])
+                .expect("parse");
+        let err = ScanPlan::from_args(&args).unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("dns-servers") || s.contains("DNS"), "{s}");
+    }
+
+    #[test]
+    fn scan_kind_flag_names_unique_and_dash_prefixed() {
+        use std::collections::HashSet;
+
+        use super::ScanKind;
+
+        let kinds = [
+            ScanKind::TcpConnect,
+            ScanKind::IpProto,
+            ScanKind::TcpSyn,
+            ScanKind::TcpNull,
+            ScanKind::TcpFin,
+            ScanKind::TcpXmas,
+            ScanKind::TcpAck,
+            ScanKind::TcpWindow,
+            ScanKind::TcpMaimon,
+            ScanKind::SctpInit,
+            ScanKind::SctpCookieEcho,
+            ScanKind::Idle,
+            ScanKind::Udp,
+        ];
+        let mut seen = HashSet::new();
+        for k in kinds {
+            let s = k.flag_name();
+            assert!(s.starts_with('-'), "{s}");
+            assert!(seen.insert(s), "duplicate flag name {s}");
+        }
+    }
+
+    #[test]
+    fn output_all_flag_sets_normal_grepable_xml_paths() {
+        use std::path::PathBuf;
+
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--oA", "/tmp/outbase", "127.0.0.1"])
+                .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.output_normal, Some(PathBuf::from("/tmp/outbase.nmap")));
+        assert_eq!(
+            plan.output_grepable,
+            Some(PathBuf::from("/tmp/outbase.gnmap"))
+        );
+        assert_eq!(plan.output_xml, Some(PathBuf::from("/tmp/outbase.xml")));
+    }
 }

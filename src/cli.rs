@@ -478,3 +478,44 @@ impl Args {
         self.osscan_guess || self.fuzzy
     }
 }
+
+#[cfg(test)]
+mod effective_opts_tests {
+    use clap::Parser;
+
+    use super::Args;
+
+    #[test]
+    fn effective_verbosity_adds_hidden_vv() {
+        let a = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--verbosity",
+            "1",
+            "--vv",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert_eq!(a.effective_verbosity(), 3);
+    }
+
+    #[test]
+    fn effective_debug_adds_hidden_ff() {
+        let a = Args::try_parse_from(["nmaprs", "-p", "80", "--debug", "1", "--ff", "127.0.0.1"])
+            .unwrap();
+        assert_eq!(a.effective_debug(), 3);
+    }
+
+    #[test]
+    fn effective_randomize_hosts_includes_r_h_alias() {
+        let a = Args::try_parse_from(["nmaprs", "-p", "80", "--rH", "127.0.0.1"]).unwrap();
+        assert!(a.effective_randomize_hosts());
+    }
+
+    #[test]
+    fn effective_osscan_guess_includes_fuzzy_alias() {
+        let a = Args::try_parse_from(["nmaprs", "-p", "80", "--fuzzy", "127.0.0.1"]).unwrap();
+        assert!(a.effective_osscan_guess());
+    }
+}

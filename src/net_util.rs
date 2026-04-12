@@ -75,3 +75,26 @@ impl AtomicDeadline {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::AtomicDeadline;
+
+    #[test]
+    fn atomic_deadline_none_until_set() {
+        let epoch = Instant::now();
+        let ad = AtomicDeadline::new(epoch);
+        assert!(ad.get().is_none());
+    }
+
+    #[test]
+    fn atomic_deadline_set_roundtrip() {
+        let epoch = Instant::now();
+        let ad = AtomicDeadline::new(epoch);
+        let deadline = epoch + Duration::from_millis(250);
+        ad.set(deadline);
+        assert_eq!(ad.get(), Some(deadline));
+    }
+}

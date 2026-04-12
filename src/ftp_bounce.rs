@@ -231,3 +231,32 @@ pub async fn ftp_bounce_scan(
         .collect()
         .await
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use super::port_command_line;
+
+    #[test]
+    fn port_command_line_classic_ftp_encoding() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(192, 0, 2, 10), 0x0050),
+            "PORT 192,0,2,10,0,80"
+        );
+    }
+
+    #[test]
+    fn port_command_line_high_byte_order() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(1, 2, 3, 4), 0x1122),
+            "PORT 1,2,3,4,17,34"
+        );
+    }
+
+    #[test]
+    fn port_command_line_ephemeral() {
+        let s = port_command_line(Ipv4Addr::new(10, 255, 0, 1), 49152);
+        assert_eq!(s, "PORT 10,255,0,1,192,0");
+    }
+}

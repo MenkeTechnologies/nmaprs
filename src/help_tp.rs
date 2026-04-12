@@ -325,3 +325,45 @@ pub fn print_version(bin: &str) {
         println!("{bin} {VERSION}");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{section_line, tp_line, VERSION};
+
+    #[test]
+    fn section_line_contains_title_and_fills_width_plain() {
+        let s = section_line("SCAN", 40, false);
+        assert!(s.contains("SCAN"));
+        assert!(s.starts_with(" ── "));
+        assert!(s.chars().filter(|c| *c == '─').count() >= 10);
+    }
+
+    #[test]
+    fn section_line_color_wraps_body() {
+        let s = section_line("NET", 30, true);
+        assert!(s.contains("\x1b[36m"));
+        assert!(s.ends_with("\x1b[0m"));
+    }
+
+    #[test]
+    fn tp_line_aligns_flags_before_comment() {
+        let plain = tp_line("-p <ports>", "Port selection", false);
+        assert!(plain.contains("//"));
+        assert!(plain.contains("Port selection"));
+        assert!(plain.contains("-p"));
+        let long = tp_line("--very-long-option-name <VAL>", "desc", false);
+        assert!(long.contains("//"));
+        assert!(long.contains("desc"));
+    }
+
+    #[test]
+    fn tp_line_color_includes_green_comment_delim() {
+        let c = tp_line("-h", "help", true);
+        assert!(c.contains("\x1b[32m//\x1b[0m"));
+    }
+
+    #[test]
+    fn version_constant_non_empty() {
+        assert!(!VERSION.is_empty());
+    }
+}

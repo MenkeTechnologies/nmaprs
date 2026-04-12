@@ -56,4 +56,10 @@ mod tests {
         let o = skid_line("Nmap scan report for 127.0.0.1");
         assert!(!o.is_empty());
     }
+
+    #[test]
+    fn skid_line_preserves_byte_length_for_ascii() {
+        let s = "Nmap scan report for 127.0.0.1:22/tcp";
+        assert_eq!(skid_line(s).len(), s.len());
+    }
 }

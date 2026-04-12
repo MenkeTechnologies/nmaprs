@@ -821,4 +821,47 @@ match http m|^HTTP/1\.[01]\s\d\d\d| p/HTTP server/
         assert!(port_in_ranges(4, &r));
         assert!(!port_in_ranges(2, &r));
     }
+
+    #[test]
+    fn parses_port_ranges_reversed_pair_normalizes() {
+        let r = parse_port_ranges_list("9-3").expect("ranges");
+        assert!(port_in_ranges(5, &r));
+        assert!(!port_in_ranges(2, &r));
+    }
+
+    #[test]
+    fn parses_udp_probe_and_totalwaitms() {
+        let fixture = r#"
+Probe UDP DNSVersionBindReq q|\x12\x34\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00|
+totalwaitms 3000
+rarity 2
+match dns m|^[^\x00]+\x00\x00\x01\x00\x01| p/DNS server/
+"#;
+        let sp = parse_probes(fixture).expect("parse");
+        assert_eq!(sp.tcp.len(), 0);
+        assert_eq!(sp.udp.len(), 1);
+        let u = &sp.udp[0];
+        assert_eq!(u.name, "DNSVersionBindReq");
+        assert_eq!(u.totalwait_ms, 3000);
+        assert_eq!(u.rarity, 2);
+        assert!(!u.payload.is_empty());
+        assert_eq!(u.matches.len(), 1);
+        assert!(!u.matches[0].soft);
+    }
+
+    #[test]
+    fn softmatch_flag_parsed() {
+        let fixture = r#"
+Probe TCP NULL q||
+softmatch unknown m|^.| p/Guess/
+"#;
+        let sp = parse_probes(fixture).expect("parse");
+        assert!(sp.tcp[0].matches[0].soft);
+    }
+
+    #[test]
+    fn decode_nmap_escape_backslash_and_zero() {
+        let p = parse_q_field(r"q|\\\0\x41|").expect("q");
+        assert_eq!(p, vec![b'\\', 0, b'A']);
+    }
 }
