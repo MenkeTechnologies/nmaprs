@@ -1,0 +1,506 @@
+.\" nmaprs(1) — short man page for the nmaprs / nms binary
+.\" Render with:  man -l man/man1/nmaprs.1
+.\" Install:      cp man/man1/nmaprs.1 /usr/local/share/man/man1/
+.TH NMAPRS 1 "May 2026" "nmaprs 0.1.1" "User Commands"
+.SH NAME
+nmaprs, nms \- parallel network scanner with nmap-compatible CLI
+.SH SYNOPSIS
+.B nmaprs
+.RI [ OPTIONS ]
+.RI [ TARGETS ]
+.br
+.B nms
+.RI [ OPTIONS ]
+.RI [ TARGETS ]
+.PP
+.B nms
+is the shorter form of
+.BR nmaprs
+\(em same binary, quicker to type.
+.SH DESCRIPTION
+.B nmaprs
+is a Rust-native network scanner that speaks nmap's CLI dialect
+.RB ( nmap \-\-help
+plus the long-option set from upstream
+.BR nmap.cc ).
+It implements real TCP connect, UDP, ICMP ping discovery, raw IPv4 /
+IPv6 half-open TCP (SYN / NULL / FIN / Xmas / ACK / Window / Maimon),
+SCTP (INIT / COOKIE_ECHO), IP-protocol scan
+.RB ( \-sO ),
+idle scan
+.RB ( \-sI ),
+FTP bounce
+.RB ( \-b ),
+target lists / random hosts, IPv6, resume checkpoints, traceroute, and
+built-in Rust "scripts" for
+.BR \-\-script / \-sC .
+.PP
+Targets, ports, and timing options accept the same syntax as
+.BR nmap (1).
+Auto-detects root via
+.BR geteuid (2)
+and falls back from SYN to TCP connect when unprivileged (use
+.B \-\-privileged
+to force raw mode).
+.PP
+.B nmaprs is not a byte-for-byte reimplementation of nmap.
+The full NSE Lua runtime is not embedded; OS detection is partial
+.RB ( nmap-os-db
+MatchPoints scoring for IPv4 only). For authoritative behavior use
+.BR nmap (1).
+.SH OPTIONS
+.SS Target Selection
+.TP
+.B \-\-iL \fIFILE\fR
+Input from list of hosts/networks.
+.TP
+.B \-\-iR \fINUM\fR
+Choose
+.I NUM
+random targets.
+.TP
+.B \-\-exclude \fITARGETS\fR
+Exclude hosts/networks (comma-separated).
+.TP
+.B \-\-excludefile \fIFILE\fR
+Exclude list from
+.IR FILE .
+.SS Host Discovery
+.TP
+.B \-sL
+List scan \(em simply list targets.
+.TP
+.B \-sn
+Ping scan only (no port scan).
+.TP
+.BR \-Pn ", " \-\-no-ping
+Treat all hosts as online; skip discovery.
+.TP
+.BI \-PS [ PORTLIST ]
+TCP SYN discovery on given ports.
+.TP
+.BI \-PA [ PORTLIST ]
+TCP ACK discovery.
+.TP
+.BI \-PU [ PORTLIST ]
+UDP discovery (default port 40125).
+.TP
+.BI \-PY [ PORTLIST ]
+SCTP INIT discovery (default port 80).
+.TP
+.B \-PE
+ICMP echo.
+.TP
+.B \-PP
+ICMP timestamp request.
+.TP
+.B \-PM
+ICMP address mask request.
+.TP
+.B \-PR
+ARP ping (auto on local IPv4 subnets;
+.B \-\-disable-arp-ping
+to suppress).
+.TP
+.B \-n
+Never do DNS resolution.
+.TP
+.B \-R
+Always do DNS resolution.
+.TP
+.B \-\-dns-servers \fISERVERS\fR
+Use custom DNS resolvers (comma-separated IPs;
+.BR hickory-resolver ).
+.TP
+.B \-\-system-dns
+Use the system resolver.
+.TP
+.B \-\-traceroute
+Trace hop path to each host (concurrent; up to
+.B min(parallelism, 32)
+subprocesses).
+.SS Scan Techniques
+.TP
+.B \-sS
+TCP SYN scan (privileged raw; default when root).
+.TP
+.B \-sT
+TCP connect scan (default when unprivileged).
+.TP
+.B \-sU
+UDP scan.
+.TP
+.B \-sY
+SCTP INIT scan.
+.TP
+.B \-sZ
+SCTP COOKIE_ECHO scan.
+.TP
+.B \-sA
+TCP ACK scan (firewall mapping).
+.TP
+.B \-sW
+TCP Window scan.
+.TP
+.B \-sN
+TCP NULL scan.
+.TP
+.B \-sF
+TCP FIN scan.
+.TP
+.B \-sX
+TCP Xmas scan.
+.TP
+.B \-sM
+TCP Maimon scan.
+.TP
+.B \-sO
+IP protocol scan.
+.TP
+.BI \-sI " ZOMBIE" [: PROBEPORT ]
+Idle scan via a zombie host.
+.TP
+.BI \-b " FTP"
+FTP bounce scan
+.RB ( user:pass@host:port ).
+.SS Port Specification
+.TP
+.BI \-p " PORTS"
+Port ranges to scan
+.RI ( "1-65535" ,
+.IR "22,80,443" ,
+.B "U:53,T:22"
+). Use
+.B "\-p \-"
+for all 65536.
+.TP
+.B \-\-exclude-ports \fIPORTS\fR
+Exclude these ports.
+.TP
+.B \-F
+Fast: scan fewer ports than default (top 100).
+.TP
+.B \-r
+Scan ports sequentially \(em don't randomize.
+.TP
+.B \-\-top-ports \fIN\fR
+Scan the
+.I N
+highest-ratio ports.
+.SS Service / Version / Script
+.TP
+.BR \-sV ", " \-\-version-scan
+Probe open ports to determine service / version info.
+.TP
+.B \-\-version-intensity \fI0-9\fR
+Set version-scan intensity.
+.TP
+.B \-\-version-light
+Equivalent to
+.BR \-\-version-intensity\ 2 .
+.TP
+.B \-\-version-all
+Equivalent to
+.BR \-\-version-intensity\ 9 .
+.TP
+.B \-sC
+Default scripts (built-in
+.B default
++
+.B banner
+\(em Lua NSE not embedded).
+.TP
+.B \-\-script \fIEXPR\fR
+Run specified built-in scripts.
+.SS OS Detection
+.TP
+.B \-O
+Enable OS detection (IPv4: raw probes +
+.B nmap-os-db
+scoring when
+.B \-\-datadir
+is set; IPv6: TTL heuristic).
+.TP
+.B \-\-osscan-limit
+OS detect only against promising targets.
+.TP
+.B \-\-osscan-guess
+.RI ( \-\-fuzzy )
+Guess OS more aggressively.
+.SS Timing & Performance
+.TP
+.B \-\-timing \fI0-5\fR
+Timing template
+.RB ( T0
+paranoid \(->
+.B T5
+insane).
+.TP
+.B \-T \fI0-5\fR
+Same as
+.BR \-\-timing .
+.TP
+.B \-\-min-rate \fIN\fR
+Send at least
+.I N
+probes/second.
+.TP
+.B \-\-max-rate \fIN\fR
+Cap probes at
+.I N
+per second.
+.TP
+.B \-\-min-parallelism \fIN\fR
+.TQ
+.B \-M\fR, \-\-max-parallelism \fIN\fR
+Concurrent probe count bounds.
+.TP
+.B \-\-min-hostgroup \fIN\fR
+.TQ
+.B \-\-max-hostgroup \fIN\fR
+Bound host group sizes; uniform random in
+.RB [ min , max ]
+when both differ.
+.TP
+.B \-\-host-timeout \fITIME\fR
+Wall-clock per host.
+.TP
+.B \-\-max-retries \fIN\fR
+Extra attempts after probe timeout.
+.TP
+.B \-\-min-rtt-timeout \fITIME\fR
+.TQ
+.B \-\-max-rtt-timeout \fITIME\fR
+.TQ
+.B \-\-initial-rtt-timeout \fITIME\fR
+RTT bounds for adaptive probe timeout.
+.TP
+.B \-\-scan-delay \fITIME\fR
+.TQ
+.B \-\-max-scan-delay \fITIME\fR
+Per-probe delay (uniform random in range when both set).
+.TP
+.B \-\-stats-every \fITIME\fR
+Periodic progress to stderr (% done, ETC, probes/sec).
+.SS Firewall / IDS Evasion
+.TP
+.B \-g \fIPORT\fR
+.TQ
+.B \-\-source-port \fIPORT\fR
+Spoof source port.
+.TP
+.B \-\-ttl \fIVAL\fR
+Set IP TTL.
+.TP
+.B \-\-badsum
+Use bad TCP/UDP/SCTP checksum.
+.TP
+.B \-D \fIDECOY1,DECOY2,...\fR
+Cloak scan with decoys.
+.TP
+.B \-S \fIIP\fR
+Spoof source address.
+.TP
+.B \-\-data \fIHEX\fR
+.TQ
+.B \-\-data-string \fITEXT\fR
+.TQ
+.B \-\-data-length \fIN\fR
+Append payload to packets.
+.TP
+.B \-f
+Fragment packets (8-byte default).
+.TP
+.B \-\-mtu \fIVAL\fR
+Custom fragmentation MTU.
+.TP
+.B \-\-spoof-mac \fIMAC\fR
+Spoof source MAC on ARP frames.
+.SS Proxy
+.TP
+.B \-\-proxies \fIURLS\fR
+.TQ
+.B \-\-proxy \fIURLS\fR
+SOCKS4 / HTTP CONNECT proxies for TCP connect scans (comma-separated).
+.SS Output
+.TP
+.BR \-oN " " \fIFILE\fR
+Normal output.
+.TP
+.BR \-oG " " \fIFILE\fR
+Grepable output.
+.TP
+.BR \-oX " " \fIFILE\fR
+XML output
+.RB ( <nmaprun>
+root, nmap-compatible).
+.TP
+.BR \-oA " " \fIBASE\fR
+Write all three formats to
+.IR BASE .{nmap,gnmap,xml} .
+.TP
+.BR \-oS " " \fIFILE\fR
+Script-kiddie output.
+.TP
+.BR \-oM " " \fIFILE\fR
+Machine-readable (currently same as
+.BR \-oG ).
+.TP
+.B \-\-resolve-all
+Scan every resolved address (default: first only).
+.SS Misc
+.TP
+.B \-6
+IPv6 targets and scans.
+.TP
+.B \-A
+Aggressive:
+.BR \-O " + " \-sV " + " \-sC " + " \-\-traceroute .
+.TP
+.B \-\-resume \fIFILE\fR
+Resume from JSON checkpoint.
+.TP
+.B \-\-iflist
+List network interfaces.
+.TP
+.B \-\-privileged
+Force raw mode.
+.TP
+.B \-\-unprivileged
+Force TCP connect (no raw).
+.TP
+.B \-v
+Increase verbosity. May be repeated
+.RB ( \-vv ).
+.TP
+.B \-d
+Increase debug level. May be repeated.
+.TP
+.B \-h\fR, \-\-help
+Print help.
+.TP
+.B \-V\fR, \-\-version
+Print version.
+.SH EXAMPLES
+TCP connect scan of common ports:
+.RS
+.nf
+nmaprs scanme.nmap.org
+.fi
+.RE
+.PP
+SYN scan + version detection + OS detection (privileged):
+.RS
+.nf
+sudo nmaprs \-sS \-sV \-O scanme.nmap.org
+.fi
+.RE
+.PP
+Aggressive scan of /24 with grepable output:
+.RS
+.nf
+sudo nmaprs \-A 192.168.1.0/24 \-oG net.gnmap
+.fi
+.RE
+.PP
+UDP scan of top 100 ports through a SOCKS4 proxy:
+.RS
+.nf
+nmaprs \-sU \-\-top-ports 100 \-\-proxies socks4://127.0.0.1:1080 target
+.fi
+.RE
+.PP
+Idle scan via a zombie:
+.RS
+.nf
+sudo nmaprs \-sI zombie.example.com:65535 target
+.fi
+.RE
+.PP
+Read targets from file, write all three output formats:
+.RS
+.nf
+sudo nmaprs \-\-iL targets.txt \-oA scan-results
+.fi
+.RE
+.PP
+IPv6 SYN scan with fast (top-100) ports:
+.RS
+.nf
+sudo nmaprs \-6 \-sS \-F 2001:db8::1
+.fi
+.RE
+.PP
+Resume an interrupted scan:
+.RS
+.nf
+sudo nmaprs \-\-resume nmaprs.checkpoint.json
+.fi
+.RE
+.PP
+List interfaces:
+.RS
+.nf
+nmaprs \-\-iflist
+.fi
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+Scan completed (regardless of host/port states).
+.TP
+.B 1
+Invalid CLI usage, required privileges missing, or fatal I/O error.
+.TP
+.B 2
+At least one target failed to resolve.
+.SH FILES
+.TP
+.I ./data/nmap-services
+.TQ
+.I ./data/nmap-service-probes
+.TQ
+.I ./data/nmap-os-db
+.TQ
+.I ./data/nmap-protocols
+Nmap reference data (location override via
+.BR \-\-datadir
+or
+.B NMAPDIR
+env var).
+.TP
+.I nmaprs.checkpoint.json
+Default checkpoint path for
+.BR \-\-resume .
+.TP
+.I /usr/local/share/man/man1/nmaprs.1
+.TQ
+.I /usr/local/share/man/man1/nmaprsall.1
+This man page + the full reference.
+.SH ENVIRONMENT
+.TP
+.B NMAPDIR
+Override the default
+.B \-\-datadir
+search path for Nmap reference files.
+.TP
+.B NO_COLOR
+Suppress ANSI color in terminal output.
+.SH SEE ALSO
+.BR nmaprsall (1),
+.BR nmap (1),
+.BR masscan (1),
+.BR zmap (1),
+.BR lsofrsall (1),
+.BR strykeall (1)
+.SH AUTHORS
+.B Jacob Menke
+.RI < https://github.com/MenkeTechnologies >
+.SH BUGS
+Report bugs at
+.UR https://github.com/MenkeTechnologies/nmaprs/issues
+.UE .
+.SH SECURITY / ETHICS
+Run only against networks and hosts you own or have explicit written
+permission to scan. Unauthorized scanning is illegal in many
+jurisdictions.

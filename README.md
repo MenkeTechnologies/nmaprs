@@ -95,6 +95,15 @@ cargo build --release
 
 Binaries: `target/release/nmaprs` and `target/release/nms` (same CLI and behavior; `nms` is a short alias).
 
+Install the man pages (short + full reference):
+
+```bash
+sudo cp man/man1/nmaprs.1    /usr/local/share/man/man1/
+sudo cp man/man1/nmaprsall.1 /usr/local/share/man/man1/
+man nmaprs        # short reference (key flags, examples)
+man nmaprsall     # full reference (every scan technique, parity matrix, examples)
+```
+
 ---
 
 ## [0x03] ZSH COMPLETION // TAB-COMPLETE ALL THE THINGS

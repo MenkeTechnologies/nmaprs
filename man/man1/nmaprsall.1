@@ -1,0 +1,1028 @@
+.\" nmaprsall(1) — comprehensive all-in-one man page for nmaprs
+.\" Modeled after zshall(1): every man page in one document.
+.\" Render with:  man -l man/man1/nmaprsall.1
+.\" Install:      cp man/man1/nmaprsall.1 /usr/local/share/man/man1/
+.TH NMAPRSALL 1 "May 2026" "nmaprs 0.1.1" "User Commands"
+.SH NAME
+nmaprsall \- the nmaprs comprehensive reference (target selection,
+discovery, every scan technique, timing & performance, evasion, OS
+detection, version scan, output, parity matrix vs nmap, examples)
+.SH OVERVIEW
+This is the all-in-one
+.B nmaprs
+manual, modeled on
+.BR zshall (1).
+It concatenates the major sections of the nmaprs reference into a
+single page so you can grep with `/`:
+.RS 2
+.PP
+.B 1.  INVOCATION
+.RB "\(em " "binaries (nmaprs, nms), privilege auto-detect, target syntax"
+.br
+.B 2.  TARGET SELECTION
+.RB "\(em " "-iL, -iR, --exclude, --excludefile, IPv4/IPv6/CIDR/range"
+.br
+.B 3.  HOST DISCOVERY
+.RB "\(em " "-sL, -sn, -Pn, -PS/PA/PU/PY/PE/PP/PM/PR, --dns-servers"
+.br
+.B 4.  SCAN TECHNIQUES
+.RB "\(em " "-sT, -sS, -sU, -sY/sZ SCTP, -sA/sW, -sN/sF/sX/sM, -sO, -sI, -b"
+.br
+.B 5.  PORT SPECIFICATION
+.RB "\(em " "-p, -F, -r, --top-ports, --port-ratio, --exclude-ports"
+.br
+.B 6.  SERVICE / VERSION / SCRIPT
+.RB "\(em " "-sV, --version-intensity, --script, -sC, --script-help"
+.br
+.B 7.  OS DETECTION
+.RB "\(em " "-O, --osscan-limit, --osscan-guess, --max-os-tries"
+.br
+.B 8.  TIMING & PERFORMANCE
+.RB "\(em " "-T0..T5, --min/max-rate, parallelism, hostgroup, RTT, retries"
+.br
+.B 9.  FIREWALL / IDS EVASION
+.RB "\(em " "-g, --ttl, --badsum, -D decoys, -S spoof, --data*, -f/--mtu, --spoof-mac"
+.br
+.B 10. PROXY
+.RB "\(em " "--proxies / --proxy (SOCKS4 + HTTP CONNECT)"
+.br
+.B 11. OUTPUT
+.RB "\(em " "-oN/-oG/-oX/-oA/-oS/-oM/-oH, --stylesheet, --webxml, --resolve-all"
+.br
+.B 12. MISC
+.RB "\(em " "-6, -A, --resume, --iflist, --privileged / --unprivileged"
+.br
+.B 13. PARITY MATRIX
+.RB "\(em " "implemented / partial / planned vs upstream nmap"
+.br
+.B 14. ENVIRONMENT
+.br
+.B 15. FILES
+.br
+.B 16. EXIT STATUS
+.br
+.B 17. EXAMPLES
+.br
+.B 18. SECURITY / ETHICS
+.RE
+.PP
+For a shorter quick-reference page see
+.BR nmaprs (1).
+.SH NAME
+nmaprs, nms \- high-performance parallel network scanner with
+nmap-compatible CLI surface (Rust)
+.SH SYNOPSIS
+.B nmaprs
+.RI [ OPTIONS ]
+.RI [ TARGETS ]
+.br
+.B nms
+.RI [ OPTIONS ]
+.RI [ TARGETS ]
+.PP
+.B nms
+is the shorter form of
+.BR nmaprs
+\(em same binary, quicker to type.
+.SH DESCRIPTION
+.B nmaprs
+is a Rust-native network scanner that speaks
+.BR nmap (1)'s
+CLI dialect
+.RB ( "nmap \-\-help"
+plus the long-option set from upstream
+.BR nmap.cc ,
+e.g.
+.BR \-\-resolve-all ,
+.BR \-\-defeat-rst-ratelimit ,
+.BR \-\-versiondb ,
+.BR \-oM / \-oH ,
+.BR \-\-vv ,
+.B \-\-proxy
+as an alias of
+.BR \-\-proxies ).
+.PP
+.B Wired at the packet level
+for raw TCP scans: evasion flags
+.RB ( \-g
+source port,
+.BR \-\-ttl ,
+.BR \-\-badsum ,
+.B \-D
+decoys,
+.B \-S
+source spoofing,
+.BR \-\-data / \-\-data-string / \-\-data-length ,
+.BR \-f / \-\-mtu
+fragmentation).
+.PP
+.B \-\-proxies
+routes TCP-connect scans through SOCKS4 or HTTP CONNECT proxies.
+.B \-\-dns-servers
+resolves targets via custom DNS servers via
+.BR hickory-resolver .
+.B \-\-spoof-mac
+spoofs the source MAC on ARP discovery frames.
+.B \-\-stats-every
+prints periodic scan progress with ETC and probes/sec.
+.PP
+Multiple
+.B \-iL
+lines and CLI targets resolve
+.B in parallel
+(order preserved) with the same
+.BR \-\-max-parallelism / \-\-min-parallelism / "timing template"
+cap as port probes.
+.PP
+.B nmaprs is not a byte-for-byte reimplementation of nmap.
+The full NSE Lua runtime is
+.B not
+embedded; OS detection is partial
+.RB ( IPv4
+raw probes + MatchPoints scoring against
+.BR nmap-os-db ;
+.B IPv6
+TTL heuristic only). For authoritative behavior use
+.BR nmap (1).
+.SH "1.  INVOCATION"
+With no flags,
+.B nmaprs
+performs a TCP-connect scan
+.RB ( \-sT )
+of nmap's default top-1000 TCP ports against the given
+.IR TARGETS .
+.PP
+.B Privilege auto-detection:
+on startup
+.B nmaprs
+calls
+.BR geteuid (2);
+when not root it downgrades from raw SYN
+.RB ( \-sS )
+to TCP connect
+.RB ( \-sT )
+and rejects raw-only modes
+.RB ( \-sO ,
+.BR \-sI ,
+SCTP). Use
+.B \-\-privileged
+to force raw mode (kernel may still reject without
+.BR CAP_NET_RAW )
+or
+.B \-\-unprivileged
+to force connect mode even as root.
+.PP
+.B Target syntax (same as nmap):
+.PP
+.TS
+tab(|);
+l l.
+.B Form|.B Example
+hostname|\fBscanme.nmap.org\fR
+IPv4|\fB192.168.1.1\fR
+IPv6|\fB2001:db8::1\fR (requires \fB-6\fR)
+CIDR v4|\fB10.0.0.0/24\fR
+CIDR v6|\fB2001:db8::/64\fR
+range|\fB10.0.0.1-100\fR or \fB10.0.0-255.1\fR
+.TE
+.SH "2.  TARGET SELECTION"
+.TP
+.B \-\-iL \fIFILE\fR
+Read targets, one per line, from
+.IR FILE .
+Multiple
+.B \-iL
+flags merge in parallel (order preserved).
+.TP
+.B \-\-iR \fINUM\fR
+Pick
+.I NUM
+random hosts.
+.TP
+.B \-\-exclude \fITARGETS\fR
+Comma-separated hosts/networks to skip.
+.TP
+.B \-\-excludefile \fIFILE\fR
+File with hosts/networks to skip (one per line).
+.TP
+.B \-\-resolve-all
+By default DNS returns one address (nmap's "first only"). Pass this
+to scan every resolved address per name.
+.SH "3.  HOST DISCOVERY"
+.TP
+.B \-sL
+List-scan only \(em do not send probes.
+.TP
+.B \-sn
+Ping scan: skip the port scan. Per-host raw ICMP echo via
+.B pnet
+(privileged), falls back to system
+.BR ping (8)
+/
+.BR ping6 (8).
+Output paths
+.RB ( \-oN ,
+.BR \-oG ,
+.BR \-oX ,
+.BR \-oS )
+write host-up lines like the port-scan path.
+.TP
+.BR \-Pn ", " \-\-no-ping
+Treat all hosts as online; skip discovery entirely.
+.TP
+.BI \-PS [ PORTLIST ]
+TCP SYN discovery on the given ports (default 80, 443).
+.TP
+.BI \-PA [ PORTLIST ]
+TCP ACK discovery (RST/SYN-ACK indicates up).
+.TP
+.BI \-PU [ PORTLIST ]
+UDP discovery probe (default port 40125).
+.TP
+.BI \-PY [ PORTLIST ]
+SCTP INIT discovery (default port 80). Same raw SCTP engines as
+.BR \-sY .
+.TP
+.BI \-PO [ PROTOS ]
+IP-protocol ping (default 1,2,4). Same engines as
+.BR \-sO .
+Host is up if any probe is open or closed.
+.TP
+.B \-PE
+ICMP echo.
+.TP
+.B \-PP
+ICMP timestamp request (IPv4, Unix raw ICMP).
+.TP
+.B \-PM
+ICMP address-mask request (IPv4, Unix raw ICMP).
+.TP
+.B \-PR
+ARP ping. Auto-runs for local-subnet IPv4 hosts; disable with
+.BR \-\-disable-arp-ping .
+.TP
+.B \-n
+Never resolve DNS.
+.TP
+.B \-R
+Always resolve DNS (default: only for live hosts).
+.TP
+.B \-\-dns-servers \fISERVERS\fR
+Comma-separated IPs of custom DNS resolvers (uses
+.BR hickory-resolver
+instead of the system stub).
+.TP
+.B \-\-system-dns
+Force the system resolver.
+.TP
+.B \-\-traceroute
+Trace hop path to each host using the system
+.BR traceroute (8)
+/
+.BR tracert
+binary. Up to
+.B min(parallelism, 32)
+hosts run concurrently; output stays in target order.
+.SH "4.  SCAN TECHNIQUES"
+.SS TCP connect (\-sT)
+Default when unprivileged. Async, parallel, timeout-bound.
+.SS TCP SYN (\-sS)
+Default when privileged. Raw IPv4 + IPv6 TCP via
+.BR pnet :
+RST \(-> closed, SYN/ACK \(-> open. Pipelined per family with dedicated
+recv thread + main-thread sends; sharded across up to 16 concurrent
+pipelines per family (bounded by
+.BR effective_probe_concurrency() ).
+Mixed v4+v6 targets run both families concurrently via
+.BR tokio::join .
+Falls back to TCP connect per address family on raw failure.
+.SS TCP NULL / FIN / Xmas / Maimon (\-sN / \-sF / \-sX / \-sM)
+Same raw sharded pipeline as
+.BR \-sS .
+Maimon sends FIN+ACK.
+.SS TCP ACK (\-sA)
+Firewall mapping. RST \(-> unfiltered, no reply \(-> filtered. No TCP
+connect fallback on raw failure (connect can't produce ACK-scan
+states).
+.SS TCP Window (\-sW)
+Same ACK probes; RST with non-zero TCP window \(-> open, RST with zero
+window \(-> closed (BSD-derived stacks); no reply \(-> filtered.
+.SS UDP (\-sU)
+Reply \(-> open. Raw ICMP listener (privileged) classifies destination
+unreachable codes: port-unreachable \(-> closed; other unreachable
+(IPv4 type 3 / ICMPv6 type 1) \(-> filtered. Unix uses one
+.BR poll (2)
++ burst-recv thread when both IPv4 and IPv6 targets are in play.
+.B closed wins over filtered.
+With
+.BR \-\-min-hostgroup / \-\-max-hostgroup ,
+ICMP listener threads start once per scan (not per batch).
+.SS SCTP INIT / COOKIE_ECHO (\-sY / \-sZ)
+CRC32c SCTP segments. IPv4 Layer-3 full datagrams; IPv6 raw SCTP
+(protocol 132) like IPv6 TCP. Pipelined recv + up to 16 shards per
+family. Mixed v4+v6 runs both engines concurrently
+.RB ( tokio::join ).
+INIT-ACK / COOKIE-ACK \(-> open, ABORT \(-> closed.
+.B Privileged
+raw socket.
+.SS Idle scan (\-sI \fIZOMBIE\fR[:\fIPROBEPORT\fR])
+Spoofed TCP SYN (source = zombie) toward targets; sequential IP-ID
+sampling on the zombie (RST to a closed probe port, default 65535) so
+global IP-ID deltas stay interpretable. Delta \(>= 2 \(-> open, else
+closed; probe / RST failures \(-> filtered. IPv4 only;
+.B privileged
+raw send.
+.SS FTP bounce (\-b \fIuser:pass@host:port\fR)
+Parallel
+.B buffer_unordered
+sessions (one control connection per probe). IPv4 only
+.RB ( PORT ).
+Maps 150/125/250 vs 425/426/421 to open/closed; misconfigured/strict
+servers may return filtered.
+.SS IP protocol (\-sO)
+IPv4: raw IPv4 headers; ICMPv4 protocol-unreachable (type 3 code 2)
+\(-> closed. IPv6 (Unix): raw IPv6
+.RB ( IPPROTO_RAW
++
+.BR IPV6_HDRINCL )
+with Next Header = probe; ICMPv6 Parameter Problem type 4 code 1
+\(-> closed. Mixed v4+v6 runs both engines concurrently. Sharded recv
++ up to 16 pipelines per family.
+.BI \-p
+takes protocol numbers
+.BR 0..=255 ;
+omit
+.B \-p
+to probe all 256.
+.B \-F
+limits protocols to
+.BR nmap-protocols
+(embedded as
+.BR data/nmap_ip_protocols_fast.txt ),
+matching nmap's
+.B "[P:0-]"
+fast selection.
+.SS Combined scans (\-sS \-sU, etc.)
+Multiple scan types run sequentially in one pass (e.g. SYN + UDP).
+.SS \-\-scanflags \fIFLAGS\fR
+Custom TCP flag set for raw TCP scans. Names:
+.B SYN, ACK, FIN, RST, PSH, URG, ECE, CWR.
+Separators: space, comma, pipe, or glued (e.g.
+.BR SYNACK ).
+Sequence/ack numbers follow nmap-style rules for SYN vs ACK probes;
+recv classification still follows the selected scan type. Ignored
+(warning) when scan type isn't raw TCP.
+.SH "5.  PORT SPECIFICATION"
+.TP
+.BI \-p " PORTS"
+Port ranges
+.RB ( 1-65535 ,
+.BR 22,80,443 ,
+.B U:53,T:22
+).
+.B \-p \-
+shorthand for all 65536.
+.TP
+.B \-\-exclude-ports \fIPORTS\fR
+Skip these ports (ignored when
+.B \-\-allports
+is set).
+.TP
+.B \-F
+Fast: nmap's top-100 frequency list.
+.TP
+.B \-r
+Scan sequentially (don't randomize).
+.TP
+.B \-\-top-ports \fIN\fR
+Scan the
+.I N
+highest-ratio ports.
+.TP
+.B \-\-port-ratio \fIRATIO\fR
+Scan ports whose nmap frequency is at least
+.IR RATIO .
+.SH "6.  SERVICE / VERSION / SCRIPT"
+.TP
+.BR \-sV ", " \-\-version-scan
+Load
+.B nmap-service-probes:
+TCP + UDP
+.B Probe
+blocks, with
+.B ports / sslports
+(TLS via
+.B rustls
+when port matches
+.BR sslports ),
+.B rarity
+vs
+.BR \-\-version-intensity ,
+and
+.B match / softmatch
+with full template fields:
+.BR "p/" " product, " "v/" " version, " "i/" " info, " "o/" " OS, " "d/" " device, " "cpe:/" " CPE."
+Perl-only regex features omitted. Parallel per open port.
+.TP
+.B \-\-version-intensity \fI0-9\fR
+.TQ
+.B \-\-version-light
+.RI ( =2 )
+.TQ
+.B \-\-version-all
+.RI ( =9 )
+.TQ
+.B \-\-version-trace
+Increase or trace version-scan effort.
+.TP
+.B \-sC
+Default built-in scripts
+.RB ( default
++
+.BR banner ;
+Lua NSE
+.B not
+embedded).
+.TP
+.B \-\-script \fIEXPR\fR
+Run specified built-in scripts (no Lua NSE).
+.TP
+.B \-\-script-args \fIARGS\fR
+.TQ
+.B \-\-script-args-file \fIFILE\fR
+.TQ
+.B \-\-script-trace
+.TQ
+.B \-\-script-updatedb
+.TQ
+.B \-\-script-help \fIEXPR\fR
+Compat shims for nmap parity (no Lua engine).
+.SH "7.  OS DETECTION"
+.TP
+.B \-O
+.B IPv4
+(privileged): raw Layer-3 probes + nmap-os-db MatchPoints scoring
+when
+.B \-\-datadir
+has the DB and the scan found both open and closed TCP ports (and
+.B not
+.B \-\-osscan-limit
+with no open TCP). Falls back to ICMP TTL +
+.B Class
+titles from the legacy DB parse.
+.B IPv6:
+TTL-style guess only (no raw OS probe engine yet).
+.TP
+.B \-\-osscan-limit
+Skip OS pass when no open TCP ports.
+.TP
+.B \-\-osscan-guess
+.RI ( \-\-fuzzy )
+Limit examples / show probable matches.
+.TP
+.B \-\-max-os-tries \fIN\fR
+Maximum OS detect tries.
+.SH "8.  TIMING & PERFORMANCE"
+.TP
+.B \-\-timing \fI0-5\fR
+.TQ
+.B \-T \fI0-5\fR
+Timing template:
+.B T0
+paranoid,
+.B T1
+sneaky,
+.B T2
+polite,
+.B T3
+normal,
+.B T4
+aggressive,
+.B T5
+insane.
+.TP
+.B \-\-min-rate \fIN\fR
+Send at least
+.I N
+probes/second. Must be \(<=
+.B \-\-max-rate
+when both set. Without
+.BR \-\-max-parallelism ,
+parallelism is raised toward
+.B min(min-rate, 65535)
+when that exceeds the timing template.
+.TP
+.B \-\-max-rate \fIN\fR
+Global cap on probe
+.B starts
+per second (TCP connect, UDP, raw half-open TCP, SCTP, IP protocol;
+mixed IPv4+IPv6 share one limiter).
+.TP
+.B \-\-min-parallelism \fIN\fR
+.TQ
+.BR \-M ", " \-\-max-parallelism " " \fIN\fR
+Concurrent probe count bounds.
+.TP
+.B \-\-min-hostgroup \fIN\fR
+.TQ
+.B \-\-max-hostgroup \fIN\fR
+Split resolved host list into batches before building port work.
+Omit both: scan all hosts in one batch. Set only one: the other
+defaults to 1 or 1024 (nmap-style). When both differ: uniform random
+in
+.RB [ min , max ]
+(last batch may be smaller).
+.B \-\-resume
+filters per batch and merges at end.
+.TP
+.B \-\-host-timeout \fITIME\fR
+Per-host wall clock from first probe. Remaining ports become
+.B filtered
+with reason
+.B host-timeout
+(TCP connect, UDP, raw half-open TCP, IP protocol; mixed v4+v6 share
+one per-
+.B IpAddr
+clock).
+.TP
+.B \-\-max-retries \fIN\fR
+Extra attempts after probe timeout. Total tries =
+.BR "1 + N" .
+Applies to TCP connect, UDP, raw half-open TCP, IP protocol, FTP
+bounce, SCTP, idle scan. Retry rounds omit scan-delay and rate pacer.
+.TP
+.B \-\-min-rtt-timeout \fITIME\fR
+.TQ
+.B \-\-max-rtt-timeout \fITIME\fR
+.TQ
+.B \-\-initial-rtt-timeout \fITIME\fR
+RTT bounds for adaptive probe timeout.
+.B "max \(>= min"
+required when both set.
+.TP
+.B \-\-scan-delay \fITIME\fR
+.TQ
+.B \-\-max-scan-delay \fITIME\fR
+Per-probe delay before send/connect: fixed
+.BR scan-delay ,
+or uniform random in
+.RB [ scan-delay , max-scan-delay ]
+when both set.
+.B "max \(>= min"
+required.
+.TP
+.B \-\-defeat-rst-ratelimit
+Reduce wait for RST replies from rate-limited hosts.
+.TP
+.B \-\-defeat-icmp-ratelimit
+Reduce wait for ICMP replies from rate-limited hosts.
+.TP
+.B \-\-nsock-engine \fIENGINE\fR
+.TQ
+.B \-\-nmaprs-engine \fIENGINE\fR
+Reserved for nmap parity.
+.TP
+.B \-\-stats-every \fITIME\fR
+Periodic scan progress to stderr (% done, ETC, probes/sec).
+Per-probe granularity for TCP connect.
+.SH "9.  FIREWALL / IDS EVASION"
+All evasion flags below are wired
+.B at the packet level
+for raw TCP scans.
+.TP
+.B \-g \fIPORT\fR
+.TQ
+.B \-\-source-port \fIPORT\fR
+Spoof source port (default fast SYN scans use random high port).
+.TP
+.B \-\-ttl \fIVAL\fR
+Set IP TTL.
+.TP
+.B \-\-badsum
+Use a bad TCP/UDP/SCTP checksum (firewall vs end-host fingerprint).
+.TP
+.B \-D \fIDECOY1,DECOY2,...,ME,...\fR
+Decoy cloaking.
+.B ME
+inserts your real source at that position.
+.TP
+.B \-S \fIIP\fR
+Spoof source IP. Combine with
+.B \-e iface
+when needed.
+.TP
+.B \-\-data \fIHEX\fR
+.TQ
+.B \-\-data-string \fITEXT\fR
+.TQ
+.B \-\-data-length \fIN\fR
+Append payload to packets (random when only
+.B \-\-data-length
+is set).
+.TP
+.B \-f
+Use small fragments (8-byte payload chunks).
+.TP
+.B \-\-mtu \fIVAL\fR
+Custom fragmentation MTU.
+.TP
+.B \-\-spoof-mac \fIMAC\fR
+Spoof source MAC on ARP discovery frames (full MAC, prefix, or vendor
+name).
+.TP
+.B \-e \fIIFACE\fR
+Force use of a specific interface.
+.SH "10. PROXY"
+.TP
+.B \-\-proxies \fIURLS\fR
+.TQ
+.B \-\-proxy \fIURLS\fR
+Comma-separated proxy URLs for TCP-connect scans. Supports
+.B socks4://
+and
+.B http://
+(HTTP CONNECT). Example:
+.B socks4://127.0.0.1:1080,http://10.0.0.1:8080
+.SH "11. OUTPUT"
+.TP
+.BR \-oN " " \fIFILE\fR
+Normal (human-readable) output.
+.TP
+.BR \-oG " " \fIFILE\fR
+Grepable output (one host per line).
+.TP
+.BR \-oX " " \fIFILE\fR
+XML output. Root
+.B <nmaprun>
+with
+.BR <scaninfo> ,
+.BR <host> ,
+.BR <status> ,
+.BR <address> ,
+.BR <hostnames> ,
+.BR <ports> ,
+.BR <extraports> ,
+.BR <service> ,
+.BR <runstats >
+\(em nmap-compatible.
+.TP
+.BR \-oA " " \fIBASE\fR
+Write
+.IR BASE .{nmap,gnmap,xml}
+in one go.
+.TP
+.BR \-oS " " \fIFILE\fR
+Script-kiddie output (1337-speak mirror of
+.BR \-oN ;
+stdout stays normal).
+.TP
+.BR \-oM " " \fIFILE\fR
+Machine-readable (currently same lines as
+.BR \-oG ).
+.TP
+.BR \-oH " " \fIFILE\fR
+Placeholder hex output (full hex capture not implemented).
+.TP
+.B \-\-stylesheet \fIURL\fR
+.TQ
+.B \-\-webxml
+.TQ
+.B \-\-no-stylesheet
+XML preamble /
+.B xml-stylesheet
+PI control when
+.B \-oX
+is used.
+.TP
+.B \-\-append-output
+Append to output files instead of clobber.
+.SH "12. MISC"
+.TP
+.B \-6
+IPv6 targets and scans (including raw SYN when privileged).
+.TP
+.B \-A
+Aggressive:
+.B \-O
++
+.B \-sV
++
+.B \-sC
++
+.BR \-\-traceroute .
+Not full nmap NSE/Lua.
+.TP
+.B \-\-resume \fIFILE\fR
+Resume from JSON checkpoint of completed
+.BR "(host, port)" .
+Applies to TCP connect, UDP, raw half-open TCP, IP protocol scan
+(remaining pairs only after the checkpoint).
+.TP
+.B \-\-iflist
+List interfaces via
+.BR if-addrs .
+.TP
+.B \-\-privileged
+Force raw mode (kernel may still reject without root /
+.BR CAP_NET_RAW ).
+.TP
+.B \-\-unprivileged
+Force TCP connect mode even as root; rejects raw-only modes
+.RB ( \-sO ,
+.BR \-sI ,
+SCTP).
+.TP
+.B \-\-allports
+Ignore
+.B \-\-exclude-ports
+when set.
+.TP
+.B \-\-datadir \fIPATH\fR
+Override the default
+.B ./data
+directory for nmap reference files
+.RB ( nmap-services ,
+.BR nmap-service-probes ,
+.BR nmap-os-db ,
+.BR nmap-protocols ).
+Also honors the
+.B NMAPDIR
+env var.
+.TP
+.B \-\-versiondb \fIPATH\fR
+Specific version probe database file.
+.TP
+.BR \-v ", " \-\-vv
+Increase verbosity.
+.TP
+.B \-d
+Increase debug level. Repeatable.
+.TP
+.B \-h\fR, \-\-help
+Print help.
+.TP
+.B \-V\fR, \-\-version
+Print version.
+.SH "13. PARITY MATRIX"
+Status vs upstream
+.BR nmap (1).
+See README for the full table; abridged below.
+.PP
+.TS
+tab(|);
+l l.
+.B Area|.B Status
+TCP connect (-sT)|Implemented
+TCP SYN raw (-sS, IPv4 + IPv6)|Implemented (privileged)
+TCP NULL/FIN/Xmas/Maimon|Implemented (raw, sharded pipeline)
+TCP ACK / Window (-sA / -sW)|Implemented (no connect fallback)
+UDP (-sU)|Implemented (raw ICMP listener for unreach)
+SCTP INIT / COOKIE-ECHO (-sY / -sZ)|Implemented (IPv4 + IPv6, CRC32c)
+Idle scan (-sI)|Implemented (IPv4 only, sequential IP-ID)
+FTP bounce (-b)|Implemented (IPv4 only)
+IP protocol (-sO)|Implemented (IPv4 + IPv6 on Unix)
+Ping scan (-sn)|Implemented
+Host discovery (-PS/-PA/-PU/-PY/-PO/-PE/-PP/-PM/-PR)|Implemented
+ARP ping (-PR, local IPv4)|Implemented (auto)
+IPv6 (-6)|Implemented
+-iL / -iR|Implemented
+--resume|Implemented (TCP connect, UDP, raw, IP-proto)
+--traceroute|Implemented (system traceroute, concurrent)
+-O OS detection|Partial (IPv4 raw + DB scoring; IPv6 TTL heuristic)
+-A aggressive bundle|Implemented (no NSE/Lua)
+-sV service/version|Partial (no Perl-only regex; rest implemented)
+--script / -sC|Partial (default + banner builtins; no Lua NSE)
+--iflist|Implemented
+--host-timeout|Implemented
+--max-retries|Implemented (omits scan-delay / rate pacer on retry)
+--min-rtt / --max-rtt / --initial-rtt timeout|Implemented
+--scan-delay / --max-scan-delay|Implemented
+--max-rate / --min-rate|Implemented (one global limiter)
+--min-hostgroup / --max-hostgroup|Implemented
+--scanflags|Implemented (raw TCP scans only)
+Port specs (-p, -F, --top-ports, --port-ratio)|Implemented
+Evasion (-g, --ttl, --badsum, -D, -S, --data*, -f / --mtu, --spoof-mac)|Implemented (packet-level)
+--proxies / --proxy|Implemented (SOCKS4 + HTTP CONNECT)
+--dns-servers|Implemented (hickory-resolver)
+Auto privilege detection|Implemented
+-oN, -oG, -oX, -oA, -oS|Implemented (nmap-compatible XML)
+-oM|Partial (same as -oG)
+-oH|Partial (placeholder)
+--stylesheet / --webxml / --no-stylesheet|Partial
+--resolve-all|Implemented
+--unprivileged / --privileged|Implemented
+--allports|Implemented
+--osscan-limit / --osscan-guess / --max-os-tries|Partial
+--script-timeout|Partial
+--stats-every|Implemented
+NSE Lua runtime|Not implemented
+.TE
+.PP
+If you need authoritative nmap NSE/OS-DB behavior, use
+.BR nmap (1).
+.SH "14. ENVIRONMENT"
+.TP
+.B NMAPDIR
+Override the default
+.B \-\-datadir
+search path for nmap reference files.
+.TP
+.B NO_COLOR
+Suppress ANSI color in terminal output.
+.TP
+.B RUST_LOG
+Log filter (see
+.BR tracing-subscriber 's
+EnvFilter).
+.SH "15. FILES"
+.TP
+.I ./data/nmap-services
+TCP/UDP service-port frequency list.
+.TP
+.I ./data/nmap-service-probes
+Service / version probe definitions.
+.TP
+.I ./data/nmap-os-db
+OS fingerprint database.
+.TP
+.I ./data/nmap-protocols
+IP-protocol number/name list.
+.TP
+.I ./data/nmap_ip_protocols_fast.txt
+Embedded fast-mode protocol shortlist for
+.BR "\-sO \-F" .
+.TP
+.I nmaprs.checkpoint.json
+Default checkpoint path for
+.BR \-\-resume .
+.TP
+.I /usr/local/share/man/man1/nmaprs.1
+Short reference man page.
+.TP
+.I /usr/local/share/man/man1/nmaprsall.1
+This man page.
+.SH "16. EXIT STATUS"
+.TP
+.B 0
+Scan completed (regardless of host/port states).
+.TP
+.B 1
+Invalid CLI usage, missing privileges, or fatal I/O error.
+.TP
+.B 2
+At least one target failed DNS resolution.
+.SH "17. EXAMPLES"
+.PP
+Basic TCP connect of common ports:
+.RS
+.nf
+nmaprs scanme.nmap.org
+.fi
+.RE
+.PP
+Quick top-100 port SYN scan against a /24 (privileged):
+.RS
+.nf
+sudo nmaprs \-sS \-F 192.168.1.0/24
+.fi
+.RE
+.PP
+Full TCP port range (1\-65535) with version + OS detection:
+.RS
+.nf
+sudo nmaprs \-sS \-p \- \-sV \-O scanme.nmap.org
+.fi
+.RE
+.PP
+Aggressive scan, all three output formats:
+.RS
+.nf
+sudo nmaprs \-A \-T4 target \-oA scan-results
+.fi
+.RE
+.PP
+UDP scan of top 100 ports through a SOCKS4 proxy:
+.RS
+.nf
+nmaprs \-sU \-\-top-ports 100 \-\-proxies socks4://127.0.0.1:1080 target
+.fi
+.RE
+.PP
+Idle scan via a zombie host:
+.RS
+.nf
+sudo nmaprs \-sI zombie.example.com:65535 target
+.fi
+.RE
+.PP
+FTP bounce:
+.RS
+.nf
+nmaprs \-b anonymous@ftp.example.com 10.0.0.0/24
+.fi
+.RE
+.PP
+SCTP INIT scan:
+.RS
+.nf
+sudo nmaprs \-sY \-p 80,443 sctp-host
+.fi
+.RE
+.PP
+IP-protocol scan of all 256 protocols (Unix, privileged):
+.RS
+.nf
+sudo nmaprs \-sO target
+.fi
+.RE
+.PP
+Custom DNS resolvers + custom user-agent style payload:
+.RS
+.nf
+nmaprs \-\-dns-servers 1.1.1.1,8.8.8.8 \-\-data-length 64 target
+.fi
+.RE
+.PP
+NULL scan with custom TCP flags + fragmentation + spoofed source port:
+.RS
+.nf
+sudo nmaprs \-sN \-\-scanflags "FIN URG PSH" \-f \-g 53 target
+.fi
+.RE
+.PP
+Decoy cloaking + spoofed source IP + TTL evasion:
+.RS
+.nf
+sudo nmaprs \-sS \-D RND:5,ME \-S 192.0.2.1 \-\-ttl 33 \-e eth0 target
+.fi
+.RE
+.PP
+ARP-only host discovery on a local subnet:
+.RS
+.nf
+sudo nmaprs \-sn \-PR 192.168.1.0/24
+.fi
+.RE
+.PP
+Read targets from file, exclude one subnet, write grepable output:
+.RS
+.nf
+sudo nmaprs \-\-iL targets.txt \-\-exclude 10.0.0.0/16 \-oG out.gnmap
+.fi
+.RE
+.PP
+IPv6 SYN scan with all-ports timing template T4:
+.RS
+.nf
+sudo nmaprs \-6 \-sS \-p \- \-T4 2001:db8::1
+.fi
+.RE
+.PP
+Resume an interrupted scan:
+.RS
+.nf
+sudo nmaprs \-\-resume nmaprs.checkpoint.json
+.fi
+.RE
+.PP
+Periodic progress + per-host timeout cap:
+.RS
+.nf
+sudo nmaprs \-sS \-\-stats-every 30s \-\-host-timeout 5m target
+.fi
+.RE
+.PP
+Rate-limited polite scan (T1 + min/max-rate):
+.RS
+.nf
+sudo nmaprs \-sS \-T1 \-\-min-rate 10 \-\-max-rate 100 target
+.fi
+.RE
+.PP
+List interfaces:
+.RS
+.nf
+nmaprs \-\-iflist
+.fi
+.RE
+.SH "18. SECURITY / ETHICS"
+Run only against networks and hosts you own or have explicit written
+permission to scan. Unauthorized scanning is illegal in many
+jurisdictions. The author and contributors disclaim responsibility
+for misuse.
+.SH SEE ALSO
+.BR nmaprs (1),
+.BR nmap (1),
+.BR masscan (1),
+.BR zmap (1),
+.BR lsofrsall (1),
+.BR iftoprsall (1),
+.BR strykeall (1),
+.BR zshrsall (1)
+.SH AUTHORS
+.B Jacob Menke
+.RI < https://github.com/MenkeTechnologies >
+.SH BUGS
+Report bugs at
+.UR https://github.com/MenkeTechnologies/nmaprs/issues
+.UE .
