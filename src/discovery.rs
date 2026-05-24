@@ -523,7 +523,7 @@ async fn tcp_connect_discovery_collect(
         .flat_map(|h| ports.iter().map(move |&p| (h, p)))
         .collect();
 
-    let results: Vec<(IpAddr, bool)> = stream::iter(pairs.into_iter())
+    let results: Vec<(IpAddr, bool)> = stream::iter(pairs)
         .map(|(host, port)| {
             let t = connect_timeout;
             async move { (host, tcp_probe(host, port, t).await) }
@@ -578,7 +578,7 @@ async fn udp_discovery_collect(
         .flat_map(|h| ports.iter().map(move |&p| (h, p)))
         .collect();
 
-    let results: Vec<(IpAddr, bool)> = stream::iter(pairs.into_iter())
+    let results: Vec<(IpAddr, bool)> = stream::iter(pairs)
         .map(|(host, port)| {
             let w = icmp_wait;
             async move { (host, udp_ping_probe(host, port, w).await) }
@@ -624,7 +624,7 @@ async fn icmp_timestamp_discovery_merge(
     if v4.is_empty() {
         return;
     }
-    let results: Vec<(IpAddr, bool)> = stream::iter(v4.into_iter())
+    let results: Vec<(IpAddr, bool)> = stream::iter(v4)
         .map(|dst| async move {
             let ok = tokio::task::spawn_blocking(move || {
                 crate::icmp_ping::icmp_timestamp_probe_v4(dst, timeout)
@@ -662,7 +662,7 @@ async fn icmp_mask_discovery_merge(
     if v4.is_empty() {
         return;
     }
-    let results: Vec<(IpAddr, bool)> = stream::iter(v4.into_iter())
+    let results: Vec<(IpAddr, bool)> = stream::iter(v4)
         .map(|dst| async move {
             let ok = tokio::task::spawn_blocking(move || {
                 crate::icmp_ping::icmp_address_mask_probe_v4(dst, timeout)

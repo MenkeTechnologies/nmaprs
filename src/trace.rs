@@ -61,7 +61,7 @@ pub async fn run_traceroute(hosts: &[IpAddr], max_parallel: usize) -> Result<()>
     }
     let cap = max_parallel.clamp(1, MAX_TRACEROUTE_PARALLEL);
     let chunks: Vec<(usize, IpAddr)> = hosts.iter().copied().enumerate().collect();
-    let mut out: Vec<(usize, String, String)> = stream::iter(chunks.into_iter())
+    let mut out: Vec<(usize, String, String)> = stream::iter(chunks)
         .map(|(idx, host)| async move {
             let (stdout, stderr) = traceroute_one(host).await;
             (idx, stdout, stderr)
