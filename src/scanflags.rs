@@ -185,7 +185,10 @@ mod tests {
 
     #[test]
     fn parses_mixed_case_fin_ack() {
-        assert_eq!(parse_scanflags("Fin,ack").unwrap(), TcpFlags::FIN | TcpFlags::ACK);
+        assert_eq!(
+            parse_scanflags("Fin,ack").unwrap(),
+            TcpFlags::FIN | TcpFlags::ACK
+        );
     }
 
     #[test]

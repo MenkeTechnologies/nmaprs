@@ -103,9 +103,7 @@ mod tests {
 
     #[tokio::test]
     async fn traceroute_ipv6_localhost_completes() {
-        run_traceroute(&["::1".parse().unwrap()], 1)
-            .await
-            .unwrap();
+        run_traceroute(&["::1".parse().unwrap()], 1).await.unwrap();
     }
 
     #[tokio::test]

@@ -1847,15 +1847,9 @@ mod rate_validation_tests {
     #[test]
     fn datadir_flag_sets_path() {
         use std::path::PathBuf;
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--datadir",
-            "/var/nmap",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--datadir", "/var/nmap", "127.0.0.1"])
+                .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(
             plan.data_file("nmap-service-probes"),
@@ -1865,9 +1859,8 @@ mod rate_validation_tests {
 
     #[test]
     fn disable_arp_ping_flag_sets_plan() {
-        let args =
-            Args::try_parse_from(["nmaprs", "-p", "80", "--disable-arp-ping", "127.0.0.1"])
-                .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--disable-arp-ping", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.disable_arp_ping);
     }
@@ -1913,60 +1906,33 @@ mod rate_validation_tests {
 
     #[test]
     fn host_timeout_thirty_seconds_on_plan() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--host-timeout",
-            "30s",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--host-timeout", "30s", "127.0.0.1"])
+                .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.host_timeout, Some(Duration::from_secs(30)));
     }
 
     #[test]
     fn min_probe_rate_from_cli() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--min-rate",
-            "100",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--min-rate", "100", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.min_probe_rate, Some(100));
     }
 
     #[test]
     fn max_probe_rate_from_cli() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--max-rate",
-            "500",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--max-rate", "500", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.max_probe_rate, Some(500));
     }
 
     #[test]
     fn connect_retries_from_max_retries_flag() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--max-retries",
-            "2",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--max-retries", "2", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.connect_retries, 2);
     }
@@ -1991,58 +1957,34 @@ mod rate_validation_tests {
 
     #[test]
     fn defeat_icmp_ratelimit_flag_on_plan() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--defeat-icmp-ratelimit",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--defeat-icmp-ratelimit", "127.0.0.1"])
+                .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.defeat_icmp_ratelimit);
     }
 
     #[test]
     fn discovery_ignore_rst_flag_on_plan() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--discovery-ignore-rst",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--discovery-ignore-rst", "127.0.0.1"])
+                .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.discovery_ignore_rst);
     }
 
     #[test]
     fn stats_every_parsed_to_duration() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--stats-every",
-            "5s",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--stats-every", "5s", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.stats_every, Some(Duration::from_secs(5)));
     }
 
     #[test]
     fn max_os_tries_valid_value_on_plan() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--max-os-tries",
-            "3",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--max-os-tries", "3", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.max_os_tries, 3);
     }
