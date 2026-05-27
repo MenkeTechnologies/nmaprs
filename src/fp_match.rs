@@ -177,4 +177,120 @@ mod tests {
     fn greater_than_at_boundary_fails() {
         assert!(!expr_match("10", ">10", false));
     }
+
+    #[test]
+    fn or_three_alternatives_third_matches() {
+        assert!(expr_match("BEEF", "F424|FAF0|BEEF", false));
+    }
+
+    #[test]
+    fn range_single_hex_digit() {
+        assert!(expr_match("A", "A-A", false));
+        assert!(!expr_match("B", "A-A", false));
+    }
+
+    #[test]
+    fn less_than_zero_decimal() {
+        assert!(expr_match("0", "<1", false));
+        assert!(!expr_match("1", "<1", false));
+    }
+
+    #[test]
+    fn greater_than_hex_ff() {
+        assert!(expr_match("100", ">FF", false));
+        assert!(!expr_match("FE", ">FF", false));
+    }
+
+    #[test]
+    fn exact_match_case_sensitive_hex() {
+        assert!(expr_match("AB", "AB", false));
+        assert!(!expr_match("ab", "AB", false));
+    }
+
+    #[test]
+    fn range_decimal_inclusive() {
+        assert!(expr_match("10", "10-12", false));
+        assert!(expr_match("12", "10-12", false));
+        assert!(!expr_match("13", "10-12", false));
+    }
+
+    #[test]
+    fn non_empty_val_non_matching_expr_fails() {
+        assert!(!expr_match("dead", "beef", false));
+    }
+
+    #[test]
+    fn less_than_at_zero_boundary() {
+        assert!(!expr_match("0", "<0", false));
+    }
+
+    #[test]
+    fn or_neither_branch_matches_fails() {
+        assert!(!expr_match("dead", "beef|cafe", false));
+    }
+
+    #[test]
+    fn greater_than_at_exact_boundary_fails() {
+        assert!(!expr_match("FF", ">FF", false));
+    }
+
+    #[test]
+    fn range_hex_midpoint_matches() {
+        assert!(expr_match("40", "3F-41", false));
+    }
+
+    #[test]
+    fn single_digit_decimal_exact() {
+        assert!(expr_match("7", "7", false));
+    }
+
+    #[test]
+    fn or_with_three_hex_alts() {
+        assert!(expr_match("AB", "AA|AB|AC", false));
+    }
+
+    #[test]
+    fn greater_than_at_boundary_plus_one() {
+        assert!(expr_match("11", ">10", false));
+    }
+
+    #[test]
+    fn less_than_at_boundary_minus_one() {
+        assert!(expr_match("9", "<10", false));
+    }
+
+    #[test]
+    fn range_hex_single_value_endpoints() {
+        assert!(expr_match("FF", "FF-FF", false));
+    }
+
+    #[test]
+    fn or_first_branch_decimal() {
+        assert!(expr_match("10", "10|20", false));
+    }
+
+    #[test]
+    fn exact_match_lowercase_differs_from_upper_hex() {
+        assert!(!expr_match("ab", "AB", false));
+    }
+
+    #[test]
+    fn empty_val_with_or_expr_fails() {
+        assert!(!expr_match("", "A|B", false));
+    }
+
+    #[test]
+    fn range_decimal_single_point() {
+        assert!(expr_match("5", "5-5", false));
+    }
+
+    #[test]
+    fn greater_than_zero_decimal() {
+        assert!(expr_match("1", ">0", false));
+    }
+
+    #[test]
+    fn less_than_one_decimal() {
+        assert!(expr_match("0", "<1", false));
+    }
 }

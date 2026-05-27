@@ -100,4 +100,28 @@ mod tests {
         let hosts = vec!["127.0.0.1".parse().unwrap(), "127.0.0.1".parse().unwrap()];
         run_traceroute(&hosts, 2).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn traceroute_ipv6_localhost_completes() {
+        run_traceroute(&["::1".parse().unwrap()], 1)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn traceroute_max_parallel_clamped_to_one() {
+        run_traceroute(&["127.0.0.1".parse().unwrap()], 0)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn traceroute_three_hosts_single_parallel() {
+        let hosts = vec![
+            "127.0.0.1".parse().unwrap(),
+            "127.0.0.1".parse().unwrap(),
+            "127.0.0.1".parse().unwrap(),
+        ];
+        run_traceroute(&hosts, 1).await.unwrap();
+    }
 }

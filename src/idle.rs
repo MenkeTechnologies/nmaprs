@@ -361,7 +361,7 @@ mod packet_build_tests {
     use std::net::Ipv4Addr;
 
     use pnet::packet::ip::IpNextHeaderProtocols;
-    use pnet::packet::ipv4::Ipv4Packet;
+    use pnet::packet::ipv4::{Ipv4Flags, Ipv4Packet};
     use pnet::packet::tcp::{TcpFlags, TcpPacket};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -418,5 +418,203 @@ mod packet_build_tests {
         );
         let ip = Ipv4Packet::new(&pkt).unwrap();
         assert_eq!(ip.get_total_length(), 40);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_ipv4_checksum_nonzero() {
+        let mut rng = StdRng::seed_from_u64(99);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::new(1, 2, 3, 4),
+            Ipv4Addr::new(5, 6, 7, 8),
+            1000,
+            2000,
+            42,
+            &mut rng,
+        );
+        let ip = Ipv4Packet::new(&pkt).unwrap();
+        assert_ne!(ip.get_checksum(), 0);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_tcp_checksum_nonzero() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::new(10, 0, 0, 1),
+            50000,
+            443,
+            7,
+            &mut rng,
+        );
+        let ihl = 20;
+        let tcp = TcpPacket::new(&pkt[ihl..]).unwrap();
+        assert_ne!(tcp.get_checksum(), 0);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_sets_dont_fragment() {
+        let mut rng = StdRng::seed_from_u64(5);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 2),
+            1,
+            2,
+            3,
+            &mut rng,
+        );
+        let ip = Ipv4Packet::new(&pkt).unwrap();
+        assert!(ip.get_flags() & Ipv4Flags::DontFragment != 0);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_ttl_is_sixty_four() {
+        let mut rng = StdRng::seed_from_u64(8);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::LOCALHOST,
+            1,
+            2,
+            3,
+            &mut rng,
+        );
+        assert_eq!(Ipv4Packet::new(&pkt).unwrap().get_ttl(), 64);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_window_is_64240() {
+        let mut rng = StdRng::seed_from_u64(13);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::LOCALHOST,
+            1,
+            2,
+            3,
+            &mut rng,
+        );
+        let tcp = TcpPacket::new(&pkt[20..]).unwrap();
+        assert_eq!(tcp.get_window(), 64240);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_no_ack_flag() {
+        let mut rng = StdRng::seed_from_u64(17);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::LOCALHOST,
+            1,
+            2,
+            3,
+            &mut rng,
+        );
+        let tcp = TcpPacket::new(&pkt[20..]).unwrap();
+        assert_eq!(tcp.get_flags() & TcpFlags::ACK, 0);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_identification_varies_by_seed() {
+        let mut r1 = StdRng::seed_from_u64(1);
+        let mut r2 = StdRng::seed_from_u64(2);
+        let a = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::LOCALHOST,
+            1,
+            2,
+            3,
+            &mut r1,
+        );
+        let b = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::LOCALHOST,
+            1,
+            2,
+            3,
+            &mut r2,
+        );
+        assert_ne!(
+            Ipv4Packet::new(&a).unwrap().get_identification(),
+            Ipv4Packet::new(&b).unwrap().get_identification()
+        );
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_ipv4_version_is_four() {
+        let mut rng = StdRng::seed_from_u64(21);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::LOCALHOST,
+            1,
+            2,
+            3,
+            &mut rng,
+        );
+        assert_eq!(Ipv4Packet::new(&pkt).unwrap().get_version(), 4);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_header_length_twenty_bytes() {
+        let mut rng = StdRng::seed_from_u64(22);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::LOCALHOST,
+            1,
+            2,
+            3,
+            &mut rng,
+        );
+        assert_eq!(Ipv4Packet::new(&pkt).unwrap().get_header_length(), 5);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_same_seed_same_identification() {
+        let mut r1 = StdRng::seed_from_u64(99);
+        let mut r2 = StdRng::seed_from_u64(99);
+        let a = build_ipv4_tcp_syn(
+            Ipv4Addr::new(1, 2, 3, 4),
+            Ipv4Addr::new(5, 6, 7, 8),
+            100,
+            200,
+            9,
+            &mut r1,
+        );
+        let b = build_ipv4_tcp_syn(
+            Ipv4Addr::new(1, 2, 3, 4),
+            Ipv4Addr::new(5, 6, 7, 8),
+            100,
+            200,
+            9,
+            &mut r2,
+        );
+        assert_eq!(
+            Ipv4Packet::new(&a).unwrap().get_identification(),
+            Ipv4Packet::new(&b).unwrap().get_identification()
+        );
+    }
+}
+
+#[cfg(test)]
+mod tcp_flags_extra_tests {
+    use pnet::packet::tcp::{MutableTcpPacket, TcpFlags};
+
+    use super::tcp_flags_rst;
+
+    #[test]
+    fn tcp_flags_rst_true_for_rst_and_syn() {
+        let mut b = vec![0u8; MutableTcpPacket::minimum_packet_size()];
+        let mut t = MutableTcpPacket::new(&mut b).expect("tcp");
+        t.set_flags(TcpFlags::RST | TcpFlags::SYN);
+        assert!(tcp_flags_rst(&b));
+    }
+
+    #[test]
+    fn tcp_flags_rst_false_for_ack_only() {
+        let mut b = vec![0u8; MutableTcpPacket::minimum_packet_size()];
+        let mut t = MutableTcpPacket::new(&mut b).expect("tcp");
+        t.set_flags(TcpFlags::ACK);
+        assert!(!tcp_flags_rst(&b));
+    }
+
+    #[test]
+    fn tcp_flags_rst_false_for_empty_slice() {
+        assert!(!tcp_flags_rst(&[]));
     }
 }

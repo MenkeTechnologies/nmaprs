@@ -426,4 +426,109 @@ mod tests {
         icmp_payload.extend_from_slice(&buf);
         assert!(super::parse_embedded_udp_ipv6(&icmp_payload).is_none());
     }
+
+    #[test]
+    fn parse_embedded_udp_ipv4_exactly_four_byte_unused_prefix() {
+        let mut buf = vec![0u8; 28];
+        {
+            let mut ip = MutableIpv4Packet::new(&mut buf[..20]).unwrap();
+            ip.set_version(4);
+            ip.set_header_length(5);
+            ip.set_total_length(28);
+            ip.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+            ip.set_source(Ipv4Addr::new(10, 0, 0, 1));
+            ip.set_destination(Ipv4Addr::new(10, 0, 0, 2));
+            ip.set_checksum(0);
+            ip.set_checksum(checksum(&ip.to_immutable()));
+        }
+        let mut icmp_payload = vec![0xAA, 0xBB, 0xCC, 0xDD];
+        icmp_payload.extend_from_slice(&buf);
+        let (dst, _) = parse_embedded_udp_ipv4(&icmp_payload).unwrap();
+        assert_eq!(dst, Ipv4Addr::new(10, 0, 0, 2));
+    }
+
+    #[test]
+    fn parse_embedded_udp_ipv4_source_port_in_header() {
+        let mut buf = vec![0u8; 28];
+        {
+            let mut ip = MutableIpv4Packet::new(&mut buf[..20]).unwrap();
+            ip.set_version(4);
+            ip.set_header_length(5);
+            ip.set_total_length(28);
+            ip.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+            ip.set_source(Ipv4Addr::new(10, 0, 0, 1));
+            ip.set_destination(Ipv4Addr::new(10, 0, 0, 2));
+            ip.set_checksum(0);
+            ip.set_checksum(checksum(&ip.to_immutable()));
+        }
+        {
+            let mut udp = MutableUdpPacket::new(&mut buf[20..]).unwrap();
+            udp.set_source(12345);
+            udp.set_destination(53);
+            udp.set_length(8);
+            udp.set_checksum(0);
+        }
+        let mut icmp_payload = vec![0u8; 4];
+        icmp_payload.extend_from_slice(&buf);
+        let (_, dport) = parse_embedded_udp_ipv4(&icmp_payload).unwrap();
+        assert_eq!(dport, 53);
+    }
+
+    #[test]
+    fn parse_embedded_udp_ipv4_rejects_tcp_inner_protocol() {
+        let mut buf = vec![0u8; 28];
+        {
+            let mut ip = MutableIpv4Packet::new(&mut buf[..20]).unwrap();
+            ip.set_version(4);
+            ip.set_header_length(5);
+            ip.set_total_length(28);
+            ip.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
+            ip.set_source(Ipv4Addr::new(10, 0, 0, 1));
+            ip.set_destination(Ipv4Addr::new(10, 0, 0, 2));
+        }
+        let mut icmp_payload = vec![0u8; 4];
+        icmp_payload.extend_from_slice(&buf);
+        assert!(parse_embedded_udp_ipv4(&icmp_payload).is_none());
+    }
+
+    #[test]
+    fn parse_embedded_udp_ipv4_payload_shorter_than_four_bytes() {
+        assert!(parse_embedded_udp_ipv4(&[0, 1, 2]).is_none());
+    }
+
+    #[test]
+    fn parse_embedded_udp_ipv4_truncated_udp_header() {
+        let mut buf = vec![0u8; 24];
+        {
+            let mut ip = MutableIpv4Packet::new(&mut buf[..20]).unwrap();
+            ip.set_version(4);
+            ip.set_header_length(5);
+            ip.set_total_length(24);
+            ip.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+            ip.set_destination(Ipv4Addr::new(10, 0, 0, 2));
+        }
+        let mut icmp_payload = vec![0u8; 4];
+        icmp_payload.extend_from_slice(&buf);
+        assert!(parse_embedded_udp_ipv4(&icmp_payload).is_none());
+    }
+
+    #[test]
+    fn parse_embedded_udp_ipv6_rejects_non_udp_next_header() {
+        let mut buf = vec![0u8; 48];
+        {
+            let mut ip = MutableIpv6Packet::new(&mut buf[..40]).unwrap();
+            ip.set_version(6);
+            ip.set_payload_length(8);
+            ip.set_next_header(IpNextHeaderProtocols::Tcp);
+            ip.set_destination(Ipv6Addr::LOCALHOST);
+        }
+        let mut icmp_payload = vec![0u8; 4];
+        icmp_payload.extend_from_slice(&buf);
+        assert!(super::parse_embedded_udp_ipv6(&icmp_payload).is_none());
+    }
+
+    #[test]
+    fn parse_embedded_udp_ipv6_missing_prefix_is_none() {
+        assert!(super::parse_embedded_udp_ipv6(&[]).is_none());
+    }
 }

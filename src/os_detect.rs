@@ -45,4 +45,74 @@ mod tests {
     fn ttl_mid_windows_bucket() {
         assert_eq!(guess_from_ttl(Some(100)), "Windows (TTL heuristic)");
     }
+
+    #[test]
+    fn ttl_zero_is_linux_bucket() {
+        assert_eq!(guess_from_ttl(Some(0)), "Linux/Unix (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_two_is_linux_bucket() {
+        assert_eq!(guess_from_ttl(Some(2)), "Linux/Unix (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_thirty_two_is_linux_bucket() {
+        assert_eq!(guess_from_ttl(Some(32)), "Linux/Unix (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_sixty_three_is_linux_bucket() {
+        assert_eq!(guess_from_ttl(Some(63)), "Linux/Unix (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_sixty_six_is_windows_bucket() {
+        assert_eq!(guess_from_ttl(Some(66)), "Windows (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_ninety_nine_is_windows_bucket() {
+        assert_eq!(guess_from_ttl(Some(99)), "Windows (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_one_twenty_seven_is_windows_bucket() {
+        assert_eq!(guess_from_ttl(Some(127)), "Windows (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_one_thirty_is_network_bucket() {
+        assert_eq!(guess_from_ttl(Some(130)), "Network device (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_two_fifty_four_is_network_bucket() {
+        assert_eq!(guess_from_ttl(Some(254)), "Network device (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_two_hundred_is_network_bucket() {
+        assert_eq!(guess_from_ttl(Some(200)), "Network device (TTL heuristic)");
+    }
+
+    #[test]
+    fn unknown_when_ttl_absent() {
+        assert_eq!(guess_from_ttl(None), "unknown");
+    }
+
+    #[test]
+    fn ttl_exactly_255_is_network_bucket() {
+        assert_eq!(guess_from_ttl(Some(255)), "Network device (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_exactly_64_is_linux_bucket() {
+        assert_eq!(guess_from_ttl(Some(64)), "Linux/Unix (TTL heuristic)");
+    }
+
+    #[test]
+    fn ttl_exactly_128_is_windows_bucket() {
+        assert_eq!(guess_from_ttl(Some(128)), "Windows (TTL heuristic)");
+    }
 }

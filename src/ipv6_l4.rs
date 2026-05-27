@@ -253,4 +253,86 @@ mod tests {
             &tcp
         );
     }
+
+    #[test]
+    fn icmpv6_slice_after_ipv6_for_icmpv6_next_header() {
+        let icmp = [0x01, 0x00, 0x00, 0x00];
+        let mut buf = v6_frame(IpNextHeaderProtocols::Icmpv6.0, icmp.len() as u16);
+        buf[40..44].copy_from_slice(&icmp);
+        let slice = icmpv6_slice_after_ipv6(&buf).expect("icmpv6");
+        assert_eq!(slice, &icmp);
+    }
+
+    #[test]
+    fn ipv6_l4_udp_payload_extracted() {
+        let udp = [0x01, 0x02, 0x03, 0x04, 0x00, 0x08, 0x00, 0x00];
+        let mut buf = v6_frame(IpNextHeaderProtocols::Udp.0, udp.len() as u16);
+        buf[40..48].copy_from_slice(&udp);
+        assert_eq!(
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Udp.0).unwrap(),
+            &udp
+        );
+    }
+
+    #[test]
+    fn ipv6_buffer_shorter_than_header_returns_none() {
+        assert!(ipv6_l4_slice(&[0x60, 0, 0, 0], IpNextHeaderProtocols::Tcp.0).is_none());
+    }
+
+    #[test]
+    fn dest_header_then_udp() {
+        let udp = [0xAA; 8];
+        let buf = v6_with_ext(60, 0, IpNextHeaderProtocols::Udp.0, &udp);
+        assert_eq!(
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Udp.0).unwrap(),
+            &udp
+        );
+    }
+
+    #[test]
+    fn hop_byhop_then_tcp() {
+        let tcp = [0x11, 0x22, 0x33, 0x44];
+        let buf = v6_with_ext(0, 0, IpNextHeaderProtocols::Tcp.0, &tcp);
+        assert_eq!(
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).unwrap(),
+            &tcp
+        );
+    }
+
+    #[test]
+    fn unknown_next_header_stops_walk() {
+        let buf = v6_frame(99, 4);
+        assert!(ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).is_none());
+    }
+
+    #[test]
+    fn extension_header_truncated_returns_none() {
+        let mut buf = v6_frame(43, 16);
+        buf[6] = 43;
+        buf[40] = IpNextHeaderProtocols::Tcp.0;
+        buf[41] = 10;
+        assert!(ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).is_none());
+    }
+
+    #[test]
+    fn fragment_header_skips_eight_bytes() {
+        let tcp = [0x55; 4];
+        let mut buf = vec![0u8; 40 + 8 + tcp.len()];
+        buf[0] = 0x60;
+        buf[6] = 44;
+        buf[7] = 64;
+        buf[4] = 0;
+        buf[5] = (8 + tcp.len()) as u8;
+        buf[40] = IpNextHeaderProtocols::Tcp.0;
+        buf[48..].copy_from_slice(&tcp);
+        assert_eq!(
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).unwrap(),
+            &tcp
+        );
+    }
+
+    #[test]
+    fn icmpv6_slice_empty_buffer_none() {
+        assert!(icmpv6_slice_after_ipv6(&[]).is_none());
+    }
 }

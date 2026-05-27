@@ -110,4 +110,20 @@ mod tests {
         let input = "A".repeat(200);
         assert_eq!(skid_line(&input).len(), 200);
     }
+
+    #[test]
+    fn skid_only_spaces_unchanged_length() {
+        assert_eq!(skid_line("     ").len(), 5);
+    }
+
+    #[test]
+    fn skid_at_sign_and_hash_unchanged() {
+        let input = "@#$%^&*()";
+        assert_eq!(skid_line(input).len(), input.len());
+    }
+
+    #[test]
+    fn skid_backslash_unchanged() {
+        assert_eq!(skid_line(r"\\").len(), 2);
+    }
 }

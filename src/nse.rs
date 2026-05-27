@@ -138,4 +138,70 @@ mod tests {
             .await
             .expect("run");
     }
+
+    #[tokio::test]
+    async fn run_scripts_default_and_banner_both_run() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script-default",
+            "--script",
+            "banner",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_banner_alias_same_as_default_for_empty_list() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "banner",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_multiple_unknown_names_still_ok() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "foo,bar,baz",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_with_unreachable_port_does_not_panic() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "banner",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let host: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        run_scripts(&args, &[(host, 65519)], Some(Duration::from_millis(50)))
+            .await
+            .expect("run");
+    }
 }

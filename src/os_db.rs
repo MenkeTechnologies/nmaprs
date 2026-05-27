@@ -276,4 +276,109 @@ mod tests {
         let s = format_os_guess(Some(64), Some(&db), 2);
         assert!(s.contains("no Class examples"));
     }
+
+    #[test]
+    fn examples_for_ttl_bsd_family_in_linux_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "FreeBSD 13".into(),
+                family: "FreeBSD".into(),
+            }],
+        };
+        assert_eq!(db.examples_for_ttl(Some(32), 1), vec!["FreeBSD 13"]);
+    }
+
+    #[test]
+    fn examples_for_ttl_android_family_in_linux_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Android 12".into(),
+                family: "Android".into(),
+            }],
+        };
+        assert_eq!(db.examples_for_ttl(Some(60), 1), vec!["Android 12"]);
+    }
+
+    #[test]
+    fn examples_for_ttl_microsoft_family_in_windows_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Win11".into(),
+                family: "Microsoft Windows".into(),
+            }],
+        };
+        assert_eq!(db.examples_for_ttl(Some(100), 1), vec!["Win11"]);
+    }
+
+    #[test]
+    fn examples_for_ttl_cisco_in_network_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "IOS-XE".into(),
+                family: "Cisco IOS".into(),
+            }],
+        };
+        assert_eq!(db.examples_for_ttl(Some(255), 1), vec!["IOS-XE"]);
+    }
+
+    #[test]
+    fn examples_for_ttl_router_keyword_in_network_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "EdgeRouter".into(),
+                family: "Router OS".into(),
+            }],
+        };
+        assert_eq!(db.examples_for_ttl(Some(200), 1), vec!["EdgeRouter"]);
+    }
+
+    #[test]
+    fn examples_for_ttl_linux_does_not_match_windows_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Ubuntu".into(),
+                family: "Linux".into(),
+            }],
+        };
+        assert!(db.examples_for_ttl(Some(128), 5).is_empty());
+    }
+
+    #[test]
+    fn parse_class_family_trims_whitespace() {
+        let s = "Class  Vendor |  Linux  | 4.X | general purpose";
+        assert_eq!(parse_class_family(s), Some("Linux".to_string()));
+    }
+
+    #[test]
+    fn load_db_skips_fingerprint_without_class() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        writeln!(f, "Fingerprint Orphan\n").unwrap();
+        f.flush().unwrap();
+        let db = OsDb::load(f.path()).unwrap();
+        assert!(db.entries.is_empty());
+    }
+
+    #[test]
+    fn format_os_guess_max_examples_at_least_one() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Linux A".into(),
+                family: "Linux".into(),
+            }],
+        };
+        let s = format_os_guess(Some(64), Some(&db), 0);
+        assert!(s.contains("Linux A"));
+    }
+
+    #[test]
+    fn examples_for_ttl_solaris_in_linux_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Solaris 11".into(),
+                family: "Solaris".into(),
+            }],
+        };
+        assert_eq!(db.examples_for_ttl(Some(50), 1), vec!["Solaris 11"]);
+    }
 }

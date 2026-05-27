@@ -130,4 +130,30 @@ mod tests {
         ad.set(deadline);
         assert_eq!(ad.get(), ad.get());
     }
+
+    #[test]
+    fn atomic_deadline_set_at_exact_epoch() {
+        let epoch = Instant::now();
+        let ad = AtomicDeadline::new(epoch);
+        ad.set(epoch);
+        assert_eq!(ad.get(), Some(epoch + Duration::from_nanos(1)));
+    }
+
+    #[test]
+    fn atomic_deadline_far_future_deadline() {
+        let epoch = Instant::now();
+        let ad = AtomicDeadline::new(epoch);
+        let deadline = epoch + Duration::from_secs(3600);
+        ad.set(deadline);
+        assert_eq!(ad.get(), Some(deadline));
+    }
+
+    #[test]
+    fn atomic_deadline_one_millisecond_offset() {
+        let epoch = Instant::now();
+        let ad = AtomicDeadline::new(epoch);
+        let deadline = epoch + Duration::from_millis(1);
+        ad.set(deadline);
+        assert_eq!(ad.get(), Some(deadline));
+    }
 }

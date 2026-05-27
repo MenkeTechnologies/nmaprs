@@ -560,4 +560,185 @@ mod tests {
     fn xml_escape_only_quotes() {
         assert_eq!(xml_escape("\"\"\""), "&quot;&quot;&quot;");
     }
+
+    fn assert_reason_line(
+        reason: PortReason,
+        proto: &'static str,
+        state: &'static str,
+        reason_token: &'static str,
+    ) {
+        let line = PortLine {
+            host: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            port: 99,
+            proto,
+            state,
+            reason,
+            latency_ms: None,
+            version_info: None,
+        };
+        assert_eq!(
+            port_line_text(&line, true),
+            format!("99/{proto}\t{state}\t{reason_token}")
+        );
+    }
+
+    #[test]
+    fn port_line_text_tcp_rst_reason() {
+        assert_reason_line(PortReason::TcpRst, "tcp", "unfiltered", "reset");
+    }
+
+    #[test]
+    fn port_line_text_tcp_window_rst_reason() {
+        assert_reason_line(PortReason::TcpWindowRst, "tcp", "open", "tcp-window");
+    }
+
+    #[test]
+    fn port_line_text_timeout_reason() {
+        assert_reason_line(PortReason::Timeout, "tcp", "filtered", "no-response");
+    }
+
+    #[test]
+    fn port_line_text_host_timeout_reason() {
+        assert_reason_line(PortReason::HostTimeout, "tcp", "filtered", "host-timeout");
+    }
+
+    #[test]
+    fn port_line_text_error_reason() {
+        assert_reason_line(PortReason::Error, "tcp", "filtered", "error");
+    }
+
+    #[test]
+    fn port_line_text_udp_response_reason() {
+        assert_reason_line(PortReason::UdpResponse, "udp", "open", "udp-response");
+    }
+
+    #[test]
+    fn port_line_text_icmp_unreachable_filtered_reason() {
+        assert_reason_line(
+            PortReason::IcmpUnreachableFiltered,
+            "udp",
+            "filtered",
+            "icmp-unreachable",
+        );
+    }
+
+    #[test]
+    fn port_line_text_icmp_proto_unreachable_reason() {
+        assert_reason_line(
+            PortReason::IcmpProtoUnreachable,
+            "ip",
+            "closed",
+            "icmp-proto-unreachable",
+        );
+    }
+
+    #[test]
+    fn port_line_text_ftp_bounce_open_reason() {
+        assert_reason_line(PortReason::FtpBounceOpen, "tcp", "open", "ftp-bounce-open");
+    }
+
+    #[test]
+    fn port_line_text_ftp_bounce_closed_reason() {
+        assert_reason_line(PortReason::FtpBounceClosed, "tcp", "closed", "ftp-bounce-closed");
+    }
+
+    #[test]
+    fn port_line_text_sctp_init_ack_reason() {
+        assert_reason_line(PortReason::SctpInitAck, "sctp", "open", "sctp-init-ack");
+    }
+
+    #[test]
+    fn port_line_text_sctp_cookie_ack_reason() {
+        assert_reason_line(PortReason::SctpCookieAck, "sctp", "open", "sctp-cookie-ack");
+    }
+
+    #[test]
+    fn port_line_text_sctp_abort_reason() {
+        assert_reason_line(PortReason::SctpAbort, "sctp", "closed", "sctp-abort");
+    }
+
+    #[test]
+    fn port_line_text_idle_ipid_open_reason() {
+        assert_reason_line(PortReason::IdleIpIdOpen, "tcp", "open", "idle-ipid-open");
+    }
+
+    #[test]
+    fn port_line_text_idle_ipid_closed_reason() {
+        assert_reason_line(PortReason::IdleIpIdClosed, "tcp", "closed", "idle-ipid-closed");
+    }
+
+    #[test]
+    fn port_line_text_idle_probe_failed_reason() {
+        assert_reason_line(PortReason::IdleProbeFailed, "tcp", "filtered", "idle-probe-failed");
+    }
+
+    #[test]
+    fn xml_escape_less_than_only() {
+        assert_eq!(xml_escape("<"), "&lt;");
+    }
+
+    #[test]
+    fn xml_escape_greater_than_only() {
+        assert_eq!(xml_escape(">"), "&gt;");
+    }
+
+    #[test]
+    fn days_to_ymd_day_365_advances_year() {
+        let (y0, _, _) = days_to_ymd(0);
+        let (y1, _, _) = days_to_ymd(365);
+        assert!(y1 > y0);
+    }
+
+    #[test]
+    fn split_version_info_leading_space_splits_on_first_space() {
+        assert_eq!(split_version_info(" Apache 2"), ("", "Apache 2"));
+    }
+
+    #[test]
+    fn port_line_text_open_without_version_omits_extra_tab_fields() {
+        let line = PortLine {
+            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: 8080,
+            proto: "tcp",
+            state: "open",
+            reason: PortReason::SynAck,
+            latency_ms: None,
+            version_info: None,
+        };
+        assert_eq!(port_line_text(&line, false), "8080/tcp\topen");
+    }
+
+    #[test]
+    fn xml_escape_all_special_chars_together() {
+        assert_eq!(
+            xml_escape("<a&\"b>"),
+            "&lt;a&amp;&quot;b&gt;"
+        );
+    }
+
+    #[test]
+    fn xml_escape_apostrophe_not_escaped() {
+        assert_eq!(xml_escape("it's"), "it's");
+    }
+
+    #[test]
+    fn days_to_ymd_day_one_is_jan_second() {
+        let (_, m, d) = days_to_ymd(1);
+        assert_eq!((m, d), (0, 2));
+    }
+
+    #[test]
+    fn split_version_info_leading_product_only() {
+        assert_eq!(split_version_info("OpenSSH 9.0"), ("OpenSSH", "9.0"));
+    }
+
+    #[test]
+    fn port_line_text_icmp_port_unreachable_reason() {
+        assert_reason_line(
+            PortReason::IcmpPortUnreachable,
+            "udp",
+            "closed",
+            "icmp-port-unreachable",
+        );
+    }
 }

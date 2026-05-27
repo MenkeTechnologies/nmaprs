@@ -534,4 +534,196 @@ mod tests {
             vec!["nmaprs", "-A"]
         );
     }
+
+    #[test]
+    fn expands_syn_scan_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sS".into()]),
+            vec!["nmaprs", "--scan-type", "S"]
+        );
+    }
+
+    #[test]
+    fn expands_connect_scan_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sT".into()]),
+            vec!["nmaprs", "--scan-type", "T"]
+        );
+    }
+
+    #[test]
+    fn expands_oN_output_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-oN".into(), "out".into()]),
+            vec!["nmaprs", "--oN", "out"]
+        );
+    }
+
+    #[test]
+    fn expands_privileged_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "--privileged".into()]),
+            vec!["nmaprs", "--privileged"]
+        );
+    }
+
+    #[test]
+    fn expands_multiple_scan_type_flags_sequentially() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sS".into(), "-sU".into()]),
+            vec!["nmaprs", "--scan-type", "S", "--scan-type", "U"]
+        );
+    }
+
+    #[test]
+    fn expands_oX_grepable_output_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-oX".into(), "out.xml".into()]),
+            vec!["nmaprs", "--oX", "out.xml"]
+        );
+    }
+
+    #[test]
+    fn expands_oG_normal_grepable_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-oG".into(), "out.gnmap".into()]),
+            vec!["nmaprs", "--oG", "out.gnmap"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_echo_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PE".into()]),
+            vec!["nmaprs", "--ping-E"]
+        );
+    }
+
+    #[test]
+    fn expands_unprivileged_long_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "--unprivileged".into()]),
+            vec!["nmaprs", "--unprivileged"]
+        );
+    }
+
+    #[test]
+    fn expands_top_ports_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-F".into()]),
+            vec!["nmaprs", "-F"]
+        );
+    }
+
+    #[test]
+    fn expands_null_scan_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sN".into()]),
+            vec!["nmaprs", "--scan-type", "N"]
+        );
+    }
+
+    #[test]
+    fn expands_fin_scan_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sF".into()]),
+            vec!["nmaprs", "--scan-type", "F"]
+        );
+    }
+
+    #[test]
+    fn expands_xmas_scan_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sX".into()]),
+            vec!["nmaprs", "--scan-type", "X"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_ack_with_port_list() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PA443".into()]),
+            vec!["nmaprs", "--ping-A", "443"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_sctp_init_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PY".into()]),
+            vec!["nmaprs", "--ping-Y"]
+        );
+    }
+
+    #[test]
+    fn expands_oM_machine_output_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-oM".into(), "out".into()]),
+            vec!["nmaprs", "--oM", "out"]
+        );
+    }
+
+    #[test]
+    fn expands_timing_t0() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-T0".into()]),
+            vec!["nmaprs", "--timing", "0"]
+        );
+    }
+
+    #[test]
+    fn expands_triple_verbosity() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-vvv".into()]),
+            vec!["nmaprs", "--verbosity=3"]
+        );
+    }
+
+    #[test]
+    fn expands_double_debug() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-dd".into()]),
+            vec!["nmaprs", "--debug=2"]
+        );
+    }
+
+    #[test]
+    fn expands_list_scan_sl_long() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sL".into()]),
+            vec!["nmaprs", "--sL"]
+        );
+    }
+
+    #[test]
+    fn expands_ip_protocol_scan_so() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sO".into()]),
+            vec!["nmaprs", "--sO"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_scan_sn() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sn".into()]),
+            vec!["nmaprs", "--sn"]
+        );
+    }
+
+    #[test]
+    fn expands_maimon_scan_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sM".into()]),
+            vec!["nmaprs", "--scan-type", "M"]
+        );
+    }
+
+    #[test]
+    fn expands_window_scan_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sW".into()]),
+            vec!["nmaprs", "--scan-type", "W"]
+        );
+    }
 }

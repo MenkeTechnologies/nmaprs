@@ -336,4 +336,95 @@ mod tests {
             assert!(d.contains(&p), "top-50 port {p} missing from default-1000");
         }
     }
+
+    #[test]
+    fn top_ports_len_matches_embedded_table() {
+        let len = top_ports_len();
+        assert_eq!(top_ports(len).len(), len);
+        assert_eq!(top_ports(len + 500).len(), len);
+    }
+
+    #[test]
+    fn parse_port_spec_leading_trailing_commas_ignored() {
+        assert_eq!(parse_port_spec(",22,").unwrap(), vec![22]);
+    }
+
+    #[test]
+    fn parse_port_spec_s_prefix_sctp_ports() {
+        assert_eq!(parse_port_spec("S:22,443").unwrap(), vec![22, 443]);
+    }
+
+    #[test]
+    fn parse_port_range_single_port_expands_to_one() {
+        assert_eq!(parse_port_spec("8080-8080").unwrap(), vec![8080]);
+    }
+
+    #[test]
+    fn parse_exclude_ports_from_dash_spec() {
+        let ex = parse_exclude_ports("-").unwrap();
+        assert_eq!(ex.len(), 65536);
+        assert!(ex.contains(&0));
+        assert!(ex.contains(&65535));
+    }
+
+    #[test]
+    fn fast_tcp_ports_len_is_100() {
+        assert_eq!(fast_tcp_ports().len(), 100);
+    }
+
+    #[test]
+    fn top_ports_exceeding_default_caps_at_table_len() {
+        let n = default_tcp_ports().len();
+        assert_eq!(top_ports(n + 100).len(), n);
+    }
+
+    #[test]
+    fn parse_port_negative_number_errors() {
+        assert!(parse_port_spec("-1").is_err());
+    }
+
+    #[test]
+    fn parse_port_float_like_token_errors() {
+        assert!(matches!(
+            parse_port_spec("80.5"),
+            Err(PortParseError::InvalidToken(_))
+        ));
+    }
+
+    #[test]
+    fn parse_port_spec_s_prefix_single_sctp() {
+        assert_eq!(parse_port_spec("S:3868").unwrap(), vec![3868]);
+    }
+
+    #[test]
+    fn fast_ip_protocols_len_at_least_three() {
+        assert!(fast_ip_protocols_nmap().len() >= 3);
+    }
+
+    #[test]
+    fn top_ports_len_helper_matches_top_ports_call() {
+        assert_eq!(top_ports_len(), top_ports(usize::MAX).len());
+    }
+
+    #[test]
+    fn parse_port_spec_multiple_ranges() {
+        assert_eq!(parse_port_spec("22,80-82").unwrap(), vec![22, 80, 81, 82]);
+    }
+
+    #[test]
+    fn parse_exclude_ports_single_port() {
+        let ex = parse_exclude_ports("22").unwrap();
+        assert!(ex.contains(&22));
+        assert_eq!(ex.len(), 1);
+    }
+
+    #[test]
+    fn fast_tcp_ports_contains_https() {
+        assert!(fast_tcp_ports().contains(&443));
+    }
+
+    #[test]
+    fn default_tcp_ports_len_exceeds_top_ports_table() {
+        assert!(default_tcp_ports().len() >= top_ports_len());
+    }
 }

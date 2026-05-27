@@ -275,4 +275,56 @@ mod tests {
             "PORT 1,2,3,4,255,255"
         );
     }
+
+    #[test]
+    fn port_command_line_port_one() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(10, 0, 0, 1), 1),
+            "PORT 10,0,0,1,0,1"
+        );
+    }
+
+    #[test]
+    fn port_command_line_port_256() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(192, 168, 1, 1), 256),
+            "PORT 192,168,1,1,1,0"
+        );
+    }
+
+    #[test]
+    fn port_command_line_loopback() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::LOCALHOST, 22),
+            "PORT 127,0,0,1,0,22"
+        );
+    }
+
+    #[test]
+    fn port_command_line_broadcast_last_octet() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(255, 255, 255, 255), 8080),
+            "PORT 255,255,255,255,31,144"
+        );
+    }
+
+    #[test]
+    fn port_command_line_high_port_bytes() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(8, 8, 8, 8), 0x1234),
+            "PORT 8,8,8,8,18,52"
+        );
+    }
+
+    #[test]
+    fn port_command_line_starts_with_port_keyword() {
+        let s = port_command_line(Ipv4Addr::new(1, 1, 1, 1), 80);
+        assert!(s.starts_with("PORT "));
+    }
+
+    #[test]
+    fn port_command_line_six_comma_separated_fields() {
+        let s = port_command_line(Ipv4Addr::new(1, 2, 3, 4), 443);
+        assert_eq!(s.matches(',').count(), 5);
+    }
 }

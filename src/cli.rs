@@ -587,4 +587,71 @@ mod effective_opts_tests {
             Args::try_parse_from(["nmaprs", "-p", "80", "--script-default", "127.0.0.1"]).unwrap();
         assert!(a.script_default);
     }
+
+    #[test]
+    fn aggressive_flag_parses() {
+        let a = Args::try_parse_from(["nmaprs", "-A", "-p", "80", "127.0.0.1"]).unwrap();
+        assert!(a.aggressive);
+    }
+
+    #[test]
+    fn os_detect_flag_parses() {
+        let a = Args::try_parse_from(["nmaprs", "-O", "-p", "80", "127.0.0.1"]).unwrap();
+        assert!(a.os_detect);
+    }
+
+    #[test]
+    fn exclude_flag_parses() {
+        let a = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--exclude",
+            "10.0.0.1",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert_eq!(a.exclude.as_deref(), Some("10.0.0.1"));
+    }
+
+    #[test]
+    fn input_list_flag_parses() {
+        let a = Args::try_parse_from(["nmaprs", "--iL", "/tmp/hosts.txt", "-p", "80"]).unwrap();
+        assert_eq!(
+            a.input_list.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            Some("/tmp/hosts.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn random_targets_flag_parses() {
+        let a = Args::try_parse_from(["nmaprs", "--iR", "5", "-p", "80"]).unwrap();
+        assert_eq!(a.random_targets, Some(5));
+    }
+
+    #[test]
+    fn defeat_icmp_ratelimit_flag_parses() {
+        let a = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--defeat-icmp-ratelimit",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(a.defeat_icmp_ratelimit);
+    }
+
+    #[test]
+    fn discovery_ignore_rst_flag_parses() {
+        let a = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--discovery-ignore-rst",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(a.discovery_ignore_rst);
+    }
 }

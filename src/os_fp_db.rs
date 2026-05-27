@@ -534,4 +534,191 @@ mod tests {
         let s = db.format_os_guess(Some(64), 2);
         assert!(s.contains("Debian 12"));
     }
+
+    #[test]
+    fn best_match_below_threshold_returns_none() {
+        let mut mp = MatchPoints::default();
+        mp.weights[4].insert("R".into(), 10);
+        let mk_ref = |expr: &str| ReferenceFingerprint {
+            name: "r".into(),
+            line: 1,
+            family: None,
+            tests: {
+                let mut t: [Option<HashMap<String, String>>; NUM_FP_TESTS] =
+                    std::array::from_fn(|_| None);
+                t[4] = Some(HashMap::from([("R".into(), expr.into())]));
+                t
+            },
+        };
+        let db = FingerprintDb {
+            match_points: mp,
+            references: vec![mk_ref("Y")],
+        };
+        let mut sub = SubjectFingerprint::default();
+        sub.tests[4] = Some(HashMap::from([("R".into(), "N".into())]));
+        assert!(db.best_match(&sub, 0.99).is_none());
+    }
+
+    #[test]
+    fn compare_one_expr_range_match() {
+        let mut mp = MatchPoints::default();
+        mp.weights[4].insert("T".into(), 10);
+        let mut ref_tests: [Option<HashMap<String, String>>; NUM_FP_TESTS] =
+            std::array::from_fn(|_| None);
+        ref_tests[4] = Some(HashMap::from([("T".into(), "40-50".into())]));
+        let rf = ReferenceFingerprint {
+            name: "ref".into(),
+            line: 1,
+            family: None,
+            tests: ref_tests,
+        };
+        let mut sub = SubjectFingerprint::default();
+        sub.tests[4] = Some(HashMap::from([("T".into(), "45".into())]));
+        assert!((compare_one(&mp, &rf, &sub) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_paren_line_trims_outer_whitespace() {
+        let (name, body) = parse_paren_line("  T2( R=Y )  ").unwrap();
+        assert_eq!(name, "T2");
+        assert_eq!(body, " R=Y ");
+    }
+
+    #[test]
+    fn examples_for_ttl_unknown_returns_empty() {
+        let db = FingerprintDb {
+            match_points: MatchPoints::default(),
+            references: vec![ReferenceFingerprint {
+                name: "Linux".into(),
+                line: 1,
+                family: Some("Linux".into()),
+                tests: std::array::from_fn(|_| None),
+            }],
+        };
+        assert!(db.examples_for_ttl(None, 5).is_empty());
+    }
+
+    #[test]
+    fn format_os_guess_no_examples_uses_loaded_message() {
+        let db = FingerprintDb {
+            match_points: MatchPoints::default(),
+            references: vec![ReferenceFingerprint {
+                name: "Win".into(),
+                line: 1,
+                family: Some("Windows".into()),
+                tests: std::array::from_fn(|_| None),
+            }],
+        };
+        let s = db.format_os_guess(Some(64), 2);
+        assert!(s.contains("no Class examples"));
+    }
+
+    #[test]
+    fn matchpoints_parses_multiple_attributes() {
+        let lines = vec!["T1(R=40%DF=50%T=60)".to_string()];
+        let mp = MatchPoints::parse_block(&lines).unwrap();
+        assert_eq!(mp.weights[4].get("R"), Some(&40));
+        assert_eq!(mp.weights[4].get("DF"), Some(&50));
+        assert_eq!(mp.weights[4].get("T"), Some(&60));
+    }
+
+    #[test]
+    fn load_db_skips_cpe_lines() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        writeln!(f, "Fingerprint CPE host").unwrap();
+        writeln!(f, "Class Linux | Linux | 4.X | general purpose").unwrap();
+        writeln!(f, "CPE cpe:/o:linux:linux_kernel").unwrap();
+        writeln!(f, "SEQ(SP=25%GCD=1%ISR=25%TI=100%CI=50%II=100%SS=80%TS=100)").unwrap();
+        f.flush().unwrap();
+        let db = FingerprintDb::load(f.path()).unwrap();
+        assert_eq!(db.references.len(), 1);
+        assert_eq!(db.references[0].name, "CPE host");
+    }
+
+    #[test]
+    fn compare_one_missing_weight_skips_attribute() {
+        let mp = MatchPoints::default();
+        let mut ref_tests: [Option<HashMap<String, String>>; NUM_FP_TESTS] =
+            std::array::from_fn(|_| None);
+        ref_tests[4] = Some(HashMap::from([("R".into(), "Y".into())]));
+        let rf = ReferenceFingerprint {
+            name: "ref".into(),
+            line: 1,
+            family: None,
+            tests: ref_tests,
+        };
+        assert_eq!(compare_one(&mp, &rf, &SubjectFingerprint::default()), 0.0);
+    }
+
+    #[test]
+    fn test_names_has_thirteen_entries() {
+        assert_eq!(TEST_NAMES.len(), NUM_FP_TESTS);
+        assert_eq!(TEST_NAMES[0], "SEQ");
+        assert_eq!(TEST_NAMES[NUM_FP_TESTS - 1], "IE");
+    }
+
+    #[test]
+    fn best_match_picks_first_when_equal_accuracy() {
+        let mut mp = MatchPoints::default();
+        mp.weights[4].insert("R".into(), 10);
+        let mk = |name: &str| ReferenceFingerprint {
+            name: name.into(),
+            line: 1,
+            family: None,
+            tests: {
+                let mut t: [Option<HashMap<String, String>>; NUM_FP_TESTS] =
+                    std::array::from_fn(|_| None);
+                t[4] = Some(HashMap::from([("R".into(), "Y".into())]));
+                t
+            },
+        };
+        let db = FingerprintDb {
+            match_points: mp,
+            references: vec![mk("first"), mk("second")],
+        };
+        let mut sub = SubjectFingerprint::default();
+        sub.tests[4] = Some(HashMap::from([("R".into(), "Y".into())]));
+        let (idx, acc) = db.best_match(&sub, 0.5).unwrap();
+        assert_eq!(idx, 0);
+        assert!((acc - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn examples_for_ttl_vxworks_in_network_bucket() {
+        let db = FingerprintDb {
+            match_points: MatchPoints::default(),
+            references: vec![ReferenceFingerprint {
+                name: "VxWorks box".into(),
+                line: 1,
+                family: Some("VxWorks".into()),
+                tests: std::array::from_fn(|_| None),
+            }],
+        };
+        assert_eq!(db.examples_for_ttl(Some(200), 1), vec!["VxWorks box"]);
+    }
+
+    #[test]
+    fn matchpoints_invalid_weight_value_errors() {
+        let lines = vec!["SEQ(SP=abc)".to_string()];
+        assert!(MatchPoints::parse_block(&lines).is_err());
+    }
+
+    #[test]
+    fn parse_paren_line_nested_parens_in_body() {
+        let line = "T1(R=Y%DF=Y%T=40%W=0)";
+        let (name, body) = parse_paren_line(line).unwrap();
+        assert_eq!(name, "T1");
+        assert!(body.contains("R=Y"));
+    }
+
+    #[test]
+    fn format_os_guess_empty_db_falls_back_to_ttl() {
+        let db = FingerprintDb {
+            match_points: MatchPoints::default(),
+            references: vec![],
+        };
+        let s = db.format_os_guess(Some(64), 2);
+        assert!(!s.is_empty());
+    }
 }

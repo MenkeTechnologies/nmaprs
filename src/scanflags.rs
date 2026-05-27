@@ -164,4 +164,27 @@ mod tests {
             TcpFlags::SYN | TcpFlags::ACK
         );
     }
+
+    #[test]
+    fn parses_ece_only() {
+        assert_eq!(parse_scanflags("ECE").unwrap(), TcpFlags::ECE);
+    }
+
+    #[test]
+    fn parses_cwr_only() {
+        assert_eq!(parse_scanflags("CWR").unwrap(), TcpFlags::CWR);
+    }
+
+    #[test]
+    fn parses_syn_fin_rst_combo() {
+        assert_eq!(
+            parse_scanflags("SYN,FIN,RST").unwrap(),
+            TcpFlags::SYN | TcpFlags::FIN | TcpFlags::RST
+        );
+    }
+
+    #[test]
+    fn parses_mixed_case_fin_ack() {
+        assert_eq!(parse_scanflags("Fin,ack").unwrap(), TcpFlags::FIN | TcpFlags::ACK);
+    }
 }

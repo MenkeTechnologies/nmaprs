@@ -451,4 +451,83 @@ mod tests {
         let (prog, _args) = ping_cmd(host);
         assert_eq!(prog, "ping6");
     }
+
+    #[test]
+    fn parse_ttl_on_second_line_only() {
+        let s = "header line\n64 bytes from x: ttl=33 time=1 ms\n";
+        assert_eq!(parse_ttl(s), Some(33));
+    }
+
+    #[test]
+    fn parse_ttl_ttl_without_equals_sign() {
+        let s = "Reply from x: bytes=32 TTL128 time=1ms";
+        assert_eq!(parse_ttl(s), Some(128));
+    }
+
+    #[test]
+    fn parse_time_ms_large_value_truncates() {
+        assert_eq!(parse_time_ms("time=9999.9 ms"), Some(9999));
+    }
+
+    #[test]
+    fn parse_time_ms_no_unit_still_parses_number() {
+        assert_eq!(parse_time_ms("time=42"), Some(42));
+    }
+
+    #[test]
+    fn parse_ttl_multiple_ttl_tokens_first_wins() {
+        let s = "ttl=10 ttl=20";
+        assert_eq!(parse_ttl(s), Some(10));
+    }
+
+    #[test]
+    fn parse_time_ms_only_positive_integers() {
+        assert_eq!(parse_time_ms("time=5 ms"), Some(5));
+        assert!(parse_time_ms("time=0 ms") == Some(0));
+    }
+
+    #[test]
+    fn parse_ttl_with_spaces_around_token() {
+        assert_eq!(parse_ttl("  ttl=64  "), Some(64));
+    }
+
+    #[test]
+    fn parse_time_ms_fractional_submillisecond_truncates() {
+        assert_eq!(parse_time_ms("time=0.999 ms"), Some(0));
+    }
+
+    #[test]
+    fn parse_ttl_in_mixed_case_line() {
+        assert_eq!(parse_ttl("Reply TTL=48 from host"), Some(48));
+    }
+
+    #[test]
+    fn parse_time_ms_windows_style_no_space_before_ms() {
+        assert_eq!(parse_time_ms("time=15ms"), Some(15));
+    }
+
+    #[test]
+    fn parse_ttl_trailing_comma_stripped() {
+        assert_eq!(parse_ttl("ttl=48,"), Some(48));
+    }
+
+    #[test]
+    fn parse_ttl_uppercase_ttl_prefix() {
+        assert_eq!(parse_ttl("TTL=32"), Some(32));
+    }
+
+    #[test]
+    fn parse_time_ms_zero_ms() {
+        assert_eq!(parse_time_ms("time=0.0 ms"), Some(0));
+    }
+
+    #[test]
+    fn parse_ttl_no_match_returns_none() {
+        assert_eq!(parse_ttl("bytes=32 from host"), None);
+    }
+
+    #[test]
+    fn parse_time_ms_no_match_returns_none() {
+        assert_eq!(parse_time_ms("no timing here"), None);
+    }
 }

@@ -515,10 +515,644 @@ fn max_rate_flag_runs() {
 }
 
 #[test]
+fn append_output_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--append-output", "-p", "65504", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn defeat_rst_ratelimit_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--defeat-rst-ratelimit", "-p", "65503", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn source_port_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--source-port", "53", "-p", "65502", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn ttl_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--ttl", "32", "-p", "65501", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn fragment_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-f", "-p", "65500", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn max_parallelism_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--max-parallelism", "32", "-p", "65499", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn min_parallelism_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--min-parallelism", "4", "-p", "65498", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn max_hostgroup_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--max-hostgroup", "16", "-p", "65497", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn script_timeout_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--script-timeout", "2s", "-p", "65496", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn version_light_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--version-light", "-p", "65495", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn version_all_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--version-all", "-p", "65494", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn osscan_limit_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--osscan-limit", "-p", "65493", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn initial_rtt_timeout_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--initial-rtt-timeout", "1s", "-p", "65492", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn scan_delay_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-delay", "10ms", "-p", "65491", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn port_spec_s_prefix_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-p", "S:22", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn send_eth_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
         .args(["-Pn", "--send-eth", "-p", "65505", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn defeat_icmp_ratelimit_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--defeat-icmp-ratelimit", "-p", "65390", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn discovery_ignore_rst_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--discovery-ignore-rst", "-p", "65389", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn stats_every_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--stats-every", "2s", "-p", "65381", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn max_os_tries_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--max-os-tries", "2", "-p", "65380", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn exclude_target_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args([
+            "-Pn",
+            "--exclude",
+            "127.0.0.2",
+            "-p",
+            "65378",
+            "127.0.0.1",
+            "127.0.0.2",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn ping_echo_discovery_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--ping-E", "-p", "65377", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn ping_syn_discovery_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--ping-S", "-p", "65376", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn ping_udp_discovery_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--ping-U", "-p", "65375", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn version_intensity_mid_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--version-intensity", "5", "-p", "65374", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn traceroute_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--traceroute", "-p", "65373", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn max_scan_delay_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--max-scan-delay", "20ms", "-p", "65370", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn exclude_ports_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--exclude-ports", "65368", "-p", "65368,65367", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn debug_level_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-d", "-p", "65364", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn timing_paranoid_t0_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-T0", "-p", "65363", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn timing_insane_t5_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-T5", "-p", "65362", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn unprivileged_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--unprivileged", "-p", "65358", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn scanflags_syn_ack_combo_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args([
+            "-Pn",
+            "-sS",
+            "--scanflags",
+            "SYN,ACK",
+            "-p",
+            "65357",
+            "127.0.0.1",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn decoys_rnd_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-D", "RND", "-p", "65356", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn ping_ip_proto_list_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--ping-ip-proto", "1,6", "-p", "65355", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn fragment_mtu_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--mtu", "16", "-p", "65354", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn defeat_rst_ratelimit_explicit_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--defeat-rst-ratelimit", "-p", "65353", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn versiondb_override_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args([
+            "-Pn",
+            "--versiondb",
+            "./data/nmap-service-probes",
+            "-p",
+            "65352",
+            "127.0.0.1",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn machine_parseable_output_flag_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.xml");
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args([
+            "-Pn",
+            "-oX",
+            path.to_str().unwrap(),
+            "-p",
+            "65351",
+            "127.0.0.1",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn grepable_output_flag_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.gnmap");
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args([
+            "-Pn",
+            "-oG",
+            path.to_str().unwrap(),
+            "-p",
+            "65350",
+            "127.0.0.1",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn spoof_source_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-S", "10.0.0.99", "-p", "65349", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn data_payload_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--data", "deadbeef", "-p", "65348", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn fragment_short_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-f", "-p", "65347", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn no_dns_short_n_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-n", "-p", "65346", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn resolve_all_short_r_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-R", "-p", "65345", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn null_scan_type_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-type", "N", "-p", "65343", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn fin_scan_type_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-type", "F", "-p", "65342", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn xmas_scan_type_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-type", "X", "-p", "65341", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn maimon_scan_type_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-type", "M", "-p", "65340", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn ack_scan_type_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-type", "A", "-p", "65339", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn window_scan_type_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-type", "W", "-p", "65338", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn ip_protocol_scan_so_requires_raw_without_privilege() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--sO", "-p", "65337", "127.0.0.1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("requires raw sockets"));
+}
+
+#[test]
+fn sctp_init_scan_y_requires_raw_without_privilege() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-type", "Y", "-p", "65336", "127.0.0.1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("requires raw sockets"));
+}
+
+#[test]
+fn sctp_cookie_scan_z_requires_raw_without_privilege() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-type", "Z", "-p", "65335", "127.0.0.1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("requires raw sockets"));
+}
+
+#[test]
+fn normal_output_file_on_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scan.txt");
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args([
+            "-Pn",
+            "-oN",
+            path.to_str().unwrap(),
+            "-p",
+            "65334",
+            "127.0.0.1",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn script_kiddie_output_os_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scan.sk");
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args([
+            "-Pn",
+            "-oS",
+            path.to_str().unwrap(),
+            "-p",
+            "65333",
+            "127.0.0.1",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn timing_template_t3_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-T3", "-p", "65326", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn timing_template_t2_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-T2", "-p", "65325", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn timing_template_t1_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "-T1", "-p", "65324", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn initial_rtt_timeout_ms_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args([
+            "-Pn",
+            "--initial-rtt-timeout",
+            "750ms",
+            "-p",
+            "65329",
+            "127.0.0.1",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn scan_delay_ms_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--scan-delay", "5ms", "-p", "65328", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn privileged_short_flag_parses_cli() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args(["-Pn", "--privileged", "-p", "65319", "127.0.0.1"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn ping_ip_proto_long_flag_runs() {
+    Command::cargo_bin("nmaprs")
+        .expect("binary")
+        .args([
+            "-Pn",
+            "--ping-ip-proto",
+            "1,6",
+            "-p",
+            "65318",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }

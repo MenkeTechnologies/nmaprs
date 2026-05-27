@@ -167,4 +167,48 @@ mod tests {
     fn done_set_empty_for_default_state() {
         assert!(ResumeState::default().done_set().is_empty());
     }
+
+    #[test]
+    fn merge_from_scan_dedupes_repeated_merge() {
+        let mut st = ResumeState::default();
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
+        st.merge_from_scan(&[(ip, 22)]);
+        st.merge_from_scan(&[(ip, 22)]);
+        assert_eq!(st.completed.len(), 1);
+    }
+
+    #[test]
+    fn is_done_false_for_untracked_host() {
+        let st = ResumeState::default();
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(!st.is_done(ip, 22));
+    }
+
+    #[test]
+    fn done_set_ipv6_key() {
+        let mut st = ResumeState::default();
+        st.completed.push(("::1".to_string(), 22));
+        let ip: IpAddr = "::1".parse().unwrap();
+        assert!(st.done_set().contains(&("::1".to_string(), 22)));
+        assert!(st.is_done(ip, 22));
+    }
+
+    #[test]
+    fn save_empty_state_writes_completed_array() {
+        let st = ResumeState::default();
+        let f = NamedTempFile::new().unwrap();
+        st.save(f.path()).unwrap();
+        let raw = std::fs::read_to_string(f.path()).unwrap();
+        assert!(raw.contains("completed"));
+    }
+
+    #[test]
+    fn merge_from_scan_multiple_ports_same_host() {
+        let mut st = ResumeState::default();
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7));
+        st.merge_from_scan(&[(ip, 22), (ip, 80)]);
+        assert_eq!(st.completed.len(), 2);
+        assert!(st.is_done(ip, 22));
+        assert!(st.is_done(ip, 80));
+    }
 }

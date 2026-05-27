@@ -1247,4 +1247,145 @@ mod tests {
         assert_eq!(alive.len(), 1);
         assert!(alive.contains(&ip));
     }
+
+    #[test]
+    fn has_explicit_discovery_flags_ping_syn_short_flag() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-S",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_explicit_discovery_flags(&args));
+    }
+
+    #[test]
+    fn has_explicit_discovery_flags_ping_ip_proto() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-ip-proto",
+            "1,6",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_explicit_discovery_flags(&args));
+    }
+
+    #[test]
+    fn parse_ping_ip_proto_list_whitespace_only_defaults() {
+        assert_eq!(parse_ping_ip_proto_list("   ").unwrap(), vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn parse_ping_ip_proto_list_max_255_ok() {
+        assert_eq!(parse_ping_ip_proto_list("255").unwrap(), vec![255]);
+    }
+
+    #[test]
+    fn ports_from_ping_tcp_invalid_spec_errors() {
+        assert!(ports_from_ping_tcp(&Some(Some("abc".into())), 80).is_err());
+    }
+
+    #[test]
+    fn ports_from_ping_udp_invalid_spec_errors() {
+        assert!(ports_from_ping_udp(&Some(Some("99999".into()))).is_err());
+    }
+
+    #[test]
+    fn port_lines_to_alive_open_only_counts() {
+        let ip = IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 20));
+        let open = PortLine::new(
+            ip,
+            80,
+            "tcp",
+            "open",
+            crate::scan::PortReason::SynAck,
+            None,
+        );
+        let alive = port_lines_to_alive_hosts(vec![open]);
+        assert_eq!(alive.len(), 1);
+    }
+
+    #[test]
+    fn has_implemented_explicit_probes_ping_echo() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-E",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_implemented_explicit_probes(&args));
+    }
+
+    #[test]
+    fn has_implemented_explicit_probes_ping_udp() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-U",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_implemented_explicit_probes(&args));
+    }
+
+    #[test]
+    fn parse_ping_ip_proto_list_sorts_unsorted_input() {
+        assert_eq!(parse_ping_ip_proto_list("17,6,1").unwrap(), vec![1, 6, 17]);
+    }
+
+    #[test]
+    fn parse_ping_ip_proto_list_256_errors() {
+        assert!(parse_ping_ip_proto_list("256").is_err());
+    }
+
+    #[test]
+    fn has_explicit_discovery_flags_no_ping_syn() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--no-ping",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(!has_explicit_discovery_flags(&args));
+    }
+
+    #[test]
+    fn port_lines_to_alive_closed_state_counts_as_up() {
+        let ip = IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 31));
+        let closed = PortLine::new(
+            ip,
+            80,
+            "tcp",
+            "closed",
+            crate::scan::PortReason::ConnRefused,
+            None,
+        );
+        let alive = port_lines_to_alive_hosts(vec![closed]);
+        assert_eq!(alive.len(), 1);
+        assert!(alive.contains(&ip));
+    }
+
+    #[test]
+    fn has_implemented_explicit_probes_ping_ip_proto() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-ip-proto",
+            "1",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_implemented_explicit_probes(&args));
+    }
 }

@@ -1782,4 +1782,279 @@ mod rate_validation_tests {
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.osscan_guess);
     }
+
+    #[test]
+    fn parse_ftp_bounce_missing_at_errors() {
+        assert!(parse_ftp_bounce("user:passhost:21").is_err());
+    }
+
+    #[test]
+    fn parse_ftp_bounce_missing_host_after_at_errors() {
+        assert!(parse_ftp_bounce("user:pass@").is_err());
+    }
+
+    #[test]
+    fn parse_ftp_bounce_user_without_password() {
+        let t = parse_ftp_bounce("anonymous@127.0.0.1").expect("parse");
+        assert_eq!(t.user, "anonymous");
+        assert_eq!(t.pass, "");
+    }
+
+    #[test]
+    fn parse_idle_scan_default_probe_port_65535() {
+        use std::net::Ipv4Addr;
+        let t = parse_idle_scan("127.0.0.1").expect("parse");
+        assert_eq!(t.zombie, Ipv4Addr::LOCALHOST);
+        assert_eq!(t.probe_port, 65535);
+    }
+
+    #[test]
+    fn parse_idle_scan_custom_probe_port() {
+        let t = parse_idle_scan("127.0.0.1:8080").expect("parse");
+        assert_eq!(t.probe_port, 8080);
+    }
+
+    #[test]
+    fn version_intensity_ten_clamped_to_nine() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--version-intensity",
+            "10",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.version_intensity, 9);
+    }
+
+    #[test]
+    fn connect_timeout_parsed_from_ms() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--initial-rtt-timeout",
+            "500ms",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.connect_timeout, Duration::from_millis(500));
+    }
+
+    #[test]
+    fn datadir_flag_sets_path() {
+        use std::path::PathBuf;
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--datadir",
+            "/var/nmap",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(
+            plan.data_file("nmap-service-probes"),
+            PathBuf::from("/var/nmap/nmap-service-probes")
+        );
+    }
+
+    #[test]
+    fn disable_arp_ping_flag_sets_plan() {
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--disable-arp-ping", "127.0.0.1"])
+                .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert!(plan.disable_arp_ping);
+    }
+
+    #[test]
+    fn badsum_flag_sets_evasion_badsum() {
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--badsum", "127.0.0.1"]).expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert!(plan.evasion.badsum);
+    }
+
+    #[test]
+    fn osscan_limit_and_guess_both_set() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--osscan-limit",
+            "--osscan-guess",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert!(plan.osscan_limit);
+        assert!(plan.osscan_guess);
+    }
+
+    #[test]
+    fn version_intensity_zero_allowed() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--version-intensity",
+            "0",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.version_intensity, 0);
+    }
+
+    #[test]
+    fn host_timeout_thirty_seconds_on_plan() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--host-timeout",
+            "30s",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.host_timeout, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn min_probe_rate_from_cli() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--min-rate",
+            "100",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.min_probe_rate, Some(100));
+    }
+
+    #[test]
+    fn max_probe_rate_from_cli() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--max-rate",
+            "500",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.max_probe_rate, Some(500));
+    }
+
+    #[test]
+    fn connect_retries_from_max_retries_flag() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--max-retries",
+            "2",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.connect_retries, 2);
+    }
+
+    #[test]
+    fn scanflags_with_syn_scan_sets_tcp_scan_flags() {
+        use pnet::packet::tcp::TcpFlags;
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--scan-type",
+            "S",
+            "-p",
+            "80",
+            "--scanflags",
+            "SYN,ACK",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.tcp_scan_flags, Some(TcpFlags::SYN | TcpFlags::ACK));
+    }
+
+    #[test]
+    fn defeat_icmp_ratelimit_flag_on_plan() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--defeat-icmp-ratelimit",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert!(plan.defeat_icmp_ratelimit);
+    }
+
+    #[test]
+    fn discovery_ignore_rst_flag_on_plan() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--discovery-ignore-rst",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert!(plan.discovery_ignore_rst);
+    }
+
+    #[test]
+    fn stats_every_parsed_to_duration() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--stats-every",
+            "5s",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.stats_every, Some(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn max_os_tries_valid_value_on_plan() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--max-os-tries",
+            "3",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        assert_eq!(plan.max_os_tries, 3);
+    }
+
+    #[test]
+    fn parse_idle_scan_invalid_host_errors() {
+        assert!(parse_idle_scan("not-a-valid-host-name.invalid.example").is_err());
+    }
+
+    #[test]
+    fn parse_ftp_bounce_server_defaults_to_port_21() {
+        let t = parse_ftp_bounce("user:pass@127.0.0.1").expect("parse");
+        assert_eq!(t.server.port(), 21);
+    }
 }

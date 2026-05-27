@@ -546,4 +546,117 @@ mod tests {
         let uniq: std::collections::HashSet<_> = v4.iter().collect();
         assert!(uniq.len() > 1, "20 random v4 draws should not all collide");
     }
+
+    #[tokio::test]
+    async fn expand_ipv4_last_octet_range_four_hosts() {
+        let ips = expand_target("10.0.0.1-4", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn expand_ipv4_reversed_octet_range_errors() {
+        let e = expand_target("10.0.5-1.0.1", &opts_no_dns_v4())
+            .await
+            .unwrap_err();
+        assert!(matches!(e, TargetError::Invalid(_)));
+    }
+
+    #[test]
+    fn random_addresses_ipv6_returns_requested_count() {
+        let v6 = random_addresses(12, true);
+        assert_eq!(v6.len(), 12);
+        assert!(v6.iter().all(|a| a.is_ipv6()));
+    }
+
+    #[test]
+    fn read_input_list_trims_leading_trailing_whitespace() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "  203.0.113.5  ").unwrap();
+        f.flush().unwrap();
+        assert_eq!(read_input_list(f.path()).unwrap(), vec!["203.0.113.5"]);
+    }
+
+    #[test]
+    fn apply_exclude_single_ip_removes_one_host() {
+        let hosts = vec![
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+        ];
+        let out = apply_exclude(hosts, Some("10.0.0.1"), None, &opts_no_dns_v4()).unwrap();
+        assert_eq!(out, vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))]);
+    }
+
+    #[tokio::test]
+    async fn expand_ipv4_literal_loopback() {
+        let ips = expand_target("127.0.0.1", &opts_no_dns_v4()).await.unwrap();
+        assert_eq!(ips, vec![IpAddr::V4(Ipv4Addr::LOCALHOST)]);
+    }
+
+    #[tokio::test]
+    async fn expand_ipv4_slash_30_yields_two_usable_hosts() {
+        let ips = expand_target("192.0.2.0/30", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips.len(), 2);
+    }
+
+    #[test]
+    fn apply_exclude_file_ignores_hash_comments() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "# excluded").unwrap();
+        writeln!(f, "10.0.0.99").unwrap();
+        f.flush().unwrap();
+        let hosts = vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 99))];
+        let out = apply_exclude(hosts, None, Some(f.path()), &opts_no_dns_v4()).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[tokio::test]
+    async fn expand_ipv4_third_octet_range() {
+        let ips = expand_target("10.0.1-2.5", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips.len(), 2);
+        assert!(ips.contains(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 5))));
+        assert!(ips.contains(&IpAddr::V4(Ipv4Addr::new(10, 0, 2, 5))));
+    }
+
+    #[test]
+    fn random_addresses_one_ipv4_is_valid() {
+        let v = random_addresses(1, false);
+        assert_eq!(v.len(), 1);
+        assert!(v[0].is_ipv4());
+    }
+
+    #[tokio::test]
+    async fn expand_ipv4_first_octet_range() {
+        let ips = expand_target("10-11.0.0.1", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips.len(), 2);
+    }
+
+    #[test]
+    fn expand_octet_single_number() {
+        assert_eq!(super::expand_octet("42").unwrap(), vec![42]);
+    }
+
+    #[test]
+    fn expand_octet_range_inclusive() {
+        assert_eq!(super::expand_octet("1-3").unwrap(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn expand_octet_invalid_token_errors() {
+        assert!(super::expand_octet("x").is_err());
+    }
+
+    #[test]
+    fn random_addresses_ipv6_when_requested() {
+        let v = random_addresses(3, true);
+        assert_eq!(v.len(), 3);
+        assert!(v.iter().all(|ip| ip.is_ipv6()));
+    }
 }

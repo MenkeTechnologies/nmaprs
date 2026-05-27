@@ -1648,4 +1648,144 @@ mod tests {
         assert_eq!(hex_val(0), "0");
         assert_eq!(hex_val(0xff), "FF");
     }
+
+    #[test]
+    fn seq_relation_one_below_probe_ack_is_other() {
+        assert_eq!(seq_relation(12344, 12345), "O");
+    }
+
+    #[test]
+    fn ack_relation_one_below_probe_seq_is_other() {
+        assert_eq!(ack_relation(99, 100), "O");
+    }
+
+    #[test]
+    fn classify_ipid_two_samples_small_diff_is_bi_or_incremental() {
+        // Two-sample sequences with diff=1 often satisfy both byte-order and
+        // incremental heuristics; pin either BI or I, not a single wrong label.
+        let label = classify_ipid(&[1000, 1001]);
+        assert!(label == "BI" || label == "I", "unexpected {label}");
+    }
+
+    #[test]
+    fn gcd_many_all_equal_values() {
+        assert_eq!(gcd_many(&[7, 7, 7, 7]), 7);
+    }
+
+    #[test]
+    fn mod_diff_half_u32_range() {
+        assert_eq!(mod_diff_u32(0, 1u32 << 31), 1u32 << 31);
+    }
+
+    #[test]
+    fn rd_value_differs_for_empty_vs_nonempty() {
+        assert_ne!(rd_value(&[]), rd_value(b"x"));
+    }
+
+    #[test]
+    fn quirks_clean_packet_has_no_quirks() {
+        assert_eq!(quirks_str(0, 0, 0), "");
+    }
+
+    #[test]
+    fn classify_ts_single_sample_is_u() {
+        assert_eq!(classify_ts(&[1000], &[Instant::now()]), "U");
+    }
+
+    #[test]
+    fn classify_ts_all_zero_tsvals_is_zero() {
+        let t0 = Instant::now();
+        let t1 = t0 + Duration::from_millis(500);
+        assert_eq!(classify_ts(&[0, 0, 0], &[t0, t1, t1]), "0");
+    }
+
+    #[test]
+    fn classify_ts_same_recv_times_is_u() {
+        let t0 = Instant::now();
+        assert_eq!(classify_ts(&[1000, 5000], &[t0, t0]), "U");
+    }
+
+    #[test]
+    fn shared_ipid_seq_needs_two_tcp_samples() {
+        assert_eq!(shared_ipid_seq(&[100], &[100, 101]), "O");
+    }
+
+    #[test]
+    fn shared_ipid_seq_needs_icmp_samples() {
+        assert_eq!(shared_ipid_seq(&[100, 200, 300], &[]), "O");
+    }
+
+    #[test]
+    fn shared_ipid_seq_incremental_tcp_and_icmp_close_is_s() {
+        assert_eq!(shared_ipid_seq(&[100, 200, 300], &[301, 401]), "S");
+    }
+
+    #[test]
+    fn shared_ipid_seq_far_icmp_gap_is_other() {
+        assert_eq!(shared_ipid_seq(&[100, 200, 300], &[1000, 1100]), "O");
+    }
+
+    #[test]
+    fn flags_str_fin_only() {
+        assert_eq!(flags_str(TcpFlags::FIN), "F");
+    }
+
+    #[test]
+    fn flags_str_rst_only() {
+        assert_eq!(flags_str(TcpFlags::RST), "R");
+    }
+
+    #[test]
+    fn flags_str_psh_urg_combo() {
+        assert_eq!(flags_str(TcpFlags::PSH | TcpFlags::URG), "UP");
+    }
+
+    #[test]
+    fn cc_str_cwr_without_ece_is_other() {
+        assert_eq!(cc_str(TcpFlags::CWR), "O");
+    }
+
+    #[test]
+    fn cc_str_ece_and_cwr_is_s() {
+        assert_eq!(cc_str(TcpFlags::ECE | TcpFlags::CWR), "S");
+    }
+
+    #[test]
+    fn rd_value_nonempty_is_uppercase_hex() {
+        let v = rd_value(b"probe");
+        assert!(!v.is_empty());
+        assert!(v.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn gcd_many_single_element() {
+        assert_eq!(gcd_many(&[42]), 42);
+    }
+
+    #[test]
+    fn mod_diff_u32_identical_is_zero() {
+        assert_eq!(mod_diff_u32(12345, 12345), 0);
+    }
+
+    #[test]
+    fn hex_val_single_byte() {
+        assert_eq!(hex_val(0xff), "FF");
+    }
+
+    #[test]
+    fn quirks_reserved_nonzero_is_r() {
+        assert_eq!(quirks_str(1, 0, 0), "R");
+    }
+
+    #[test]
+    fn quirks_urg_without_urg_flag_is_u() {
+        assert_eq!(quirks_str(0, 0, 1), "U");
+    }
+
+    #[test]
+    fn classify_ts_two_zeros_with_elapsed_time_is_zero() {
+        let t0 = Instant::now();
+        let t1 = t0 + Duration::from_secs(2);
+        assert_eq!(classify_ts(&[0, 0], &[t0, t1]), "0");
+    }
 }

@@ -419,4 +419,22 @@ mod tests {
         let line = tp_line("-h", "help", false);
         assert!(line.starts_with("  "));
     }
+
+    #[test]
+    fn section_line_long_title_present() {
+        let s = section_line("HOST DISCOVERY", 70, false);
+        assert!(s.contains("HOST DISCOVERY"));
+    }
+
+    #[test]
+    fn tp_line_empty_comment_still_has_separator() {
+        let line = tp_line("-v", "", false);
+        assert!(line.contains("//"));
+    }
+
+    #[test]
+    fn tp_line_color_comment_contains_reset() {
+        let c = tp_line("-O", "OS detect", true);
+        assert!(c.contains("\x1b[0m"));
+    }
 }
