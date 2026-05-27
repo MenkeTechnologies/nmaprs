@@ -1388,4 +1388,87 @@ mod tests {
         .unwrap();
         assert!(has_implemented_explicit_probes(&args));
     }
+
+    #[test]
+    fn has_implemented_explicit_probes_ping_ack() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-A",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_implemented_explicit_probes(&args));
+    }
+
+    #[test]
+    fn has_implemented_explicit_probes_ping_sctp() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-Y",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_implemented_explicit_probes(&args));
+    }
+
+    #[test]
+    fn has_explicit_discovery_flags_ping_ack() {
+        let args = crate::cli::Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--ping-A",
+            "443",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert!(has_explicit_discovery_flags(&args));
+    }
+
+    #[test]
+    fn ports_from_ping_tcp_range_spec() {
+        assert_eq!(
+            ports_from_ping_tcp(&Some(Some("22-24".into())), 80).unwrap(),
+            vec![22, 23, 24]
+        );
+    }
+
+    #[test]
+    fn ports_from_ping_sctp_multi_port() {
+        assert_eq!(
+            ports_from_ping_sctp(&Some(Some("80,443".into()))).unwrap(),
+            vec![80, 443]
+        );
+    }
+
+    #[test]
+    fn parse_ping_ip_proto_list_leading_comma_skips_empty_token() {
+        assert_eq!(parse_ping_ip_proto_list(",1").unwrap(), vec![1]);
+    }
+
+    #[test]
+    fn port_lines_to_alive_ipv6_host() {
+        let ip: IpAddr = "2001:db8::1".parse().unwrap();
+        let open = PortLine::new(
+            ip,
+            443,
+            "tcp",
+            "open",
+            crate::scan::PortReason::SynAck,
+            None,
+        );
+        let alive = port_lines_to_alive_hosts(vec![open]);
+        assert!(alive.contains(&ip));
+    }
+
+    #[test]
+    fn local_subnet_v4_includes_loopback_when_on_subnet() {
+        let hosts = vec![IpAddr::V4(Ipv4Addr::LOCALHOST)];
+        let local = local_subnet_v4_hosts(&hosts);
+        assert!(local.contains(&Ipv4Addr::LOCALHOST) || local.is_empty());
+    }
 }

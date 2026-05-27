@@ -327,4 +327,20 @@ mod tests {
         let s = port_command_line(Ipv4Addr::new(1, 2, 3, 4), 443);
         assert_eq!(s.matches(',').count(), 5);
     }
+
+    #[test]
+    fn port_command_line_all_zero_ip_and_port() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(0, 0, 0, 0), 0),
+            "PORT 0,0,0,0,0,0"
+        );
+    }
+
+    #[test]
+    fn port_command_line_private_network_8443() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(172, 16, 0, 1), 8443),
+            "PORT 172,16,0,1,32,251"
+        );
+    }
 }

@@ -530,4 +530,69 @@ mod tests {
     fn parse_time_ms_no_match_returns_none() {
         assert_eq!(parse_time_ms("no timing here"), None);
     }
+
+    #[test]
+    fn parse_ttl_equals_sign_required_for_lowercase() {
+        assert_eq!(parse_ttl("ttl 64"), None);
+    }
+
+    #[test]
+    fn parse_time_ms_negative_not_matched() {
+        assert_eq!(parse_time_ms("time=-5 ms"), None);
+    }
+
+    #[test]
+    fn parse_ttl_max_u8() {
+        assert_eq!(parse_ttl("ttl=255"), Some(255));
+    }
+
+    #[test]
+    fn parse_time_ms_decimal_only_fraction() {
+        assert_eq!(parse_time_ms("time=.5 ms"), Some(0));
+    }
+
+    #[test]
+    fn parse_ttl_in_parentheses_not_matched() {
+        assert_eq!(parse_ttl("(ttl=47)"), None);
+    }
+
+    #[test]
+    fn parse_time_ms_tab_separated() {
+        assert_eq!(parse_time_ms("time=12\tms"), Some(12));
+    }
+
+    #[test]
+    fn parse_ttl_mixed_with_bytes_from() {
+        let s = "64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.1 ms";
+        assert_eq!(parse_ttl(s), Some(64));
+        assert_eq!(parse_time_ms(s), Some(0));
+    }
+
+    #[test]
+    fn parse_time_ms_multiple_decimals_invalid() {
+        assert_eq!(parse_time_ms("time=1.2.3 ms"), None);
+    }
+
+    #[test]
+    fn parse_ttl_leading_zero() {
+        assert_eq!(parse_ttl("ttl=064"), Some(64));
+    }
+
+    #[test]
+    fn ping_cmd_v4_returns_ping_binary() {
+        let (prog, args) = ping_cmd(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1)));
+        assert_eq!(prog, "ping");
+        assert!(args.contains(&"-c"));
+    }
+
+    #[test]
+    fn parse_time_ms_uppercase_time_prefix() {
+        assert_eq!(parse_time_ms("TIME=7 ms"), Some(7));
+    }
+
+    #[test]
+    fn parse_ttl_after_time_still_found() {
+        let s = "time=1 ms ttl=50";
+        assert_eq!(parse_ttl(s), Some(50));
+    }
 }

@@ -659,4 +659,77 @@ mod tests {
         assert_eq!(v.len(), 3);
         assert!(v.iter().all(|ip| ip.is_ipv6()));
     }
+
+    #[test]
+    fn expand_octet_range_single_value() {
+        assert_eq!(super::expand_octet("5-5").unwrap(), vec![5]);
+    }
+
+    #[test]
+    fn expand_octet_reversed_range_errors() {
+        assert!(super::expand_octet("5-3").is_err());
+    }
+
+    #[test]
+    fn expand_octet_out_of_range_errors() {
+        assert!(super::expand_octet("256").is_err());
+    }
+
+    #[test]
+    fn read_input_list_skips_blank_lines() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "").unwrap();
+        writeln!(f, "10.0.0.1").unwrap();
+        writeln!(f, "   ").unwrap();
+        f.flush().unwrap();
+        assert_eq!(read_input_list(f.path()).unwrap(), vec!["10.0.0.1"]);
+    }
+
+    #[test]
+    fn read_input_list_skips_hash_comments() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "# skip").unwrap();
+        writeln!(f, "10.0.0.2").unwrap();
+        f.flush().unwrap();
+        assert_eq!(read_input_list(f.path()).unwrap(), vec!["10.0.0.2"]);
+    }
+
+    #[test]
+    fn random_addresses_large_count_honors_request() {
+        let v = random_addresses(100_000, false);
+        assert_eq!(v.len(), 100_000);
+    }
+
+    #[test]
+    fn apply_exclude_ipv4_cidr() {
+        let hosts = vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))];
+        let out = apply_exclude(hosts, Some("10.0.0.0/30"), None, &opts_no_dns_v4()).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[tokio::test]
+    async fn expand_ipv4_second_octet_range() {
+        let ips = expand_target("10.1-2.0.1", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn expand_ipv4_slash_31_two_hosts() {
+        let ips = expand_target("192.0.2.0/31", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips.len(), 2);
+    }
+
+    #[test]
+    fn expand_octet_zero() {
+        assert_eq!(super::expand_octet("0").unwrap(), vec![0]);
+    }
+
+    #[test]
+    fn expand_octet_max_255() {
+        assert_eq!(super::expand_octet("255").unwrap(), vec![255]);
+    }
 }

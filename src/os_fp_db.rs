@@ -721,4 +721,80 @@ mod tests {
         let s = db.format_os_guess(Some(64), 2);
         assert!(!s.is_empty());
     }
+
+    #[test]
+    fn matchpoints_empty_block_yields_empty_weights() {
+        let mp = MatchPoints::parse_block(&[]).unwrap();
+        assert!(mp.weights[0].is_empty());
+    }
+
+    #[test]
+    fn matchpoints_skips_hash_comments() {
+        let lines = vec!["# comment".into(), "SEQ(SP=10)".into()];
+        let mp = MatchPoints::parse_block(&lines).unwrap();
+        assert_eq!(mp.weights[0].get("SP"), Some(&10));
+    }
+
+    #[test]
+    fn matchpoints_unknown_test_name_errors() {
+        let lines = vec!["NOPE(R=1)".into()];
+        assert!(MatchPoints::parse_block(&lines).is_err());
+    }
+
+    #[test]
+    fn test_attrs_seq_has_eight_keys() {
+        assert_eq!(TEST_ATTRS[0].len(), 8);
+    }
+
+    #[test]
+    fn test_attrs_t1_has_nine_keys() {
+        assert_eq!(TEST_ATTRS[4].len(), 9);
+    }
+
+    #[test]
+    fn parse_paren_line_no_paren_returns_none() {
+        assert!(parse_paren_line("SEQ SP=10").is_none());
+    }
+
+    #[test]
+    fn examples_for_ttl_zero_max_still_yields_one_match() {
+        let db = FingerprintDb {
+            match_points: MatchPoints::default(),
+            references: vec![ReferenceFingerprint {
+                name: "Linux".into(),
+                line: 1,
+                family: Some("Linux".into()),
+                tests: std::array::from_fn(|_| None),
+            }],
+        };
+        assert_eq!(db.examples_for_ttl(Some(64), 0), vec!["Linux"]);
+    }
+
+    #[test]
+    fn format_os_guess_windows_ttl_with_windows_ref() {
+        let db = FingerprintDb {
+            match_points: MatchPoints::default(),
+            references: vec![ReferenceFingerprint {
+                name: "Win10".into(),
+                line: 1,
+                family: Some("Windows".into()),
+                tests: std::array::from_fn(|_| None),
+            }],
+        };
+        let s = db.format_os_guess(Some(128), 1);
+        assert!(s.contains("Win10"));
+    }
+
+    #[test]
+    fn matchpoints_multiple_tests_in_block() {
+        let lines = vec!["SEQ(SP=10)".into(), "T1(R=20)".into()];
+        let mp = MatchPoints::parse_block(&lines).unwrap();
+        assert_eq!(mp.weights[0].get("SP"), Some(&10));
+        assert_eq!(mp.weights[4].get("R"), Some(&20));
+    }
+
+    #[test]
+    fn num_fp_tests_matches_test_names_len() {
+        assert_eq!(NUM_FP_TESTS, TEST_NAMES.len());
+    }
 }

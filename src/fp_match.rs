@@ -293,4 +293,96 @@ mod tests {
     fn less_than_one_decimal() {
         assert!(expr_match("0", "<1", false));
     }
+
+    #[test]
+    fn or_second_branch_hex() {
+        assert!(expr_match("BEEF", "DEAD|BEEF", false));
+    }
+
+    #[test]
+    fn range_inclusive_below_start_fails() {
+        assert!(!expr_match("09", "10-12", false));
+    }
+
+    #[test]
+    fn range_inclusive_above_end_fails() {
+        assert!(!expr_match("13", "10-12", false));
+    }
+
+    #[test]
+    fn greater_than_hex_ff_boundary() {
+        assert!(expr_match("100", ">FF", false));
+        assert!(!expr_match("FF", ">FF", false));
+    }
+
+    #[test]
+    fn tcp_opt_style_mss_literal_match() {
+        assert!(expr_match("M1460", "M1460", true));
+    }
+
+    #[test]
+    fn tcp_opt_style_mss_or_range_alternative() {
+        assert!(expr_match("M1400", "M1400|M1500", true));
+    }
+
+    #[test]
+    fn tcp_opt_style_window_scale_match() {
+        assert!(expr_match("W10", "W10", true));
+    }
+
+    #[test]
+    fn tcp_opt_style_sack_permitted() {
+        assert!(expr_match("S", "S", true));
+    }
+
+    #[test]
+    fn tcp_opt_style_timestamp_present() {
+        assert!(expr_match("T", "T", true));
+    }
+
+    #[test]
+    fn tcp_opt_style_nop_match() {
+        assert!(expr_match("N", "N", true));
+    }
+
+    #[test]
+    fn tcp_opt_style_or_two_options() {
+        assert!(expr_match("M1460", "M1400|M1460", true));
+    }
+
+    #[test]
+    fn decimal_range_midpoint_inclusive() {
+        assert!(expr_match("50", "40-60", false));
+    }
+
+    #[test]
+    fn hex_or_lowercase_branch() {
+        assert!(expr_match("ab", "ab|cd", false));
+    }
+
+    #[test]
+    fn exact_match_single_zero() {
+        assert!(expr_match("0", "0", false));
+    }
+
+    #[test]
+    fn greater_than_single_digit() {
+        assert!(expr_match("2", ">1", false));
+    }
+
+    #[test]
+    fn less_than_single_digit() {
+        assert!(expr_match("0", "<1", false));
+    }
+
+    #[test]
+    fn or_four_alternatives_last_matches() {
+        assert!(expr_match("D", "A|B|C|D", false));
+    }
+
+    #[test]
+    fn range_hex_a_through_f() {
+        assert!(expr_match("C", "A-F", false));
+        assert!(!expr_match("G", "A-F", false));
+    }
 }

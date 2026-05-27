@@ -156,4 +156,38 @@ mod tests {
         ad.set(deadline);
         assert_eq!(ad.get(), Some(deadline));
     }
+
+    #[test]
+    fn atomic_deadline_subsequent_get_unchanged() {
+        let epoch = Instant::now();
+        let ad = AtomicDeadline::new(epoch);
+        let d = epoch + Duration::from_secs(5);
+        ad.set(d);
+        let first = ad.get();
+        let second = ad.get();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn atomic_deadline_new_starts_none() {
+        assert!(AtomicDeadline::new(Instant::now()).get().is_none());
+    }
+
+    #[test]
+    fn atomic_deadline_overwrite_with_shorter_deadline() {
+        let epoch = Instant::now();
+        let ad = AtomicDeadline::new(epoch);
+        ad.set(epoch + Duration::from_secs(10));
+        ad.set(epoch + Duration::from_secs(1));
+        assert_eq!(ad.get(), Some(epoch + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn atomic_deadline_nanosecond_precision_preserved() {
+        let epoch = Instant::now();
+        let ad = AtomicDeadline::new(epoch);
+        let d = epoch + Duration::from_nanos(123_456);
+        ad.set(d);
+        assert_eq!(ad.get(), Some(d));
+    }
 }

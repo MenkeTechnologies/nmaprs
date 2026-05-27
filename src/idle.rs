@@ -589,6 +589,35 @@ mod packet_build_tests {
             Ipv4Packet::new(&b).unwrap().get_identification()
         );
     }
+
+    #[test]
+    fn build_ipv4_tcp_syn_data_offset_five() {
+        let mut rng = StdRng::seed_from_u64(44);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::LOCALHOST,
+            1,
+            2,
+            3,
+            &mut rng,
+        );
+        let tcp = TcpPacket::new(&pkt[20..]).unwrap();
+        assert_eq!(tcp.get_data_offset(), 5);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_urgent_pointer_zero() {
+        let mut rng = StdRng::seed_from_u64(45);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::LOCALHOST,
+            1,
+            2,
+            3,
+            &mut rng,
+        );
+        assert_eq!(TcpPacket::new(&pkt[20..]).unwrap().get_urgent_ptr(), 0);
+    }
 }
 
 #[cfg(test)]
@@ -616,5 +645,13 @@ mod tcp_flags_extra_tests {
     #[test]
     fn tcp_flags_rst_false_for_empty_slice() {
         assert!(!tcp_flags_rst(&[]));
+    }
+
+    #[test]
+    fn tcp_flags_rst_false_for_fin_psh_urg() {
+        let mut b = vec![0u8; MutableTcpPacket::minimum_packet_size()];
+        let mut t = MutableTcpPacket::new(&mut b).expect("tcp");
+        t.set_flags(TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG);
+        assert!(!tcp_flags_rst(&b));
     }
 }

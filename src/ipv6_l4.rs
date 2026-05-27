@@ -335,4 +335,81 @@ mod tests {
     fn icmpv6_slice_empty_buffer_none() {
         assert!(icmpv6_slice_after_ipv6(&[]).is_none());
     }
+
+    #[test]
+    fn rejects_ipv4_version_nibble_six() {
+        let mut buf = v6_frame(IpNextHeaderProtocols::Tcp.0, 4);
+        buf[0] = 0x46;
+        assert!(ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).is_none());
+    }
+
+    #[test]
+    fn payload_length_zero_direct_tcp_empty_slice() {
+        let buf = v6_frame(IpNextHeaderProtocols::Tcp.0, 0);
+        assert_eq!(
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).unwrap(),
+            &[] as &[u8]
+        );
+    }
+
+    #[test]
+    fn destination_options_then_udp() {
+        let udp = [0xCC; 8];
+        let buf = v6_with_ext(60, 0, IpNextHeaderProtocols::Udp.0, &udp);
+        assert_eq!(
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Udp.0).unwrap(),
+            &udp
+        );
+    }
+
+    #[test]
+    fn routing_header_then_tcp() {
+        let tcp = [0xDD; 12];
+        let buf = v6_with_ext(43, 0, IpNextHeaderProtocols::Tcp.0, &tcp);
+        assert_eq!(
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).unwrap(),
+            &tcp
+        );
+    }
+
+    #[test]
+    fn icmpv6_helper_matches_direct_icmpv6_slice() {
+        let tail = [0x01, 0x03, 0x00, 0x00];
+        let mut buf = v6_frame(IpNextHeaderProtocols::Icmpv6.0, tail.len() as u16);
+        buf[40..].copy_from_slice(&tail);
+        assert_eq!(
+            icmpv6_slice_after_ipv6(&buf).unwrap(),
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Icmpv6.0).unwrap()
+        );
+    }
+
+    #[test]
+    fn hop_by_hop_chained_to_destination_options_then_tcp() {
+        let tcp = [0x11; 4];
+        let mut buf = vec![0u8; 40 + 8 + 8 + tcp.len()];
+        buf[0] = 0x60;
+        let payload_len = 8 + 8 + tcp.len();
+        buf[4] = (payload_len >> 8) as u8;
+        buf[5] = payload_len as u8;
+        buf[6] = 0;
+        buf[7] = 64;
+        buf[40] = 60;
+        buf[41] = 0;
+        buf[48] = IpNextHeaderProtocols::Tcp.0;
+        buf[49] = 0;
+        buf[56..].copy_from_slice(&tcp);
+        assert_eq!(
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).unwrap(),
+            &tcp
+        );
+    }
+
+    #[test]
+    fn buffer_exactly_40_bytes_no_payload_none_for_tcp() {
+        let buf = v6_frame(IpNextHeaderProtocols::Tcp.0, 0);
+        assert_eq!(
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).unwrap().len(),
+            0
+        );
+    }
 }

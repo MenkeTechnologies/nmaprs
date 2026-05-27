@@ -741,4 +741,64 @@ mod tests {
             "icmp-port-unreachable",
         );
     }
+
+    #[test]
+    fn days_to_ymd_month_index_zero_based_january() {
+        let (_, m, d) = days_to_ymd(0);
+        assert_eq!((m, d), (0, 1));
+    }
+
+    #[test]
+    fn chrono_timestamp_human_has_year_component() {
+        let (_, human) = chrono_timestamp();
+        assert!(human.len() >= 8);
+    }
+
+    #[test]
+    fn port_line_text_ip_proto_closed_reason() {
+        assert_reason_line(
+            PortReason::IcmpProtoUnreachable,
+            "ip",
+            "closed",
+            "icmp-proto-unreachable",
+        );
+    }
+
+    #[test]
+    fn split_version_info_tab_not_split() {
+        assert_eq!(split_version_info("product\tversion"), ("product\tversion", ""));
+    }
+
+    #[test]
+    fn xml_escape_newline_unchanged() {
+        assert_eq!(xml_escape("a\nb"), "a\nb");
+    }
+
+    #[test]
+    fn port_line_text_high_port_number() {
+        let line = PortLine {
+            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: 65535,
+            proto: "tcp",
+            state: "open",
+            reason: PortReason::SynAck,
+            latency_ms: None,
+            version_info: None,
+        };
+        assert_eq!(port_line_text(&line, false), "65535/tcp\topen");
+    }
+
+    #[test]
+    fn port_line_text_latency_not_in_text_output() {
+        let line = PortLine {
+            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: 22,
+            proto: "tcp",
+            state: "open",
+            reason: PortReason::SynAck,
+            latency_ms: Some(99),
+            version_info: None,
+        };
+        assert!(!port_line_text(&line, false).contains("99"));
+    }
 }

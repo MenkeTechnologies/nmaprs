@@ -726,4 +726,124 @@ mod tests {
             vec!["nmaprs", "--scan-type", "W"]
         );
     }
+
+    #[test]
+    fn expands_idle_scan_si_with_zombie() {
+        assert_eq!(
+            expand_nmap_style_argv(vec![
+                "nmaprs".into(),
+                "-sI".into(),
+                "10.0.0.1".into()
+            ]),
+            vec!["nmaprs", "--sI", "10.0.0.1"]
+        );
+    }
+
+    #[test]
+    fn expands_ftp_bounce_short_b() {
+        assert_eq!(
+            expand_nmap_style_argv(vec![
+                "nmaprs".into(),
+                "-b".into(),
+                "user@127.0.0.1".into()
+            ]),
+            vec!["nmaprs", "-b", "user@127.0.0.1"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_syn_with_port_list() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PS22,80".into()]),
+            vec!["nmaprs", "--ping-S", "22,80"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_timestamp_pp() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PP".into()]),
+            vec!["nmaprs", "--ping-P"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_mask_pm() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PM".into()]),
+            vec!["nmaprs", "--ping-M"]
+        );
+    }
+
+    #[test]
+    fn expands_list_scan_sl() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sL".into()]),
+            vec!["nmaprs", "--sL"]
+        );
+    }
+
+    #[test]
+    fn expands_sctp_init_sy() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sY".into()]),
+            vec!["nmaprs", "--scan-type", "Y"]
+        );
+    }
+
+    #[test]
+    fn expands_sctp_cookie_sz() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sZ".into()]),
+            vec!["nmaprs", "--scan-type", "Z"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_ack_pa_with_ports() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PA443".into()]),
+            vec!["nmaprs", "--ping-A", "443"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_udp_pu() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PU".into()]),
+            vec!["nmaprs", "--ping-U"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_echo_pe() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PE".into()]),
+            vec!["nmaprs", "--ping-E"]
+        );
+    }
+
+    #[test]
+    fn expands_fast_scan_f() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-F".into()]),
+            vec!["nmaprs", "-F"]
+        );
+    }
+
+    #[test]
+    fn expands_no_dns_n() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-n".into()]),
+            vec!["nmaprs", "-n"]
+        );
+    }
+
+    #[test]
+    fn expands_resolve_r() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-R".into()]),
+            vec!["nmaprs", "-R"]
+        );
+    }
 }

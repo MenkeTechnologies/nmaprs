@@ -995,6 +995,67 @@ mod port_line_tests {
         );
         assert!(p.latency_ms.is_none());
     }
+
+    #[test]
+    fn new_udp_proto_preserved() {
+        let p = PortLine::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            53,
+            "udp",
+            "open",
+            PortReason::UdpResponse,
+            Some(2),
+        );
+        assert_eq!(p.proto, "udp");
+    }
+
+    #[test]
+    fn new_sctp_proto_preserved() {
+        let p = PortLine::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            3868,
+            "sctp",
+            "open",
+            PortReason::SctpInitAck,
+            None,
+        );
+        assert_eq!(p.proto, "sctp");
+    }
+
+    #[test]
+    fn new_ip_proto_state_preserved() {
+        let p = PortLine::new(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            6,
+            "ip",
+            "closed",
+            PortReason::IcmpProtoUnreachable,
+            None,
+        );
+        assert_eq!(p.proto, "ip");
+        assert_eq!(p.state, "closed");
+    }
+
+    #[test]
+    fn new_preserves_host_and_port() {
+        let host = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let p = PortLine::new(host, 8080, "tcp", "open", PortReason::SynAck, Some(5));
+        assert_eq!(p.host, host);
+        assert_eq!(p.port, 8080);
+    }
+
+    #[test]
+    fn new_filtered_state_with_timeout_reason() {
+        let p = PortLine::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            1,
+            "tcp",
+            "filtered",
+            PortReason::Timeout,
+            None,
+        );
+        assert_eq!(p.reason, PortReason::Timeout);
+    }
 }
 
 #[cfg(test)]
@@ -1081,5 +1142,15 @@ mod host_deadline_extra_tests {
         // Sleep enough for the start instant to be measurably in the past.
         std::thread::sleep(Duration::from_millis(2));
         assert!(host_over_deadline(&m, h, Duration::ZERO));
+    }
+
+    #[test]
+    fn host_deadline_ipv6_tracked_separately() {
+        let m = DashMap::new();
+        let v4 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let v6: IpAddr = "::1".parse().unwrap();
+        assert!(!host_over_deadline(&m, v4, Duration::from_secs(30)));
+        assert!(!host_over_deadline(&m, v6, Duration::from_secs(30)));
+        assert_eq!(m.len(), 2);
     }
 }

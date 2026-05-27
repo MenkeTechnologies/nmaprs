@@ -273,4 +273,84 @@ mod tests {
         assert_eq!(am.len(), 12);
         assert_ne!(ts.len(), am.len());
     }
+
+    #[test]
+    fn address_mask_request_id_seq_in_payload() {
+        let buf = build_icmp_address_mask_request(0xabcd, 0x0102);
+        let p = IcmpPacket::new(&buf).unwrap();
+        let pl = p.payload();
+        assert_eq!(u16::from_be_bytes([pl[0], pl[1]]), 0xabcd);
+        assert_eq!(u16::from_be_bytes([pl[2], pl[3]]), 0x0102);
+    }
+
+    #[test]
+    fn icmp_id_seq_from_payload_parses_four_bytes() {
+        let buf = build_icmp_timestamp_request(0x1111, 0x2222);
+        let p = IcmpPacket::new(&buf).unwrap();
+        assert_eq!(
+            icmp_id_seq_from_payload(p.payload()),
+            Some((0x1111, 0x2222))
+        );
+    }
+
+    #[test]
+    fn icmp_id_seq_from_payload_rejects_three_bytes() {
+        assert!(icmp_id_seq_from_payload(&[1, 2, 3]).is_none());
+    }
+
+    #[test]
+    fn address_mask_and_timestamp_share_id_seq_layout() {
+        let ts = build_icmp_timestamp_request(0xaaaa, 0xbbbb);
+        let am = build_icmp_address_mask_request(0xaaaa, 0xbbbb);
+        let ts_pkt = IcmpPacket::new(&ts).unwrap();
+        let am_pkt = IcmpPacket::new(&am).unwrap();
+        let ts_pl = ts_pkt.payload();
+        let am_pl = am_pkt.payload();
+        assert_eq!(&ts_pl[0..4], &am_pl[0..4]);
+    }
+
+    #[test]
+    fn timestamp_request_type_thirteen() {
+        let buf = build_icmp_timestamp_request(1, 1);
+        assert_eq!(IcmpPacket::new(&buf).unwrap().get_icmp_type(), IcmpTypes::Timestamp);
+    }
+
+    #[test]
+    fn address_mask_request_type_seventeen() {
+        let buf = build_icmp_address_mask_request(1, 1);
+        assert_eq!(
+            IcmpPacket::new(&buf).unwrap().get_icmp_type(),
+            IcmpTypes::AddressMaskRequest
+        );
+    }
+
+    #[test]
+    fn icmp_id_seq_from_payload_max_values() {
+        let buf = build_icmp_timestamp_request(0xffff, 0xffff);
+        let pkt = IcmpPacket::new(&buf).unwrap();
+        let pl = pkt.payload();
+        assert_eq!(icmp_id_seq_from_payload(pl), Some((0xffff, 0xffff)));
+    }
+
+    #[test]
+    fn timestamp_request_payload_sixteen_bytes() {
+        assert_eq!(
+            IcmpPacket::new(&build_icmp_timestamp_request(0, 0))
+                .unwrap()
+                .payload()
+                .len(),
+            16
+        );
+    }
+
+    #[test]
+    fn address_mask_payload_eight_bytes() {
+        assert_eq!(
+            IcmpPacket::new(&build_icmp_address_mask_request(0, 0))
+                .unwrap()
+                .payload()
+                .len(),
+            8
+        );
+    }
 }

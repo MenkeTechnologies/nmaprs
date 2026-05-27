@@ -187,4 +187,57 @@ mod tests {
     fn parses_mixed_case_fin_ack() {
         assert_eq!(parse_scanflags("Fin,ack").unwrap(), TcpFlags::FIN | TcpFlags::ACK);
     }
+
+    #[test]
+    fn parses_finack_glued() {
+        assert_eq!(
+            parse_scanflags("FINACK").unwrap(),
+            TcpFlags::FIN | TcpFlags::ACK
+        );
+    }
+
+    #[test]
+    fn parses_pshurgrst_glued() {
+        assert_eq!(
+            parse_scanflags("PSHURGRST").unwrap(),
+            TcpFlags::PSH | TcpFlags::URG | TcpFlags::RST
+        );
+    }
+
+    #[test]
+    fn parses_pipe_separated_syn_fin() {
+        assert_eq!(
+            parse_scanflags("SYN|FIN").unwrap(),
+            TcpFlags::SYN | TcpFlags::FIN
+        );
+    }
+
+    #[test]
+    fn parses_ack_rst_combo() {
+        assert_eq!(
+            parse_scanflags("ACK RST").unwrap(),
+            TcpFlags::ACK | TcpFlags::RST
+        );
+    }
+
+    #[test]
+    fn parses_tab_separated_flags() {
+        assert_eq!(
+            parse_scanflags("SYN\tACK").unwrap(),
+            TcpFlags::SYN | TcpFlags::ACK
+        );
+    }
+
+    #[test]
+    fn null_keyword_errors() {
+        assert!(parse_scanflags("NULL").is_err());
+    }
+
+    #[test]
+    fn xmas_style_fin_psh_urg() {
+        assert_eq!(
+            parse_scanflags("FIN,PSH,URG").unwrap(),
+            TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG
+        );
+    }
 }

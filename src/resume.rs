@@ -211,4 +211,51 @@ mod tests {
         assert!(st.is_done(ip, 22));
         assert!(st.is_done(ip, 80));
     }
+
+    #[test]
+    fn merge_from_scan_empty_input_no_op() {
+        let mut st = ResumeState::default();
+        st.merge_from_scan(&[]);
+        assert!(st.completed.is_empty());
+    }
+
+    #[test]
+    fn load_roundtrip_multiple_hosts() {
+        let st = ResumeState {
+            completed: vec![
+                ("10.0.0.1".to_string(), 22),
+                ("10.0.0.2".to_string(), 80),
+            ],
+        };
+        let f = NamedTempFile::new().unwrap();
+        st.save(f.path()).unwrap();
+        let loaded = ResumeState::load(f.path()).unwrap();
+        assert_eq!(loaded.completed.len(), 2);
+    }
+
+    #[test]
+    fn is_done_port_zero() {
+        let mut st = ResumeState::default();
+        st.completed.push(("127.0.0.1".to_string(), 0));
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        assert!(st.is_done(ip, 0));
+    }
+
+    #[test]
+    fn merge_from_scan_sorts_lexicographically() {
+        let mut st = ResumeState::default();
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        st.merge_from_scan(&[(ip, 443), (ip, 22)]);
+        st.completed.sort();
+        assert_eq!(st.completed[0].1, 22);
+        assert_eq!(st.completed[1].1, 443);
+    }
+
+    #[test]
+    fn done_set_dedupes_duplicate_entries() {
+        let st = ResumeState {
+            completed: vec![("1.1.1.1".into(), 53), ("1.1.1.1".into(), 53)],
+        };
+        assert_eq!(st.done_set().len(), 1);
+    }
 }

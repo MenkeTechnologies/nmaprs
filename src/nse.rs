@@ -204,4 +204,86 @@ mod tests {
             .await
             .expect("run");
     }
+
+    #[tokio::test]
+    async fn run_scripts_duplicate_banner_token_runs_twice() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "banner,banner",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_default_plus_unknown_name_still_ok() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script-default",
+            "--script",
+            "no-such-script",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_whitespace_only_script_name_is_noop() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "   ",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_banner_alias_on_unreachable_port() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "banner",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        let host: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        run_scripts(&args, &[(host, 65518)], Some(Duration::from_millis(20)))
+            .await
+            .expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_three_unknown_names() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "a,b,c",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
 }

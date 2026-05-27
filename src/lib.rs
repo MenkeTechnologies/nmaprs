@@ -1251,6 +1251,35 @@ mod syn_work_tests {
         assert!(v4.is_empty());
         assert_eq!(v6.len(), 1);
     }
+
+    #[test]
+    fn split_syn_work_preserves_port_order_for_ipv4() {
+        let work = vec![
+            (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 22),
+            (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 80),
+            (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 443),
+        ];
+        let (v4, v6) = split_syn_work(&work);
+        assert_eq!(v4.len(), 3);
+        assert_eq!(v4[0].1, 22);
+        assert_eq!(v4[1].1, 80);
+        assert_eq!(v4[2].1, 443);
+        assert!(v6.is_empty());
+    }
+
+    #[test]
+    fn split_syn_work_interleaved_v4_v6_keeps_v4_order() {
+        let work = vec![
+            (IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 80),
+            (IpAddr::V6(Ipv6Addr::LOCALHOST), 443),
+            (IpAddr::V4(Ipv4Addr::new(2, 2, 2, 2)), 22),
+        ];
+        let (v4, v6) = split_syn_work(&work);
+        assert_eq!(v4.len(), 2);
+        assert_eq!(v6.len(), 1);
+        assert_eq!(v4[0].1, 80);
+        assert_eq!(v4[1].1, 22);
+    }
 }
 
 #[cfg(test)]
@@ -1475,5 +1504,14 @@ mod host_batch_tests {
         assert!(!b.is_empty());
         let flat: Vec<_> = b.iter().flatten().copied().collect();
         assert_eq!(flat, hosts);
+    }
+
+    #[test]
+    fn batch_hosts_min_less_than_len_yields_single_batch() {
+        let hosts: Vec<_> = (1..=2).map(ipv4).collect();
+        let mut rng = StdRng::seed_from_u64(3);
+        let b = batch_hosts_slice_with_rng(&hosts, 2, 10, &mut rng);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0], hosts);
     }
 }

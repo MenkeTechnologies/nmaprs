@@ -1068,4 +1068,70 @@ mod pure_compute_tests {
         let embedded = embedded_ipv4_from_dest_unreach(&icmp).expect("embedded");
         assert_eq!(embedded.get_header_length(), 5);
     }
+
+    #[test]
+    fn icmp_from_buffer_single_byte_returns_none() {
+        assert!(icmp_packet_from_recv_buffer(&[0]).is_none());
+    }
+
+    #[test]
+    fn icmp_from_buffer_ipv4_only_no_trailing_icmp_falls_back() {
+        let mut buf = vec![0u8; 20];
+        {
+            let mut ip = MutableIpv4Packet::new(&mut buf).unwrap();
+            ip.set_version(4);
+            ip.set_header_length(5);
+            ip.set_total_length(20);
+        }
+        // No bytes after the IPv4 header; helper falls through to IcmpPacket::new on full buffer.
+        let pkt = icmp_packet_from_recv_buffer(&buf);
+        assert!(pkt.is_some());
+        assert_ne!(pkt.unwrap().get_icmp_type(), IcmpTypes::EchoReply);
+    }
+
+    #[test]
+    fn embedded_ipv4_rejected_for_port_unreachable_code() {
+        let buf = build_dest_unreach_with_embedded_ipv4(IcmpTypes::DestinationUnreachable, 3, true);
+        let icmp = IcmpPacket::new(&buf).unwrap();
+        assert!(embedded_ipv4_from_dest_unreach(&icmp).is_none());
+    }
+
+    #[test]
+    fn atomic_proto_zero_length_constructs() {
+        let _r = AtomicProtoResults::new(0);
+    }
+
+    #[test]
+    fn embedded_ipv4_rejected_for_network_unreachable_code() {
+        let buf = build_dest_unreach_with_embedded_ipv4(IcmpTypes::DestinationUnreachable, 0, true);
+        let icmp = IcmpPacket::new(&buf).unwrap();
+        assert!(embedded_ipv4_from_dest_unreach(&icmp).is_none());
+    }
+
+    #[test]
+    fn embedded_ipv4_rejected_for_host_unreachable_code() {
+        let buf = build_dest_unreach_with_embedded_ipv4(IcmpTypes::DestinationUnreachable, 1, true);
+        let icmp = IcmpPacket::new(&buf).unwrap();
+        assert!(embedded_ipv4_from_dest_unreach(&icmp).is_none());
+    }
+
+    #[test]
+    fn proto_outcome_closed_and_host_timeout_distinct_codes() {
+        assert_ne!(
+            ProtoOutcome::Closed.to_u8(),
+            ProtoOutcome::HostTimeout.to_u8()
+        );
+    }
+
+    #[test]
+    fn atomic_proto_resolved_after_set() {
+        let r = AtomicProtoResults::new(1);
+        r.set(0, ProtoOutcome::Closed);
+        assert!(r.is_resolved(0));
+    }
+
+    #[test]
+    fn icmp_from_buffer_two_bytes_returns_none() {
+        assert!(icmp_packet_from_recv_buffer(&[0, 0]).is_none());
+    }
 }

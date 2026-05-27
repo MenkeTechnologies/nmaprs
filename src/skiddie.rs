@@ -126,4 +126,69 @@ mod tests {
     fn skid_backslash_unchanged() {
         assert_eq!(skid_line(r"\\").len(), 2);
     }
+
+    #[test]
+    fn skid_colon_in_address_unchanged() {
+        let input = "127.0.0.1:443";
+        assert_eq!(skid_line(input).matches(':').count(), 1);
+    }
+
+    #[test]
+    fn skid_slash_in_port_proto_unchanged() {
+        let input = "22/tcp";
+        assert_eq!(skid_line(input).matches('/').count(), 1);
+    }
+
+    #[test]
+    fn skid_parentheses_preserved() {
+        let input = "(open)";
+        assert_eq!(skid_line(input).matches('(').count(), 1);
+    }
+
+    #[test]
+    fn skid_word_scan_report_length_stable() {
+        let input = "Nmap scan report for host";
+        assert_eq!(skid_line(input).len(), input.len());
+    }
+
+    #[test]
+    fn skid_preserves_carriage_return() {
+        let input = "line\r\n";
+        assert_eq!(skid_line(input).matches('\r').count(), 1);
+    }
+
+    #[test]
+    fn skid_percent_sign_unchanged() {
+        let input = "100% done";
+        assert_eq!(skid_line(input).matches('%').count(), 1);
+    }
+
+    #[test]
+    fn skid_brackets_unchanged() {
+        let input = "[open]";
+        assert_eq!(skid_line(input).matches('[').count(), 1);
+    }
+
+    #[test]
+    fn skid_single_char_ascii() {
+        assert_eq!(skid_line("A").len(), 1);
+    }
+
+    #[test]
+    fn skid_all_digits_string() {
+        let input = "1234567890";
+        assert_eq!(skid_line(input).len(), input.len());
+    }
+
+    #[test]
+    fn skid_mixed_case_word_length_stable() {
+        let input = "OpenSSH";
+        assert_eq!(skid_line(input).len(), input.len());
+    }
+
+    #[test]
+    fn skid_pipe_character_unchanged() {
+        let input = "a|b";
+        assert_eq!(skid_line(input).matches('|').count(), 1);
+    }
 }

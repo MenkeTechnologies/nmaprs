@@ -427,4 +427,52 @@ mod tests {
     fn default_tcp_ports_len_exceeds_top_ports_table() {
         assert!(default_tcp_ports().len() >= top_ports_len());
     }
+
+    #[test]
+    fn top_ports_one_returns_single_port() {
+        assert_eq!(top_ports(1).len(), 1);
+    }
+
+    #[test]
+    fn default_tcp_ports_first_matches_top_one() {
+        assert_eq!(default_tcp_ports()[0], top_ports(1)[0]);
+    }
+
+    #[test]
+    fn fast_ip_protocols_are_strictly_increasing() {
+        let protos = fast_ip_protocols_nmap();
+        for w in protos.windows(2) {
+            assert!(w[0] < w[1]);
+        }
+    }
+
+    #[test]
+    fn parse_exclude_ports_range() {
+        let ex = parse_exclude_ports("1000-1002").unwrap();
+        assert!(ex.contains(&1000));
+        assert!(ex.contains(&1001));
+        assert!(ex.contains(&1002));
+    }
+
+    #[test]
+    fn top_ports_two_returns_two_distinct() {
+        let t = top_ports(2);
+        assert_eq!(t.len(), 2);
+        assert_ne!(t[0], t[1]);
+    }
+
+    #[test]
+    fn default_tcp_ports_contains_port_22() {
+        assert!(default_tcp_ports().contains(&22));
+    }
+
+    #[test]
+    fn parse_port_spec_mixed_t_and_plain_ports() {
+        assert_eq!(parse_port_spec("T:22,443,8080").unwrap(), vec![22, 443, 8080]);
+    }
+
+    #[test]
+    fn parse_port_spec_dash_is_all_ports() {
+        assert_eq!(parse_port_spec("-").unwrap().len(), 65536);
+    }
 }

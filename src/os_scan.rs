@@ -1788,4 +1788,73 @@ mod tests {
         let t1 = t0 + Duration::from_secs(2);
         assert_eq!(classify_ts(&[0, 0], &[t0, t1]), "0");
     }
+
+    #[test]
+    fn classify_ts_slow_increment_returns_one_bucket() {
+        let t0 = Instant::now();
+        let t1 = t0 + Duration::from_secs(1);
+        assert_eq!(classify_ts(&[1000, 1004], &[t0, t1]), "1");
+    }
+
+    #[test]
+    fn ttl_guess_exactly_thirty_two() {
+        assert_eq!(ttl_guess(32), 32);
+    }
+
+    #[test]
+    fn internet_checksum_all_ones_word_folds_to_zero() {
+        let data = [0xff, 0xff];
+        assert_eq!(internet_checksum(&data), 0);
+    }
+
+    #[test]
+    fn internet_checksum_empty_is_ffff() {
+        assert_eq!(internet_checksum(&[]), !0u16);
+    }
+
+    #[test]
+    fn internet_checksum_odd_length_last_byte() {
+        let data = [0x00, 0x01, 0x02];
+        let cs = internet_checksum(&data);
+        assert_ne!(cs, 0);
+    }
+
+    #[test]
+    fn next_ipid_sequential_three_values() {
+        let mut c = 100u16;
+        assert_eq!(next_ipid(&mut c), 100);
+        assert_eq!(next_ipid(&mut c), 101);
+        assert_eq!(next_ipid(&mut c), 102);
+    }
+
+    #[test]
+    fn flags_str_syn_ack_combo() {
+        assert_eq!(flags_str(TcpFlags::SYN | TcpFlags::ACK), "AS");
+    }
+
+    #[test]
+    fn ttl_guess_one_returns_thirty_two() {
+        assert_eq!(ttl_guess(1), 32);
+    }
+
+    #[test]
+    fn ttl_guess_two_fifty_five_returns_two_fifty_five() {
+        assert_eq!(ttl_guess(255), 255);
+    }
+
+    #[test]
+    fn gcd_two_equal_nonzero() {
+        assert_eq!(gcd_two(13, 13), 13);
+    }
+
+    #[test]
+    fn mod_diff_u32_wraparound() {
+        assert_eq!(mod_diff_u32(0, u32::MAX), 1);
+    }
+
+    #[test]
+    fn classify_ipid_single_increment_is_i_or_bi() {
+        let label = classify_ipid(&[500, 501, 502, 503, 504]);
+        assert!(label == "I" || label == "BI", "unexpected {label}");
+    }
 }

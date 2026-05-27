@@ -1286,4 +1286,142 @@ Probe UDP U q|u|
         let caps = re.captures(b"x").unwrap();
         assert_eq!(apply_template("$9", &caps), "");
     }
+
+    #[test]
+    fn parse_match_line_pipe_delimited_regex() {
+        let m = parse_match_line("match ssh m|^SSH-| p/OpenSSH/").unwrap().unwrap();
+        assert_eq!(m.service_name, "ssh");
+    }
+
+    #[test]
+    fn parse_match_line_escaped_delimiter_in_pattern() {
+        let m = parse_match_line(r"match x m|^foo\|bar| p/X/").unwrap().unwrap();
+        assert_eq!(m.service_name, "x");
+    }
+
+    #[test]
+    fn apply_template_multi_digit_group_index() {
+        let re = Regex::new(r"^(.)(.)(.)").unwrap();
+        let caps = re.captures(b"abc").unwrap();
+        assert_eq!(apply_template("$1$2$3", &caps), "abc");
+    }
+
+    #[test]
+    fn apply_template_group_ten_when_present() {
+        let re = Regex::new(r"^(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)").unwrap();
+        let caps = re.captures(b"abcdefghij").unwrap();
+        assert_eq!(apply_template("$10", &caps), "j");
+    }
+
+    #[test]
+    fn parse_probe_tcp_line_decodes_payload() {
+        let (name, payload) = super::parse_probe_tcp_line("NULL q|GET / HTTP/1.0\\r\\n\\r\\n|").unwrap();
+        assert_eq!(name, "NULL");
+        assert!(payload.starts_with(b"GET"));
+    }
+
+    #[test]
+    fn parse_probe_udp_line_decodes_payload() {
+        let (name, payload) = super::parse_probe_udp_line("DNS q|\\0\\x00\\x01|").unwrap();
+        assert_eq!(name, "DNS");
+        assert!(!payload.is_empty());
+    }
+
+    #[test]
+    fn parse_probes_tcp_ports_line_restricts_probe() {
+        let fixture = "Probe TCP T q||\nports 22,80\n";
+        let sp = parse_probes(fixture).unwrap();
+        assert!(probe_ports_ok(22, &sp.tcp[0].ports));
+        assert!(!probe_ports_ok(8080, &sp.tcp[0].ports));
+    }
+
+    #[test]
+    fn parse_probes_skips_exclude_directive_line() {
+        let fixture = "Exclude T\nProbe TCP T q||\n";
+        let sp = parse_probes(fixture).unwrap();
+        assert_eq!(sp.tcp.len(), 1);
+        assert_eq!(sp.tcp[0].name, "T");
+    }
+
+    #[test]
+    fn split_first_token_via_match_line_service_name() {
+        let m = parse_match_line("match my-service m|^x| p/X/").unwrap().unwrap();
+        assert_eq!(m.service_name, "my-service");
+    }
+
+    #[test]
+    fn find_slash_field_info_template() {
+        let tail = " p/Apache/ i/(Ubuntu)/ v/2.4/";
+        assert_eq!(super::find_slash_field(tail, "i/"), Some("(Ubuntu)".into()));
+    }
+
+    #[test]
+    fn format_match_includes_cpe_when_present() {
+        let re = Regex::new(r"^HTTP").unwrap();
+        let caps = re.captures(b"HTTP/1.1").unwrap();
+        let m = ServiceMatch {
+            service_name: "http".into(),
+            regex: re,
+            product_tpl: Some("Apache".into()),
+            version_tpl: None,
+            info_tpl: None,
+            os_tpl: None,
+            device_tpl: None,
+            cpe_tpl: vec!["cpe:/a:apache:http_server".into()],
+            soft: false,
+        };
+        let s = format_match(&m, &caps);
+        assert!(s.contains("cpe:/a:apache:http_server"));
+    }
+
+    #[test]
+    fn split_first_token_single_word() {
+        let (a, b) = super::split_first_token("hello");
+        assert_eq!(a, "hello");
+        assert_eq!(b, "");
+    }
+
+    #[test]
+    fn split_first_token_two_words() {
+        let (a, b) = super::split_first_token("ssh m|^x|");
+        assert_eq!(a, "ssh");
+        assert_eq!(b, " m|^x|");
+    }
+
+    #[test]
+    fn extract_m_delimited_simple_pattern() {
+        let (pat, tail) = super::extract_m_delimited("m|^SSH-| p/OpenSSH/").unwrap();
+        assert_eq!(pat, "^SSH-");
+        assert!(tail.contains("p/"));
+    }
+
+    #[test]
+    fn extract_p_v_templates_product_only() {
+        let (p, v, _, _, _, _) = super::extract_p_v_templates(" p/Apache/ ");
+        assert_eq!(p.as_deref(), Some("Apache"));
+        assert!(v.is_none());
+    }
+
+    #[test]
+    fn find_slash_field_missing_returns_none() {
+        assert!(super::find_slash_field(" p/x/ ", "z/").is_none());
+    }
+
+    #[test]
+    fn decode_nmap_escape_backslash_at_end_dropped() {
+        assert_eq!(decode_nmap_escape_bytes(r"test\"), b"test");
+    }
+
+    #[test]
+    fn parse_probes_udp_only_fixture() {
+        let fixture = "Probe UDP X q||\n";
+        let sp = parse_probes(fixture).unwrap();
+        assert_eq!(sp.tcp.len(), 0);
+        assert_eq!(sp.udp.len(), 1);
+    }
+
+    #[test]
+    fn parse_match_line_no_m_field_returns_none() {
+        assert!(parse_match_line("match ssh p/OpenSSH/").unwrap().is_none());
+    }
 }

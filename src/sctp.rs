@@ -1089,4 +1089,92 @@ mod tests {
         p[12] = 42;
         assert_eq!(sctp_first_chunk_type(&p), Some(42));
     }
+
+    #[test]
+    fn build_init_chunk_type_is_one() {
+        let mut rng = StdRng::seed_from_u64(5);
+        let pkt = build_sctp_segment(SctpProbeKind::Init, 1, 2, &mut rng);
+        assert_eq!(sctp_first_chunk_type(&pkt), Some(CHUNK_INIT));
+    }
+
+    #[test]
+    fn build_cookie_echo_chunk_type_is_ten() {
+        let mut rng = StdRng::seed_from_u64(6);
+        let pkt = build_sctp_segment(SctpProbeKind::CookieEcho, 1, 2, &mut rng);
+        assert_eq!(sctp_first_chunk_type(&pkt), Some(CHUNK_COOKIE_ECHO));
+    }
+
+    #[test]
+    fn crc32c_fn_two_byte_input_stable() {
+        let a = crc32c_fn(&[0x01, 0x02]);
+        assert_eq!(a, crc32c_fn(&[0x01, 0x02]));
+    }
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::{AtomicSctpResults, SctpOutcome};
+
+    #[test]
+    fn sctp_outcome_roundtrip_all_variants() {
+        for v in 1..=3u8 {
+            let o = SctpOutcome::from_u8(v).expect("known");
+            assert_eq!(o.to_u8(), v);
+        }
+    }
+
+    #[test]
+    fn sctp_outcome_zero_is_pending() {
+        assert!(SctpOutcome::from_u8(0).is_none());
+    }
+
+    #[test]
+    fn sctp_outcome_unknown_codes_none() {
+        assert!(SctpOutcome::from_u8(4).is_none());
+        assert!(SctpOutcome::from_u8(255).is_none());
+    }
+
+    #[test]
+    fn atomic_sctp_starts_unresolved() {
+        let r = AtomicSctpResults::new(3);
+        for i in 0..3 {
+            assert!(!r.is_resolved(i));
+            assert!(r.get(i).is_none());
+        }
+    }
+
+    #[test]
+    fn atomic_sctp_set_get_roundtrip() {
+        let r = AtomicSctpResults::new(3);
+        r.set(0, SctpOutcome::Open);
+        r.set(1, SctpOutcome::Closed);
+        r.set(2, SctpOutcome::HostTimeout);
+        assert!(matches!(r.get(0), Some(SctpOutcome::Open)));
+        assert!(matches!(r.get(1), Some(SctpOutcome::Closed)));
+        assert!(matches!(r.get(2), Some(SctpOutcome::HostTimeout)));
+    }
+
+    #[test]
+    fn atomic_sctp_last_write_wins() {
+        let r = AtomicSctpResults::new(1);
+        r.set(0, SctpOutcome::Open);
+        r.set(0, SctpOutcome::Closed);
+        assert!(matches!(r.get(0), Some(SctpOutcome::Closed)));
+    }
+
+    #[test]
+    fn atomic_sctp_unresolved_index_returns_none() {
+        let r = AtomicSctpResults::new(2);
+        assert!(r.get(1).is_none());
+    }
+
+    #[test]
+    fn sctp_outcome_open_and_closed_distinct() {
+        assert_ne!(SctpOutcome::Open.to_u8(), SctpOutcome::Closed.to_u8());
+    }
+
+    #[test]
+    fn atomic_sctp_zero_length_constructs() {
+        let _r = AtomicSctpResults::new(0);
+    }
 }

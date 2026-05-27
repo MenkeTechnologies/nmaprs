@@ -381,4 +381,94 @@ mod tests {
         };
         assert_eq!(db.examples_for_ttl(Some(50), 1), vec!["Solaris 11"]);
     }
+
+    #[test]
+    fn parse_class_family_missing_pipe_is_none() {
+        assert!(parse_class_family("Class only one field").is_none());
+    }
+
+    #[test]
+    fn examples_for_ttl_respects_max_examples_cap() {
+        let db = OsDb {
+            entries: vec![
+                OsEntry {
+                    name: "Linux A".into(),
+                    family: "Linux".into(),
+                },
+                OsEntry {
+                    name: "Linux B".into(),
+                    family: "Linux".into(),
+                },
+            ],
+        };
+        assert_eq!(db.examples_for_ttl(Some(64), 1).len(), 1);
+    }
+
+    #[test]
+    fn examples_for_ttl_unknown_bucket_empty() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Linux".into(),
+                family: "Linux".into(),
+            }],
+        };
+        assert!(db.examples_for_ttl(None, 5).is_empty());
+    }
+
+    #[test]
+    fn examples_for_ttl_macos_excluded_from_linux_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "macOS 13".into(),
+                family: "Mac OS X".into(),
+            }],
+        };
+        assert!(db.examples_for_ttl(Some(64), 1).is_empty());
+    }
+
+    #[test]
+    fn examples_for_ttl_irix_excluded_from_linux_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "IRIX 6".into(),
+                family: "IRIX".into(),
+            }],
+        };
+        assert!(db.examples_for_ttl(Some(32), 1).is_empty());
+    }
+
+    #[test]
+    fn load_db_multiple_fingerprints() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        writeln!(f, "Fingerprint One").unwrap();
+        writeln!(f, "Class Linux | Linux | 4.X | general purpose").unwrap();
+        writeln!(f, "Fingerprint Two").unwrap();
+        writeln!(f, "Class Windows | Windows | 10 | general purpose").unwrap();
+        f.flush().unwrap();
+        let db = OsDb::load(f.path()).unwrap();
+        assert_eq!(db.entries.len(), 2);
+    }
+
+    #[test]
+    fn format_os_guess_none_ttl_unknown() {
+        assert_eq!(format_os_guess(None, None, 2), "unknown");
+    }
+
+    #[test]
+    fn parse_class_family_extracts_second_field() {
+        let s = "Class Vendor | Windows | 10 | general purpose";
+        assert_eq!(parse_class_family(s), Some("Windows".to_string()));
+    }
+
+    #[test]
+    fn examples_for_ttl_hpux_excluded_from_linux_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "HP-UX 11".into(),
+                family: "HP-UX".into(),
+            }],
+        };
+        assert!(db.examples_for_ttl(Some(60), 1).is_empty());
+    }
 }

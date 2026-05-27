@@ -1381,6 +1381,58 @@ mod syn_shard_tests {
         assert_eq!(c[1], vec![2]);
         assert_eq!(c[2], vec![3]);
     }
+
+    #[test]
+    fn split_two_items_two_shards() {
+        let c = split_into_syn_chunks(vec![10u8, 20], 2);
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0], vec![10]);
+        assert_eq!(c[1], vec![20]);
+    }
+
+    #[test]
+    fn split_five_items_three_shards_sizes() {
+        let c = split_into_syn_chunks((1..=5).collect(), 3);
+        assert_eq!(c.len(), 3);
+        let sum: usize = c.iter().map(|x| x.len()).sum();
+        assert_eq!(sum, 5);
+    }
+
+    #[test]
+    fn split_large_shards_single_element() {
+        let c = split_into_syn_chunks(vec![99u8], 16);
+        assert_eq!(c, vec![vec![99]]);
+    }
+
+    #[test]
+    fn split_eleven_items_four_shards_no_loss() {
+        let v: Vec<u8> = (0..11).collect();
+        let flat: Vec<u8> = split_into_syn_chunks(v.clone(), 4)
+            .into_iter()
+            .flatten()
+            .collect();
+        assert_eq!(flat, v);
+    }
+
+    #[test]
+    fn split_hundred_items_ten_shards_balanced() {
+        let v: Vec<u16> = (0..100).collect();
+        let chunks = split_into_syn_chunks(v.clone(), 10);
+        assert_eq!(chunks.len(), 10);
+        assert!(chunks.iter().all(|c| c.len() == 10));
+    }
+
+    #[test]
+    fn split_max_shards_caps_at_item_count() {
+        let c = split_into_syn_chunks(vec![1, 2, 3], usize::MAX);
+        assert_eq!(c.len(), 3);
+    }
+
+    #[test]
+    fn split_three_shards_seven_items_first_chunk_larger() {
+        let c = split_into_syn_chunks((0..7).collect::<Vec<u8>>(), 3);
+        assert_eq!(c[0].len(), 3);
+    }
 }
 
 #[cfg(test)]
@@ -1661,5 +1713,51 @@ mod pure_compute_tests {
         assert_eq!(TcpPortScanKind::Maimon.to_string(), "Maimon");
         assert_eq!(TcpPortScanKind::Ack.to_string(), "ACK");
         assert_eq!(TcpPortScanKind::Window.to_string(), "Window");
+    }
+
+    #[test]
+    fn null_scan_open_outcome_maps_to_open_synack() {
+        let p = port_line_from_syn_outcome(
+            RawTcpProbeKind::Null,
+            Some(SynOutcome::Open),
+            host(),
+            443,
+        );
+        assert_eq!(p.state, "open");
+        assert_eq!(p.reason, PortReason::SynAck);
+    }
+
+    #[test]
+    fn fin_scan_closed_outcome_maps_to_closed() {
+        let p = port_line_from_syn_outcome(
+            RawTcpProbeKind::Fin,
+            Some(SynOutcome::Closed),
+            host(),
+            443,
+        );
+        assert_eq!(p.state, "closed");
+    }
+
+    #[test]
+    fn maimon_scan_host_timeout_maps_to_filtered() {
+        let p = port_line_from_syn_outcome(
+            RawTcpProbeKind::Maimon,
+            Some(SynOutcome::HostTimeout),
+            host(),
+            443,
+        );
+        assert_eq!(p.state, "filtered");
+        assert_eq!(p.reason, PortReason::HostTimeout);
+    }
+
+    #[test]
+    fn syn_outcome_window_open_to_u8_is_four() {
+        assert_eq!(SynOutcome::WindowOpen.to_u8(), 4);
+    }
+
+    #[test]
+    fn atomic_syn_results_unset_slot_is_none() {
+        let r = AtomicSynResults::new(2);
+        assert!(r.get(1).is_none());
     }
 }

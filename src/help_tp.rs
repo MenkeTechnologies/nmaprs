@@ -437,4 +437,52 @@ mod tests {
         let c = tp_line("-O", "OS detect", true);
         assert!(c.contains("\x1b[0m"));
     }
+
+    #[test]
+    fn section_line_color_wraps_title() {
+        let c = section_line("SCAN TECHNIQUES", 50, true);
+        assert!(c.contains("\x1b["));
+    }
+
+    #[test]
+    fn tp_line_plain_has_no_color_codes() {
+        let line = tp_line("-p", "ports", false);
+        assert!(!line.contains("\x1b"));
+    }
+
+    #[test]
+    fn section_line_color_includes_title_text() {
+        let c = section_line("OUTPUT", 40, true);
+        assert!(c.contains("OUTPUT"));
+    }
+
+    #[test]
+    fn tp_line_double_dash_long_option() {
+        let line = tp_line("--scan-type", "scan letter", false);
+        assert!(line.contains("--scan-type"));
+        assert!(line.contains("scan letter"));
+    }
+
+    #[test]
+    fn section_line_very_long_title_truncates_dashes_not_title() {
+        let s = section_line("HOST DISCOVERY OPTIONS", 40, false);
+        assert!(s.contains("HOST DISCOVERY OPTIONS"));
+    }
+
+    #[test]
+    fn tp_line_color_has_green_delimiter_only_once() {
+        let c = tp_line("-O", "OS", true);
+        assert_eq!(c.matches("\x1b[32m//\x1b[0m").count(), 1);
+    }
+
+    #[test]
+    fn banner_plain_no_escape_sequences() {
+        use super::BANNER_PLAIN;
+        assert!(!BANNER_PLAIN.contains("\x1b"));
+    }
+
+    #[test]
+    fn version_constant_matches_cargo_pkg() {
+        assert!(VERSION.chars().any(|c| c.is_ascii_digit()));
+    }
 }

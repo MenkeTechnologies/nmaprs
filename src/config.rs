@@ -2057,4 +2057,213 @@ mod rate_validation_tests {
         let t = parse_ftp_bounce("user:pass@127.0.0.1").expect("parse");
         assert_eq!(t.server.port(), 21);
     }
+
+    #[test]
+    fn parse_ftp_bounce_explicit_port_8080() {
+        let t = parse_ftp_bounce("user:pass@127.0.0.1:8080").expect("parse");
+        assert_eq!(t.server.port(), 8080);
+    }
+}
+
+#[cfg(test)]
+mod parse_helpers_tests {
+    use std::net::IpAddr;
+    use std::time::Duration;
+
+    use super::{
+        hex_nibble, parse_dns_servers, parse_duration, parse_hex_data, parse_mac, parse_proxy_list,
+        ProxyKind,
+    };
+
+    #[test]
+    fn parse_duration_ms_suffix() {
+        assert_eq!(parse_duration("250ms").unwrap(), Duration::from_millis(250));
+    }
+
+    #[test]
+    fn parse_duration_seconds_suffix() {
+        assert_eq!(parse_duration("2s").unwrap(), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn parse_duration_fractional_seconds() {
+        assert_eq!(
+            parse_duration("1.5s").unwrap(),
+            Duration::from_secs_f64(1.5)
+        );
+    }
+
+    #[test]
+    fn parse_duration_minutes_suffix() {
+        assert_eq!(parse_duration("2m").unwrap(), Duration::from_secs(120));
+    }
+
+    #[test]
+    fn parse_duration_hours_suffix() {
+        assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn parse_duration_bare_number_is_seconds() {
+        assert_eq!(parse_duration("3").unwrap(), Duration::from_secs(3));
+    }
+
+    #[test]
+    fn parse_duration_trims_whitespace() {
+        assert_eq!(parse_duration("  100ms  ").unwrap(), Duration::from_millis(100));
+    }
+
+    #[test]
+    fn parse_duration_invalid_ms_errors() {
+        assert!(parse_duration("xms").is_err());
+    }
+
+    #[test]
+    fn parse_duration_zero_ms() {
+        assert_eq!(parse_duration("0ms").unwrap(), Duration::ZERO);
+    }
+
+    #[test]
+    fn parse_hex_data_two_bytes() {
+        assert_eq!(parse_hex_data("deadbeef").unwrap(), vec![0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn parse_hex_data_0x_prefix() {
+        assert_eq!(parse_hex_data("0x0102").unwrap(), vec![0x01, 0x02]);
+    }
+
+    #[test]
+    fn parse_hex_data_odd_length_errors() {
+        assert!(parse_hex_data("abc").is_err());
+    }
+
+    #[test]
+    fn parse_hex_data_invalid_char_errors() {
+        assert!(parse_hex_data("gg").is_err());
+    }
+
+    #[test]
+    fn parse_hex_data_empty_is_empty_vec() {
+        assert!(parse_hex_data("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn hex_nibble_digits() {
+        assert_eq!(hex_nibble(b'0'), Some(0));
+        assert_eq!(hex_nibble(b'9'), Some(9));
+    }
+
+    #[test]
+    fn hex_nibble_lowercase_hex() {
+        assert_eq!(hex_nibble(b'a'), Some(10));
+        assert_eq!(hex_nibble(b'f'), Some(15));
+    }
+
+    #[test]
+    fn hex_nibble_uppercase_hex() {
+        assert_eq!(hex_nibble(b'A'), Some(10));
+        assert_eq!(hex_nibble(b'F'), Some(15));
+    }
+
+    #[test]
+    fn hex_nibble_non_hex_returns_none() {
+        assert!(hex_nibble(b'g').is_none());
+        assert!(hex_nibble(b' ').is_none());
+    }
+
+    #[test]
+    fn parse_mac_colon_separated() {
+        let mac = parse_mac("00:11:22:33:44:55").unwrap();
+        assert_eq!(mac, [0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    }
+
+    #[test]
+    fn parse_mac_dash_separated() {
+        let mac = parse_mac("AA-BB-CC-DD-EE-FF").unwrap();
+        assert_eq!(mac, [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+    }
+
+    #[test]
+    fn parse_mac_no_separators() {
+        let mac = parse_mac("001122334455").unwrap();
+        assert_eq!(mac, [0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    }
+
+    #[test]
+    fn parse_mac_wrong_length_errors() {
+        assert!(parse_mac("00:11:22").is_err());
+    }
+
+    #[test]
+    fn parse_dns_servers_single_ipv4() {
+        let v = parse_dns_servers("8.8.8.8").unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0], "8.8.8.8".parse::<IpAddr>().unwrap());
+    }
+
+    #[test]
+    fn parse_dns_servers_csv_two() {
+        let v = parse_dns_servers("1.1.1.1,8.8.4.4").unwrap();
+        assert_eq!(v.len(), 2);
+    }
+
+    #[test]
+    fn parse_dns_servers_skips_empty_tokens() {
+        let v = parse_dns_servers("1.1.1.1,,8.8.8.8").unwrap();
+        assert_eq!(v.len(), 2);
+    }
+
+    #[test]
+    fn parse_dns_servers_empty_errors() {
+        assert!(parse_dns_servers("").is_err());
+    }
+
+    #[test]
+    fn parse_dns_servers_invalid_ip_errors() {
+        assert!(parse_dns_servers("not-an-ip").is_err());
+    }
+
+    #[test]
+    fn parse_proxy_list_socks4_default_port() {
+        let v = parse_proxy_list("proxy.example.com").unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].kind, ProxyKind::Socks4);
+        assert_eq!(v[0].port, 1080);
+    }
+
+    #[test]
+    fn parse_proxy_list_http_scheme_default_port() {
+        let v = parse_proxy_list("http://proxy.local").unwrap();
+        assert_eq!(v[0].kind, ProxyKind::Http);
+        assert_eq!(v[0].port, 8080);
+    }
+
+    #[test]
+    fn parse_proxy_list_explicit_port() {
+        let v = parse_proxy_list("socks4://127.0.0.1:9050").unwrap();
+        assert_eq!(v[0].host, "127.0.0.1");
+        assert_eq!(v[0].port, 9050);
+    }
+
+    #[test]
+    fn parse_proxy_list_csv_two_proxies() {
+        let v = parse_proxy_list("a:1,b:2").unwrap();
+        assert_eq!(v.len(), 2);
+    }
+
+    #[test]
+    fn parse_proxy_list_bad_port_errors() {
+        assert!(parse_proxy_list("host:99999").is_err());
+    }
+
+    #[test]
+    fn parse_duration_half_minute() {
+        assert_eq!(parse_duration("0.5m").unwrap(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn parse_hex_data_uppercase_ok() {
+        assert_eq!(parse_hex_data("ABCD").unwrap(), vec![0xAB, 0xCD]);
+    }
 }
