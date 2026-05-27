@@ -1228,6 +1228,29 @@ mod syn_work_tests {
         );
         assert_eq!(v6, vec![(Ipv6Addr::LOCALHOST, 443)]);
     }
+
+    #[test]
+    fn split_syn_work_empty_is_two_empty_vecs() {
+        let (v4, v6) = split_syn_work(&[]);
+        assert!(v4.is_empty());
+        assert!(v6.is_empty());
+    }
+
+    #[test]
+    fn split_syn_work_ipv4_only() {
+        let work = vec![(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), 25)];
+        let (v4, v6) = split_syn_work(&work);
+        assert_eq!(v4.len(), 1);
+        assert!(v6.is_empty());
+    }
+
+    #[test]
+    fn split_syn_work_ipv6_only() {
+        let work = vec![(IpAddr::V6(Ipv6Addr::LOCALHOST), 443)];
+        let (v4, v6) = split_syn_work(&work);
+        assert!(v4.is_empty());
+        assert_eq!(v6.len(), 1);
+    }
 }
 
 #[cfg(test)]
@@ -1273,6 +1296,20 @@ mod build_work_tests {
         assert!(build_work(&[], &[80]).is_empty());
         assert!(build_work(&h, &[]).is_empty());
         assert!(build_work(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn build_work_single_host_single_port() {
+        let h = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        assert_eq!(build_work(&[h], &[53]), vec![(h, 53)]);
+    }
+
+    #[test]
+    fn build_work_one_host_many_ports() {
+        let h = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
+        let w = build_work(&[h], &[1, 2, 3]);
+        assert_eq!(w.len(), 3);
+        assert!(w.iter().all(|(ip, _)| *ip == h));
     }
 }
 
@@ -1353,5 +1390,86 @@ mod host_batch_tests {
         for chunk in &b {
             assert_eq!(chunk.len(), 1);
         }
+    }
+
+    #[test]
+    fn batch_hosts_width_one_each_host_own_batch() {
+        let hosts: Vec<_> = (1..=4).map(ipv4).collect();
+        let mut rng = StdRng::seed_from_u64(99);
+        let b = batch_hosts_slice_with_rng(&hosts, 1, 1, &mut rng);
+        assert_eq!(b.len(), 4);
+        assert!(b.iter().all(|chunk| chunk.len() == 1));
+    }
+
+    #[test]
+    fn batch_hosts_large_min_clamped_to_host_count() {
+        let hosts: Vec<_> = (1..=3).map(ipv4).collect();
+        let mut rng = StdRng::seed_from_u64(7);
+        let b = batch_hosts_slice_with_rng(&hosts, 100, 100, &mut rng);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].len(), 3);
+    }
+
+    #[test]
+    fn host_batches_max_hostgroup_caps_batch_size() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--max-hostgroup",
+            "2",
+            "-p",
+            "80",
+            "127.0.0.1",
+            "127.0.0.2",
+            "127.0.0.3",
+            "127.0.0.4",
+        ])
+        .unwrap();
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        let hosts: Vec<_> = (1..=4).map(|n| IpAddr::V4(Ipv4Addr::new(127, 0, 0, n))).collect();
+        let b = host_batches(&hosts, &plan);
+        assert!(b.len() >= 2);
+        assert!(b.iter().all(|chunk| chunk.len() <= 2));
+        let flat: Vec<_> = b.iter().flatten().copied().collect();
+        assert_eq!(flat, hosts);
+    }
+
+    #[test]
+    fn batch_hosts_min_equals_max_fixed_size() {
+        let hosts: Vec<_> = (1..=6).map(ipv4).collect();
+        let mut rng = StdRng::seed_from_u64(42);
+        let b = batch_hosts_slice_with_rng(&hosts, 3, 3, &mut rng);
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0].len(), 3);
+        assert_eq!(b[1].len(), 3);
+    }
+
+    #[test]
+    fn batch_hosts_single_host_one_batch() {
+        let hosts = vec![ipv4(1)];
+        let mut rng = StdRng::seed_from_u64(0);
+        let b = batch_hosts_slice_with_rng(&hosts, 1, 5, &mut rng);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0], hosts);
+    }
+
+    #[test]
+    fn host_batches_min_hostgroup_only_uses_default_max() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "--min-hostgroup",
+            "2",
+            "-p",
+            "80",
+            "127.0.0.1",
+            "127.0.0.2",
+            "127.0.0.3",
+        ])
+        .unwrap();
+        let plan = ScanPlan::from_args(&args).expect("plan");
+        let hosts: Vec<_> = (1..=3).map(|n| IpAddr::V4(Ipv4Addr::new(127, 0, 0, n))).collect();
+        let b = host_batches(&hosts, &plan);
+        assert!(b.len() >= 1);
+        let flat: Vec<_> = b.iter().flatten().copied().collect();
+        assert_eq!(flat, hosts);
     }
 }

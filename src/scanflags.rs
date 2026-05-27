@@ -97,4 +97,68 @@ mod tests {
         let f = parse_scanflags("syn,fin").unwrap();
         assert_eq!(f, TcpFlags::SYN | TcpFlags::FIN);
     }
+
+    #[test]
+    fn parses_fin_only() {
+        assert_eq!(parse_scanflags("FIN").unwrap(), TcpFlags::FIN);
+    }
+
+    #[test]
+    fn parses_all_common_flags() {
+        let f = parse_scanflags("SYN,ACK,FIN,RST,PSH,URG,ECE,CWR").unwrap();
+        assert_eq!(
+            f,
+            TcpFlags::SYN
+                | TcpFlags::ACK
+                | TcpFlags::FIN
+                | TcpFlags::RST
+                | TcpFlags::PSH
+                | TcpFlags::URG
+                | TcpFlags::ECE
+                | TcpFlags::CWR
+        );
+    }
+
+    #[test]
+    fn parses_whitespace_and_comma_mix() {
+        let f = parse_scanflags(" SYN , ACK ").unwrap();
+        assert_eq!(f, TcpFlags::SYN | TcpFlags::ACK);
+    }
+
+    #[test]
+    fn parses_rst_syn_scan_combo() {
+        assert_eq!(
+            parse_scanflags("RSTSYN").unwrap(),
+            TcpFlags::RST | TcpFlags::SYN
+        );
+    }
+
+    #[test]
+    fn duplicate_flag_tokens_or_bits() {
+        let f = parse_scanflags("SYN SYN").unwrap();
+        assert_eq!(f, TcpFlags::SYN);
+    }
+
+    #[test]
+    fn null_scan_flags_empty_is_error() {
+        assert!(parse_scanflags("NULL").is_err());
+    }
+
+    #[test]
+    fn parses_psh_only() {
+        assert_eq!(parse_scanflags("PSH").unwrap(), TcpFlags::PSH);
+    }
+
+    #[test]
+    fn parses_urg_fin_combo() {
+        assert_eq!(
+            parse_scanflags("URG FIN").unwrap(),
+            TcpFlags::URG | TcpFlags::FIN
+        );
+    }
+
+    #[test]
+    fn parses_lowercase_glued_synack() {
+        assert_eq!(parse_scanflags("synack").unwrap(), TcpFlags::SYN | TcpFlags::ACK);
+    }
 }

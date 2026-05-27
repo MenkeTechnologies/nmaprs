@@ -1064,4 +1064,29 @@ mod tests {
             "cookie bytes identical when rng matches"
         );
     }
+
+    #[test]
+    fn build_init_ports_are_big_endian() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let pkt = build_sctp_segment(SctpProbeKind::Init, 0x0102, 0x0304, &mut rng);
+        assert_eq!(u16::from_be_bytes([pkt[0], pkt[1]]), 0x0102);
+        assert_eq!(u16::from_be_bytes([pkt[2], pkt[3]]), 0x0304);
+    }
+
+    #[test]
+    fn crc32c_fn_empty_input_is_zero() {
+        assert_eq!(crc32c_fn(&[]), 0);
+    }
+
+    #[test]
+    fn crc32c_fn_single_byte_differs_from_empty() {
+        assert_ne!(crc32c_fn(&[0]), crc32c_fn(&[]));
+    }
+
+    #[test]
+    fn first_chunk_type_exactly_13_bytes() {
+        let mut p = vec![0u8; 13];
+        p[12] = 42;
+        assert_eq!(sctp_first_chunk_type(&p), Some(42));
+    }
 }

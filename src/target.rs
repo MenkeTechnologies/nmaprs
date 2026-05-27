@@ -411,4 +411,139 @@ mod tests {
         assert_eq!(v6.len(), 4);
         assert!(v6.iter().all(|a| a.is_ipv6()));
     }
+
+    #[tokio::test]
+    async fn expand_single_ipv4_literal() {
+        let ips = expand_target("192.0.2.55", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips, vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 55))]);
+    }
+
+    #[tokio::test]
+    async fn expand_ipv6_with_dash6_flag() {
+        let opts = ExpandOpts {
+            ipv6: true,
+            no_dns: true,
+            resolve_all: false,
+            dns_servers: vec![],
+        };
+        let ips = expand_target("2001:db8::1", &opts).await.unwrap();
+        assert_eq!(ips.len(), 1);
+        assert!(ips[0].is_ipv6());
+    }
+
+    #[test]
+    fn apply_exclude_cidr_removes_block() {
+        let hosts = vec![
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+        ];
+        let out = apply_exclude(hosts, Some("10.0.0.0/31"), None, &opts_no_dns_v4()).unwrap();
+        assert_eq!(
+            out,
+            vec![
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_exclude_file_reads_lines() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "10.0.0.2").unwrap();
+        writeln!(f, "# comment").unwrap();
+        f.flush().unwrap();
+        let hosts = vec![
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+        ];
+        let out = apply_exclude(hosts, None, Some(f.path()), &opts_no_dns_v4()).unwrap();
+        assert_eq!(out, vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))]);
+    }
+
+    #[test]
+    fn random_addresses_zero_returns_empty() {
+        assert!(random_addresses(0, false).is_empty());
+        assert!(random_addresses(0, true).is_empty());
+    }
+
+    #[tokio::test]
+    async fn cidr_slash_32_is_one_host() {
+        let ips = expand_target("203.0.113.5/32", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips.len(), 1);
+    }
+
+    #[test]
+    fn read_input_list_strips_windows_crlf() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "10.0.0.9\r\n").unwrap();
+        f.flush().unwrap();
+        let lines = read_input_list(f.path()).unwrap();
+        assert_eq!(lines, vec!["10.0.0.9"]);
+    }
+
+    #[test]
+    fn apply_exclude_empty_exclude_leaves_hosts() {
+        let hosts = vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))];
+        let out = apply_exclude(hosts.clone(), None, None, &opts_no_dns_v4()).unwrap();
+        assert_eq!(out, hosts);
+    }
+
+    #[tokio::test]
+    async fn expand_ipv4_range_three_hosts() {
+        let ips = expand_target("192.0.2.1-3", &opts_no_dns_v4())
+            .await
+            .unwrap();
+        assert_eq!(ips.len(), 3);
+    }
+
+    #[test]
+    fn apply_exclude_comma_separated_two_ips() {
+        let hosts = vec![
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+        ];
+        let out = apply_exclude(hosts, Some("10.0.0.1,10.0.0.3"), None, &opts_no_dns_v4()).unwrap();
+        assert_eq!(out, vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))]);
+    }
+
+    #[tokio::test]
+    async fn expand_invalid_ipv4_literal_errors() {
+        let e = expand_target("999.999.999.999", &opts_no_dns_v4())
+            .await
+            .unwrap_err();
+        assert!(matches!(e, TargetError::Invalid(_)));
+    }
+
+    #[tokio::test]
+    async fn expand_ipv6_cidr_with_dash6() {
+        let opts = ExpandOpts {
+            ipv6: true,
+            no_dns: true,
+            resolve_all: false,
+            dns_servers: vec![],
+        };
+        let ips = expand_target("2001:db8::/127", &opts).await.unwrap();
+        assert_eq!(ips.len(), 2);
+    }
+
+    #[test]
+    fn apply_exclude_trims_whitespace_in_csv() {
+        let hosts = vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))];
+        let out = apply_exclude(hosts, Some(" 10.0.0.1 "), None, &opts_no_dns_v4()).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn random_addresses_distinct_samples_usually() {
+        let v4 = random_addresses(20, false);
+        let uniq: std::collections::HashSet<_> = v4.iter().collect();
+        assert!(uniq.len() > 1, "20 random v4 draws should not all collide");
+    }
 }

@@ -120,4 +120,29 @@ mod tests {
             .await
             .expect("run");
     }
+
+    #[tokio::test]
+    async fn run_scripts_default_alias_runs_without_error() {
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--script-default", "127.0.0.1"])
+            .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
+
+    #[tokio::test]
+    async fn run_scripts_banner_on_empty_open_list_is_noop() {
+        let args = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--script",
+            "banner",
+            "127.0.0.1",
+        ])
+        .expect("parse");
+        run_scripts(&args, &[], Some(Duration::from_millis(1)))
+            .await
+            .expect("run");
+    }
 }

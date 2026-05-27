@@ -62,4 +62,52 @@ mod tests {
         let s = "Nmap scan report for 127.0.0.1:22/tcp";
         assert_eq!(skid_line(s).len(), s.len());
     }
+
+    #[test]
+    fn skid_never_introduces_non_ascii_bytes() {
+        let input = "The quick brown fox jumps over the lazy dog AEIOU SZ sz";
+        for _ in 0..50 {
+            let out = skid_line(input);
+            assert!(out.is_ascii(), "output must stay ASCII: {out:?}");
+        }
+    }
+
+    #[test]
+    fn skid_empty_string_stays_empty() {
+        assert_eq!(skid_line(""), "");
+    }
+
+    #[test]
+    fn skid_digits_and_punctuation_unchanged_or_case_flipped_only() {
+        let input = "127.0.0.1:22/tcp (open)";
+        let out = skid_line(input);
+        for (a, b) in input.bytes().zip(out.bytes()) {
+            if a.is_ascii_punctuation() || a.is_ascii_digit() {
+                assert_eq!(a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn skid_substitution_alphabet_stays_in_limited_set() {
+        let input = "AESIOZ aesioz";
+        for _ in 0..30 {
+            let out = skid_line(input);
+            assert!(out.bytes().all(|b| b.is_ascii_graphic() || b == b' '));
+        }
+    }
+
+    #[test]
+    fn skid_preserves_newlines_and_tabs() {
+        let input = "line1\nline2\tend";
+        let out = skid_line(input);
+        assert_eq!(out.matches('\n').count(), input.matches('\n').count());
+        assert_eq!(out.matches('\t').count(), input.matches('\t').count());
+    }
+
+    #[test]
+    fn skid_long_string_same_length() {
+        let input = "A".repeat(200);
+        assert_eq!(skid_line(&input).len(), 200);
+    }
 }

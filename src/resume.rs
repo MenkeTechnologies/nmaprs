@@ -93,4 +93,79 @@ mod tests {
         let p = Path::new("/nonexistent/nmaprs-resume-xyz.json");
         assert!(ResumeState::load(p).is_err());
     }
+
+    #[test]
+    fn done_set_is_hash_of_completed_pairs() {
+        let st = ResumeState {
+            completed: vec![("10.0.0.1".into(), 22), ("10.0.0.2".into(), 80)],
+        };
+        let set = st.done_set();
+        assert!(set.contains(&("10.0.0.1".to_string(), 22)));
+        assert!(set.contains(&("10.0.0.2".to_string(), 80)));
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn merge_from_scan_on_empty_state() {
+        let mut st = ResumeState::default();
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        st.merge_from_scan(&[(ip, 25), (ip, 26)]);
+        st.completed.sort();
+        assert_eq!(
+            st.completed,
+            vec![("192.0.2.1".to_string(), 25), ("192.0.2.1".to_string(), 26)]
+        );
+    }
+
+    #[test]
+    fn is_done_ipv6_string_form() {
+        let mut st = ResumeState::default();
+        st.completed
+            .push(("2001:db8::1".to_string(), 443));
+        let ip: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(st.is_done(ip, 443));
+        assert!(!st.is_done(ip, 80));
+    }
+
+    #[test]
+    fn save_creates_valid_json() {
+        let st = ResumeState {
+            completed: vec![("127.0.0.1".to_string(), 1)],
+        };
+        let f = NamedTempFile::new().unwrap();
+        st.save(f.path()).unwrap();
+        let raw = std::fs::read_to_string(f.path()).unwrap();
+        assert!(raw.contains("127.0.0.1"));
+        assert!(raw.contains("\"completed\""));
+    }
+
+    #[test]
+    fn merge_from_scan_preserves_other_hosts() {
+        let mut st = ResumeState::default();
+        st.completed.push(("10.0.0.1".to_string(), 22));
+        let ip2 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        st.merge_from_scan(&[(ip2, 80)]);
+        assert!(st.is_done("10.0.0.1".parse().unwrap(), 22));
+        assert!(st.is_done(ip2, 80));
+    }
+
+    #[test]
+    fn load_invalid_json_errors() {
+        let f = NamedTempFile::new().unwrap();
+        std::fs::write(f.path(), b"not json").unwrap();
+        assert!(ResumeState::load(f.path()).is_err());
+    }
+
+    #[test]
+    fn is_done_false_for_wrong_port() {
+        let mut st = ResumeState::default();
+        st.completed.push(("127.0.0.1".to_string(), 22));
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        assert!(!st.is_done(ip, 443));
+    }
+
+    #[test]
+    fn done_set_empty_for_default_state() {
+        assert!(ResumeState::default().done_set().is_empty());
+    }
 }

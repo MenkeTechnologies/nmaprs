@@ -223,4 +223,114 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn parse_port_single_value() {
+        assert_eq!(parse_port_spec("443").unwrap(), vec![443]);
+    }
+
+    #[test]
+    fn parse_port_dedupes_duplicates() {
+        let p = parse_port_spec("80,80,443,443").unwrap();
+        assert_eq!(p, vec![80, 443]);
+    }
+
+    #[test]
+    fn parse_port_sorts_ascending() {
+        assert_eq!(parse_port_spec("443,22,80").unwrap(), vec![22, 80, 443]);
+    }
+
+    #[test]
+    fn parse_port_max_boundary_65535() {
+        assert_eq!(parse_port_spec("65535").unwrap(), vec![65535]);
+    }
+
+    #[test]
+    fn parse_port_zero_is_valid() {
+        assert_eq!(parse_port_spec("0").unwrap(), vec![0]);
+    }
+
+    #[test]
+    fn parse_port_out_of_range_errors() {
+        assert!(parse_port_spec("65536").is_err());
+    }
+
+    #[test]
+    fn parse_port_non_numeric_errors() {
+        assert!(matches!(
+            parse_port_spec("abc"),
+            Err(PortParseError::InvalidToken(_))
+        ));
+    }
+
+    #[test]
+    fn top_ports_zero_is_empty() {
+        assert!(top_ports(0).is_empty());
+    }
+
+    #[test]
+    fn top_ports_one_is_first_default_port() {
+        let d = default_tcp_ports();
+        assert_eq!(top_ports(1), vec![d[0]]);
+    }
+
+    #[test]
+    fn parse_port_whitespace_around_commas() {
+        assert_eq!(parse_port_spec(" 22 , 80 ").unwrap(), vec![22, 80]);
+    }
+
+    #[test]
+    fn parse_exclude_ports_empty_errors() {
+        assert!(matches!(parse_exclude_ports(""), Err(PortParseError::Empty)));
+    }
+
+    #[test]
+    fn fast_tcp_ports_first_port_is_http() {
+        assert_eq!(fast_tcp_ports()[0], 80);
+    }
+
+    #[test]
+    fn default_tcp_ports_are_unique() {
+        let d = default_tcp_ports();
+        let mut seen = std::collections::HashSet::new();
+        for p in d {
+            assert!(seen.insert(p), "duplicate port {p} in default set");
+        }
+    }
+
+    #[test]
+    fn parse_port_triple_range_expands() {
+        assert_eq!(parse_port_spec("1-3").unwrap(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn parse_port_duplicate_in_range_deduped() {
+        assert_eq!(parse_port_spec("80-82,81").unwrap(), vec![80, 81, 82]);
+    }
+
+    #[test]
+    fn parse_exclude_ports_rejects_invalid_token() {
+        assert!(parse_exclude_ports("abc").is_err());
+    }
+
+    #[test]
+    fn fast_ip_protocols_contains_icmp() {
+        let protos = fast_ip_protocols_nmap();
+        assert!(protos.contains(&1), "ICMP (1) must be in fast IP proto set");
+    }
+
+    #[test]
+    fn fast_ip_protocols_contains_tcp_and_udp() {
+        let protos = fast_ip_protocols_nmap();
+        assert!(protos.contains(&6));
+        assert!(protos.contains(&17));
+    }
+
+    #[test]
+    fn top_ports_fifty_is_subset_of_default() {
+        let d = default_tcp_ports();
+        for p in top_ports(50) {
+            assert!(d.contains(&p), "top-50 port {p} missing from default-1000");
+        }
+    }
 }

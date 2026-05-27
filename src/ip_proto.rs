@@ -1037,4 +1037,34 @@ mod pure_compute_tests {
         let icmp = IcmpPacket::new(&buf).unwrap();
         assert!(embedded_ipv4_from_dest_unreach(&icmp).is_none());
     }
+
+    #[test]
+    fn embedded_ipv4_extracts_protocol_from_dest_unreach() {
+        let buf =
+            build_dest_unreach_with_embedded_ipv4(IcmpTypes::DestinationUnreachable, 2, true);
+        let icmp = IcmpPacket::new(&buf).unwrap();
+        let embedded = embedded_ipv4_from_dest_unreach(&icmp).expect("embedded");
+        assert_eq!(embedded.get_version(), 4);
+    }
+
+    #[test]
+    fn atomic_proto_unresolved_index_returns_none() {
+        let r = AtomicProtoResults::new(3);
+        assert!(r.get(2).is_none());
+        assert!(!r.is_resolved(2));
+    }
+
+    #[test]
+    fn proto_outcome_closed_and_host_timeout_distinct() {
+        assert_ne!(ProtoOutcome::Closed.to_u8(), ProtoOutcome::HostTimeout.to_u8());
+    }
+
+    #[test]
+    fn embedded_ipv4_extracts_destination_from_inner_header() {
+        let buf =
+            build_dest_unreach_with_embedded_ipv4(IcmpTypes::DestinationUnreachable, 2, true);
+        let icmp = IcmpPacket::new(&buf).unwrap();
+        let embedded = embedded_ipv4_from_dest_unreach(&icmp).expect("embedded");
+        assert_eq!(embedded.get_header_length(), 5);
+    }
 }

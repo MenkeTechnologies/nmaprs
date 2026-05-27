@@ -1337,6 +1337,53 @@ mod syn_shard_tests {
         assert_eq!(c.len(), 1);
         assert_eq!(c[0], vec![1, 2, 3]);
     }
+
+    #[test]
+    fn split_empty_input_yields_empty() {
+        let c = split_into_syn_chunks(Vec::<u8>::new(), 4);
+        assert!(c.is_empty());
+    }
+
+    #[test]
+    fn split_one_element_many_shards_collapses_to_one() {
+        let c = split_into_syn_chunks(vec![42u8], 99);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0], vec![42]);
+    }
+
+    #[test]
+    fn split_preserves_element_order() {
+        let v: Vec<u8> = (0..7).collect();
+        let flat: Vec<u8> = split_into_syn_chunks(v, 3)
+            .into_iter()
+            .flatten()
+            .collect();
+        assert_eq!(flat, (0..7).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn split_exact_divisor_gives_equal_chunks() {
+        let v: Vec<u8> = (0..12).collect();
+        let c = split_into_syn_chunks(v, 4);
+        assert_eq!(c.len(), 4);
+        assert!(c.iter().all(|chunk| chunk.len() == 3));
+    }
+
+    #[test]
+    fn split_zero_shards_treated_as_one() {
+        let c = split_into_syn_chunks(vec![1, 2], 0);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0], vec![1, 2]);
+    }
+
+    #[test]
+    fn split_more_shards_than_items_caps_at_len() {
+        let c = split_into_syn_chunks(vec![1u8, 2, 3], 10);
+        assert_eq!(c.len(), 3);
+        assert_eq!(c[0], vec![1]);
+        assert_eq!(c[1], vec![2]);
+        assert_eq!(c[2], vec![3]);
+    }
 }
 
 #[cfg(test)]

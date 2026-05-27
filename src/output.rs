@@ -423,6 +423,8 @@ mod tests {
 
     use super::{port_line_text, split_version_info, xml_escape};
 
+    use super::{days_to_ymd, chrono_timestamp};
+
     #[test]
     fn xml_escape_escapes_markup_and_quotes() {
         assert_eq!(
@@ -457,5 +459,108 @@ mod tests {
         );
         let with_reason = port_line_text(&line, true);
         assert_eq!(with_reason, "443/tcp\topen\thttps Apache/2.4\tsyn-ack");
+    }
+
+    #[test]
+    fn xml_escape_leaves_plain_alnum_untouched() {
+        assert_eq!(xml_escape("host.example.com_123"), "host.example.com_123");
+    }
+
+    #[test]
+    fn xml_escape_ampersand_only() {
+        assert_eq!(xml_escape("foo&bar"), "foo&amp;bar");
+    }
+
+    #[test]
+    fn days_to_ymd_epoch_is_1970_jan_1() {
+        let (y, m, d) = days_to_ymd(0);
+        assert_eq!((y, m, d), (1970, 0, 1));
+    }
+
+    #[test]
+    fn days_to_ymd_increments_day_within_same_month() {
+        let (y0, m0, d0) = days_to_ymd(100);
+        let (y1, m1, d1) = days_to_ymd(101);
+        assert_eq!((y0, m0), (y1, m1));
+        assert_eq!(d1, d0 + 1);
+    }
+
+    #[test]
+    fn chrono_timestamp_returns_positive_secs_and_human_string() {
+        let (secs, human) = chrono_timestamp();
+        assert!(secs > 1_600_000_000);
+        assert!(human.contains(':'));
+        assert!(human.chars().any(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn port_line_text_filtered_without_version_or_reason() {
+        let line = PortLine {
+            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: 1,
+            proto: "tcp",
+            state: "filtered",
+            reason: PortReason::Timeout,
+            latency_ms: None,
+            version_info: None,
+        };
+        assert_eq!(port_line_text(&line, false), "1/tcp\tfiltered");
+    }
+
+    #[test]
+    fn port_line_text_udp_icmp_reason_when_requested() {
+        let line = PortLine {
+            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: 53,
+            proto: "udp",
+            state: "closed",
+            reason: PortReason::IcmpPortUnreachable,
+            latency_ms: Some(1),
+            version_info: None,
+        };
+        assert_eq!(
+            port_line_text(&line, true),
+            "53/udp\tclosed\ticmp-port-unreachable"
+        );
+    }
+
+    #[test]
+    fn split_version_info_no_space_returns_whole_product() {
+        assert_eq!(split_version_info("nginx"), ("nginx", ""));
+    }
+
+    #[test]
+    fn xml_escape_empty_string_unchanged() {
+        assert_eq!(xml_escape(""), "");
+    }
+
+    #[test]
+    fn port_line_text_closed_conn_refused_reason() {
+        let line = PortLine {
+            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: 22,
+            proto: "tcp",
+            state: "closed",
+            reason: PortReason::ConnRefused,
+            latency_ms: None,
+            version_info: None,
+        };
+        assert_eq!(
+            port_line_text(&line, true),
+            "22/tcp\tclosed\tconn-refused"
+        );
+    }
+
+    #[test]
+    fn split_version_info_multiple_spaces_keeps_rest() {
+        assert_eq!(
+            split_version_info("OpenSSH 8.2p1 Debian 12"),
+            ("OpenSSH", "8.2p1 Debian 12")
+        );
+    }
+
+    #[test]
+    fn xml_escape_only_quotes() {
+        assert_eq!(xml_escape("\"\"\""), "&quot;&quot;&quot;");
     }
 }

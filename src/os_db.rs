@@ -142,4 +142,138 @@ mod tests {
         let s = "Class Linux | Linux | 4.X | general purpose";
         assert_eq!(parse_class_family(s), Some("Linux".to_string()));
     }
+
+    #[test]
+    fn parse_class_family_empty_family_is_none() {
+        let s = "Class Vendor |  | gen | type";
+        assert_eq!(parse_class_family(s), None);
+    }
+
+    #[test]
+    fn parse_class_family_missing_prefix_is_none() {
+        assert_eq!(parse_class_family("NotClass Linux | Linux | 4.X"), None);
+    }
+
+    #[test]
+    fn load_minimal_db_extracts_fingerprint_and_class() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        writeln!(
+            f,
+            "Fingerprint Test Linux Box\nClass Linux | Linux | 4.X | general purpose\n"
+        )
+        .unwrap();
+        f.flush().unwrap();
+        let db = OsDb::load(f.path()).unwrap();
+        assert_eq!(db.entries.len(), 1);
+        assert_eq!(db.entries[0].name, "Test Linux Box");
+        assert_eq!(db.entries[0].family, "Linux");
+    }
+
+    #[test]
+    fn examples_for_ttl_linux_bucket_matches_linux_family() {
+        let db = OsDb {
+            entries: vec![
+                OsEntry {
+                    name: "Linux 1".into(),
+                    family: "Linux".into(),
+                },
+                OsEntry {
+                    name: "Windows 1".into(),
+                    family: "Windows".into(),
+                },
+            ],
+        };
+        let ex = db.examples_for_ttl(Some(32), 5);
+        assert_eq!(ex, vec!["Linux 1"]);
+    }
+
+    #[test]
+    fn examples_for_ttl_windows_bucket() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Win7".into(),
+                family: "Microsoft Windows".into(),
+            }],
+        };
+        let ex = db.examples_for_ttl(Some(128), 3);
+        assert_eq!(ex, vec!["Win7"]);
+    }
+
+    #[test]
+    fn examples_for_ttl_network_bucket_cisco() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "IOS".into(),
+                family: "Cisco IOS".into(),
+            }],
+        };
+        let ex = db.examples_for_ttl(Some(255), 2);
+        assert_eq!(ex, vec!["IOS"]);
+    }
+
+    #[test]
+    fn examples_for_ttl_unknown_returns_empty() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Linux 1".into(),
+                family: "Linux".into(),
+            }],
+        };
+        assert!(db.examples_for_ttl(None, 5).is_empty());
+    }
+
+    #[test]
+    fn examples_for_ttl_respects_max_cap() {
+        let db = OsDb {
+            entries: vec![
+                OsEntry {
+                    name: "A".into(),
+                    family: "Linux".into(),
+                },
+                OsEntry {
+                    name: "B".into(),
+                    family: "BSD".into(),
+                },
+                OsEntry {
+                    name: "C".into(),
+                    family: "Solaris".into(),
+                },
+            ],
+        };
+        assert_eq!(db.examples_for_ttl(Some(60), 2).len(), 2);
+    }
+
+    #[test]
+    fn format_os_guess_without_db_is_ttl_only() {
+        assert_eq!(
+            format_os_guess(Some(64), None, 3),
+            "Linux/Unix (TTL heuristic)"
+        );
+    }
+
+    #[test]
+    fn format_os_guess_with_db_includes_example_titles() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Ubuntu 22".into(),
+                family: "Linux".into(),
+            }],
+        };
+        let s = format_os_guess(Some(64), Some(&db), 2);
+        assert!(s.contains("Ubuntu 22"));
+        assert!(s.contains("example DB titles"));
+    }
+
+    #[test]
+    fn format_os_guess_loaded_db_no_bucket_match() {
+        let db = OsDb {
+            entries: vec![OsEntry {
+                name: "Win10".into(),
+                family: "Windows".into(),
+            }],
+        };
+        let s = format_os_guess(Some(64), Some(&db), 2);
+        assert!(s.contains("no Class examples"));
+    }
 }

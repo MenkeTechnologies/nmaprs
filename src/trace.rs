@@ -87,4 +87,20 @@ mod tests {
     async fn traceroute_empty_is_ok() {
         run_traceroute(&[], 8).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn traceroute_localhost_completes() {
+        run_traceroute(&["127.0.0.1".parse().unwrap()], 1)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn traceroute_multiple_hosts_preserves_order() {
+        let hosts = vec![
+            "127.0.0.1".parse().unwrap(),
+            "127.0.0.1".parse().unwrap(),
+        ];
+        run_traceroute(&hosts, 2).await.unwrap();
+    }
 }

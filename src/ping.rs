@@ -416,4 +416,40 @@ mod tests {
         assert!(joined.contains(&"-c"));
         assert!(joined.contains(&"1"));
     }
+
+    #[test]
+    fn ttl_zero_is_valid() {
+        assert_eq!(parse_ttl("ttl=0"), Some(0));
+    }
+
+    #[test]
+    fn ttl_non_numeric_suffix_returns_none() {
+        assert_eq!(parse_ttl("ttl=abc"), None);
+    }
+
+    #[test]
+    fn parse_time_ms_integer_without_decimal() {
+        assert_eq!(parse_time_ms("time=42 ms"), Some(42));
+    }
+
+    #[test]
+    fn parse_time_ms_picks_first_match_in_multiline() {
+        let s = "time=9 ms\ntime=99 ms\n";
+        assert_eq!(parse_time_ms(s), Some(9));
+    }
+
+    #[test]
+    fn parse_ttl_before_time_in_same_line() {
+        let s = "ttl=32 time=7.2 ms";
+        assert_eq!(parse_ttl(s), Some(32));
+        assert_eq!(parse_time_ms(s), Some(7));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn ping_cmd_v6_uses_ping6_binary() {
+        let host = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let (prog, _args) = ping_cmd(host);
+        assert_eq!(prog, "ping6");
+    }
 }

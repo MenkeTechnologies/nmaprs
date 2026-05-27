@@ -357,4 +357,177 @@ mod tests {
         let mp = MatchPoints::parse_block(&lines).expect("mp");
         assert_eq!(mp.weights[0].get("SP"), Some(&25));
     }
+
+    #[test]
+    fn parse_paren_line_extracts_name_and_body() {
+        let (name, body) = parse_paren_line("T1(R=Y%DF=Y%T=40)").unwrap();
+        assert_eq!(name, "T1");
+        assert_eq!(body, "R=Y%DF=Y%T=40");
+    }
+
+    #[test]
+    fn parse_paren_line_no_paren_is_none() {
+        assert!(parse_paren_line("SEQ SP=25").is_none());
+    }
+
+    #[test]
+    fn matchpoints_skips_comments_and_blanks() {
+        let lines = vec![
+            "# comment".to_string(),
+            String::new(),
+            "WIN(W1=15%W2=15%W3=15%W4=15%W5=15%W6=15)".to_string(),
+        ];
+        let mp = MatchPoints::parse_block(&lines).unwrap();
+        assert_eq!(mp.weights[2].get("W1"), Some(&15));
+    }
+
+    #[test]
+    fn matchpoints_unknown_test_errors() {
+        let lines = vec!["NOTATEST(X=1)".to_string()];
+        assert!(MatchPoints::parse_block(&lines).is_err());
+    }
+
+    #[test]
+    fn compare_one_perfect_match_scores_one() {
+        let mut mp = MatchPoints::default();
+        mp.weights[4].insert("R".into(), 10);
+        let mut ref_tests: [Option<HashMap<String, String>>; NUM_FP_TESTS] =
+            std::array::from_fn(|_| None);
+        ref_tests[4] = Some(HashMap::from([("R".into(), "Y".into())]));
+        let rf = ReferenceFingerprint {
+            name: "ref".into(),
+            line: 1,
+            family: None,
+            tests: ref_tests,
+        };
+        let mut sub = SubjectFingerprint::default();
+        sub.tests[4] = Some(HashMap::from([("R".into(), "Y".into())]));
+        assert!((compare_one(&mp, &rf, &sub) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn compare_one_partial_match() {
+        let mut mp = MatchPoints::default();
+        mp.weights[4].insert("R".into(), 10);
+        mp.weights[4].insert("DF".into(), 10);
+        let mut ref_tests: [Option<HashMap<String, String>>; NUM_FP_TESTS] =
+            std::array::from_fn(|_| None);
+        ref_tests[4] = Some(HashMap::from([
+            ("R".into(), "Y".into()),
+            ("DF".into(), "N".into()),
+        ]));
+        let rf = ReferenceFingerprint {
+            name: "ref".into(),
+            line: 1,
+            family: None,
+            tests: ref_tests,
+        };
+        let mut sub = SubjectFingerprint::default();
+        sub.tests[4] = Some(HashMap::from([
+            ("R".into(), "Y".into()),
+            ("DF".into(), "Y".into()),
+        ]));
+        assert!((compare_one(&mp, &rf, &sub) - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn compare_one_no_subject_attrs_scores_zero() {
+        let mut mp = MatchPoints::default();
+        mp.weights[0].insert("SP".into(), 25);
+        let mut ref_tests: [Option<HashMap<String, String>>; NUM_FP_TESTS] =
+            std::array::from_fn(|_| None);
+        ref_tests[0] = Some(HashMap::from([("SP".into(), "25".into())]));
+        let rf = ReferenceFingerprint {
+            name: "ref".into(),
+            line: 1,
+            family: None,
+            tests: ref_tests,
+        };
+        assert_eq!(compare_one(&mp, &rf, &SubjectFingerprint::default()), 0.0);
+    }
+
+    #[test]
+    fn load_minimal_fingerprint_db() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        writeln!(f, "MatchPoints").unwrap();
+        writeln!(
+            f,
+            "SEQ(SP=25%GCD=75%ISR=25%TI=100%CI=50%II=100%SS=80%TS=100)"
+        )
+        .unwrap();
+        writeln!(f).unwrap();
+        writeln!(f, "Fingerprint Example OS").unwrap();
+        writeln!(f, "Class Linux | Linux | 4.X | general purpose").unwrap();
+        writeln!(f, "SEQ(SP=25%GCD=1%ISR=25%TI=100%CI=50%II=100%SS=80%TS=100)").unwrap();
+        f.flush().unwrap();
+        let db = FingerprintDb::load(f.path()).unwrap();
+        assert_eq!(db.references.len(), 1);
+        assert_eq!(db.references[0].name, "Example OS");
+        assert_eq!(db.references[0].family.as_deref(), Some("Linux"));
+    }
+
+    #[test]
+    fn best_match_returns_highest_accuracy() {
+        let mut mp = MatchPoints::default();
+        mp.weights[4].insert("R".into(), 10);
+        let mk_ref = |name: &str, expr: &str| ReferenceFingerprint {
+            name: name.into(),
+            line: 1,
+            family: None,
+            tests: {
+                let mut t: [Option<HashMap<String, String>>; NUM_FP_TESTS] =
+                    std::array::from_fn(|_| None);
+                t[4] = Some(HashMap::from([("R".into(), expr.into())]));
+                t
+            },
+        };
+        let db = FingerprintDb {
+            match_points: mp,
+            references: vec![mk_ref("weak", "N"), mk_ref("strong", "Y")],
+        };
+        let mut sub = SubjectFingerprint::default();
+        sub.tests[4] = Some(HashMap::from([("R".into(), "Y".into())]));
+        let (idx, acc) = db.best_match(&sub, 0.5).unwrap();
+        assert_eq!(idx, 1);
+        assert!((acc - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn examples_for_ttl_filters_by_family() {
+        let db = FingerprintDb {
+            match_points: MatchPoints::default(),
+            references: vec![
+                ReferenceFingerprint {
+                    name: "Linux box".into(),
+                    line: 1,
+                    family: Some("Linux".into()),
+                    tests: std::array::from_fn(|_| None),
+                },
+                ReferenceFingerprint {
+                    name: "Win box".into(),
+                    line: 2,
+                    family: Some("Windows".into()),
+                    tests: std::array::from_fn(|_| None),
+                },
+            ],
+        };
+        let ex = db.examples_for_ttl(Some(64), 5);
+        assert_eq!(ex, vec!["Linux box"]);
+    }
+
+    #[test]
+    fn format_os_guess_includes_db_titles() {
+        let db = FingerprintDb {
+            match_points: MatchPoints::default(),
+            references: vec![ReferenceFingerprint {
+                name: "Debian 12".into(),
+                line: 1,
+                family: Some("Linux".into()),
+                tests: std::array::from_fn(|_| None),
+            }],
+        };
+        let s = db.format_os_guess(Some(64), 2);
+        assert!(s.contains("Debian 12"));
+    }
 }

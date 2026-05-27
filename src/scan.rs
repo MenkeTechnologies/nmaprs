@@ -713,6 +713,48 @@ mod inter_probe_delay_tests {
             Some(Duration::from_millis(40))
         );
     }
+
+    #[test]
+    fn sample_inter_probe_delay_max_only_is_bounded() {
+        let max = Duration::from_millis(20);
+        let sampled = sample_inter_probe_delay(None, Some(max)).unwrap();
+        assert!(sampled <= max);
+    }
+
+    #[test]
+    fn sample_inter_probe_delay_both_none() {
+        assert!(sample_inter_probe_delay(None, None).is_none());
+    }
+
+    #[test]
+    fn sample_inter_probe_delay_min_max_equal_returns_min() {
+        let d = Duration::from_millis(50);
+        assert_eq!(sample_inter_probe_delay(Some(d), Some(d)), Some(d));
+    }
+
+    #[test]
+    fn sample_inter_probe_delay_min_max_range_is_bounded() {
+        let min = Duration::from_millis(10);
+        let max = Duration::from_millis(30);
+        let sampled = sample_inter_probe_delay(Some(min), Some(max)).unwrap();
+        assert!(sampled >= min);
+        assert!(sampled <= max);
+    }
+
+    #[test]
+    fn sample_inter_probe_delay_max_zero_is_zero() {
+        assert_eq!(
+            sample_inter_probe_delay(None, Some(Duration::ZERO)),
+            Some(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn sample_inter_probe_delay_max_less_than_min_returns_min() {
+        let min = Duration::from_millis(100);
+        let max = Duration::from_millis(20);
+        assert_eq!(sample_inter_probe_delay(Some(min), Some(max)), Some(min));
+    }
 }
 
 #[cfg(test)]
@@ -730,6 +772,16 @@ mod host_deadline_tests {
         let h = IpAddr::V4(Ipv4Addr::new(9, 8, 7, 6));
         assert!(!host_over_deadline(&m, h, Duration::from_secs(60)));
         assert!(!host_over_deadline(&m, h, Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn host_deadline_expired_after_limit() {
+        use std::thread;
+        let m = DashMap::new();
+        let h = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        assert!(!host_over_deadline(&m, h, Duration::from_millis(1)));
+        thread::sleep(Duration::from_millis(5));
+        assert!(host_over_deadline(&m, h, Duration::from_millis(1)));
     }
 }
 
@@ -751,6 +803,11 @@ mod pacer_tests {
     #[test]
     fn maybe_new_none_without_max_rate() {
         assert!(ProbeRatePacer::maybe_new(None, Some(100)).is_none());
+    }
+
+    #[test]
+    fn maybe_new_some_with_max_rate() {
+        assert!(ProbeRatePacer::maybe_new(Some(500), None).is_some());
     }
 }
 
@@ -779,5 +836,14 @@ mod merge_tests {
         merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Closed);
         merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Filtered);
         assert_eq!(*notes.get(&k).unwrap(), UdpIcmpOutcome::Closed);
+    }
+
+    #[test]
+    fn merge_filtered_stays_filtered() {
+        let notes: UdpIcmpNotes = Arc::new(DashMap::new());
+        let k = (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)), 11);
+        merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Filtered);
+        merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Filtered);
+        assert_eq!(*notes.get(&k).unwrap(), UdpIcmpOutcome::Filtered);
     }
 }

@@ -355,3 +355,68 @@ mod tcp_flags_tests {
         assert!(!tcp_flags_rst(&[0u8; 4]));
     }
 }
+
+#[cfg(test)]
+mod packet_build_tests {
+    use std::net::Ipv4Addr;
+
+    use pnet::packet::ip::IpNextHeaderProtocols;
+    use pnet::packet::ipv4::Ipv4Packet;
+    use pnet::packet::tcp::{TcpFlags, TcpPacket};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    use super::build_ipv4_tcp_syn;
+
+    #[test]
+    fn build_ipv4_tcp_syn_sets_syn_flag_and_ports() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 2),
+            12345,
+            443,
+            0xdeadbeef,
+            &mut rng,
+        );
+        let ip = Ipv4Packet::new(&pkt).unwrap();
+        assert_eq!(ip.get_source(), Ipv4Addr::new(10, 0, 0, 1));
+        assert_eq!(ip.get_destination(), Ipv4Addr::new(10, 0, 0, 2));
+        assert_eq!(ip.get_next_level_protocol(), IpNextHeaderProtocols::Tcp);
+        let ihl = ip.get_header_length() as usize * 4;
+        let tcp = TcpPacket::new(&pkt[ihl..]).unwrap();
+        assert_eq!(tcp.get_source(), 12345);
+        assert_eq!(tcp.get_destination(), 443);
+        assert_eq!(tcp.get_flags() & TcpFlags::SYN, TcpFlags::SYN);
+        assert_eq!(tcp.get_sequence(), 0xdeadbeef);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_total_length_matches_buffer() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::new(192, 0, 2, 1),
+            40000,
+            80,
+            1,
+            &mut rng,
+        );
+        assert_eq!(pkt.len(), 40);
+    }
+
+    #[test]
+    fn build_ipv4_tcp_syn_ipv4_total_length_field() {
+        let mut rng = StdRng::seed_from_u64(3);
+        let pkt = build_ipv4_tcp_syn(
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 2),
+            40000,
+            443,
+            99,
+            &mut rng,
+        );
+        let ip = Ipv4Packet::new(&pkt).unwrap();
+        assert_eq!(ip.get_total_length(), 40);
+    }
+}

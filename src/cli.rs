@@ -518,4 +518,78 @@ mod effective_opts_tests {
         let a = Args::try_parse_from(["nmaprs", "-p", "80", "--fuzzy", "127.0.0.1"]).unwrap();
         assert!(a.effective_osscan_guess());
     }
+
+    #[test]
+    fn effective_verbosity_high_value_passthrough() {
+        let a = Args::try_parse_from([
+            "nmaprs",
+            "-p",
+            "80",
+            "--verbosity",
+            "4",
+            "127.0.0.1",
+        ])
+        .unwrap();
+        assert_eq!(a.effective_verbosity(), 4);
+    }
+
+    #[test]
+    fn effective_debug_with_ff_adds_two() {
+        let a = Args::try_parse_from(["nmaprs", "-p", "80", "--debug", "1", "--ff", "127.0.0.1"])
+            .unwrap();
+        assert_eq!(a.effective_debug(), 3);
+    }
+
+    #[test]
+    fn effective_randomize_hosts_from_long_flag() {
+        let a =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--randomize-hosts", "127.0.0.1"]).unwrap();
+        assert!(a.effective_randomize_hosts());
+    }
+
+    #[test]
+    fn ping_only_and_list_scan_flags_parse() {
+        let a = Args::try_parse_from(["nmaprs", "--sL", "127.0.0.1"]).unwrap();
+        assert!(a.list_scan);
+        let b = Args::try_parse_from(["nmaprs", "--sn", "127.0.0.1"]).unwrap();
+        assert!(b.ping_only);
+    }
+
+    #[test]
+    fn no_ping_flag_parses() {
+        let a = Args::try_parse_from(["nmaprs", "--no-ping", "-p", "80", "127.0.0.1"]).unwrap();
+        assert!(a.no_ping);
+    }
+
+    #[test]
+    fn ipv6_flag_parses() {
+        let a = Args::try_parse_from(["nmaprs", "-6", "-p", "80", "::1"]).unwrap();
+        assert!(a.ipv6);
+    }
+
+    #[test]
+    fn top_ports_and_fast_flags_parse() {
+        let a = Args::try_parse_from(["nmaprs", "-F", "127.0.0.1"]).unwrap();
+        assert!(a.fast);
+        let b = Args::try_parse_from(["nmaprs", "--top-ports", "50", "127.0.0.1"]).unwrap();
+        assert_eq!(b.top_ports, Some(50));
+    }
+
+    #[test]
+    fn traceroute_flag_parses() {
+        let a = Args::try_parse_from(["nmaprs", "-p", "80", "--traceroute", "127.0.0.1"]).unwrap();
+        assert!(a.traceroute);
+    }
+
+    #[test]
+    fn version_scan_flag_parses() {
+        let a = Args::try_parse_from(["nmaprs", "-p", "80", "--version-scan", "127.0.0.1"]).unwrap();
+        assert!(a.version_scan);
+    }
+
+    #[test]
+    fn script_default_flag_parses() {
+        let a = Args::try_parse_from(["nmaprs", "-p", "80", "--script-default", "127.0.0.1"]).unwrap();
+        assert!(a.script_default);
+    }
 }

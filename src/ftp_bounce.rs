@@ -259,4 +259,20 @@ mod tests {
         let s = port_command_line(Ipv4Addr::new(10, 255, 0, 1), 49152);
         assert_eq!(s, "PORT 10,255,0,1,192,0");
     }
+
+    #[test]
+    fn port_command_line_port_zero() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(1, 2, 3, 4), 0),
+            "PORT 1,2,3,4,0,0"
+        );
+    }
+
+    #[test]
+    fn port_command_line_port_65535() {
+        assert_eq!(
+            port_command_line(Ipv4Addr::new(1, 2, 3, 4), 65535),
+            "PORT 1,2,3,4,255,255"
+        );
+    }
 }

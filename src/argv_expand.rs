@@ -343,4 +343,188 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn expands_syn_ack_window_and_maimon_scan_types() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sS".into()]),
+            vec!["nmaprs", "--scan-type", "S"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sA".into()]),
+            vec!["nmaprs", "--scan-type", "A"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sW".into()]),
+            vec!["nmaprs", "--scan-type", "W"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sM".into()]),
+            vec!["nmaprs", "--scan-type", "M"]
+        );
+    }
+
+    #[test]
+    fn expands_udp_and_connect_scan_types() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sU".into()]),
+            vec!["nmaprs", "--scan-type", "U"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sT".into()]),
+            vec!["nmaprs", "--scan-type", "T"]
+        );
+    }
+
+    #[test]
+    fn expands_pp_and_pm_icmp_ping_flags() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PP".into()]),
+            vec!["nmaprs", "--ping-P"]
+        );
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PM".into()]),
+            vec!["nmaprs", "--ping-M"]
+        );
+    }
+
+    #[test]
+    fn expands_oX_and_oG_output_flags() {
+        let v = expand_nmap_style_argv(vec![
+            "nmaprs".into(),
+            "-oX".into(),
+            "scan.xml".into(),
+            "-oG".into(),
+            "scan.gnmap".into(),
+        ]);
+        assert_eq!(v, vec!["nmaprs", "--oX", "scan.xml", "--oG", "scan.gnmap"]);
+    }
+
+    #[test]
+    fn expands_ping_ack_without_port_list() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PA".into()]),
+            vec!["nmaprs", "--ping-A"]
+        );
+    }
+
+    #[test]
+    fn expands_ping_udp_default_flag_only() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-PU".into()]),
+            vec!["nmaprs", "--ping-U"]
+        );
+    }
+
+    #[test]
+    fn mixed_short_and_long_flags_preserve_order() {
+        let v = expand_nmap_style_argv(vec![
+            "nmaprs".into(),
+            "-Pn".into(),
+            "--top-ports".into(),
+            "10".into(),
+            "-sT".into(),
+            "127.0.0.1".into(),
+        ]);
+        assert_eq!(
+            v,
+            vec![
+                "nmaprs", "--no-ping", "--top-ports", "10", "--scan-type", "T", "127.0.0.1",
+            ]
+        );
+    }
+
+    #[test]
+    fn single_dash_passes_through_unknown_cluster() {
+        let v = expand_nmap_style_argv(vec!["nmaprs".into(), "-p".into(), "80".into()]);
+        assert_eq!(v, vec!["nmaprs", "-p", "80"]);
+    }
+
+    #[test]
+    fn expand_vvvv_caps_at_five() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-vvvvv".into()]),
+            vec!["nmaprs", "--verbosity=5"]
+        );
+    }
+
+    #[test]
+    fn expands_b_ftp_bounce_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-b".into(), "u:p@h:21".into()]),
+            vec!["nmaprs", "-b", "u:p@h:21"]
+        );
+    }
+
+    #[test]
+    fn expands_fragment_short_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-f".into()]),
+            vec!["nmaprs", "-f"]
+        );
+    }
+
+    #[test]
+    fn expands_n_no_dns() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-n".into()]),
+            vec!["nmaprs", "-n"]
+        );
+    }
+
+    #[test]
+    fn expands_r_resolve_all() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-R".into()]),
+            vec!["nmaprs", "-R"]
+        );
+    }
+
+    #[test]
+    fn expands_6_ipv6_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-6".into()]),
+            vec!["nmaprs", "-6"]
+        );
+    }
+
+    #[test]
+    fn expands_uppercase_scan_type_via_s_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sU".into()]),
+            vec!["nmaprs", "--scan-type", "U"]
+        );
+    }
+
+    #[test]
+    fn expands_traceroute_long_flag_passthrough() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "--traceroute".into()]),
+            vec!["nmaprs", "--traceroute"]
+        );
+    }
+
+    #[test]
+    fn expands_no_ping_long_flag() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "--no-ping".into()]),
+            vec!["nmaprs", "--no-ping"]
+        );
+    }
+
+    #[test]
+    fn expands_version_scan_short() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sV".into()]),
+            vec!["nmaprs", "--version-scan"]
+        );
+    }
+
+    #[test]
+    fn expands_aggressive_uppercase_a_not_scan_type() {
+        assert_eq!(
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-A".into()]),
+            vec!["nmaprs", "-A"]
+        );
+    }
 }

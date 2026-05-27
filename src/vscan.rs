@@ -864,4 +864,294 @@ softmatch unknown m|^.| p/Guess/
         let p = parse_q_field(r"q|\\\0\x41|").expect("q");
         assert_eq!(p, vec![b'\\', 0, b'A']);
     }
+
+    #[test]
+    fn decode_nmap_escape_whitespace_controls() {
+        assert_eq!(decode_nmap_escape_bytes(r"\n\r\t"), vec![b'\n', b'\r', b'\t']);
+    }
+
+    #[test]
+    fn decode_nmap_escape_plain_chars_after_backslash() {
+        assert_eq!(decode_nmap_escape_bytes(r"\Q"), vec![b'Q']);
+    }
+
+    #[test]
+    fn parse_q_field_custom_pipe_delimiter() {
+        let p = parse_q_field("q|GET / HTTP/1.0\\r\\n\\r\\n|").expect("q");
+        assert!(p.starts_with(b"GET / HTTP/1.0"));
+    }
+
+    #[test]
+    fn parse_q_field_missing_delimiter_is_none() {
+        assert!(parse_q_field("not-a-q-field").is_none());
+    }
+
+    #[test]
+    fn parse_q_field_empty_payload() {
+        let p = parse_q_field("q||").expect("q");
+        assert!(p.is_empty());
+    }
+
+    #[test]
+    fn port_in_ranges_inclusive_endpoints() {
+        let r = parse_port_ranges_list("80-443").unwrap();
+        assert!(port_in_ranges(80, &r));
+        assert!(port_in_ranges(443, &r));
+        assert!(!port_in_ranges(79, &r));
+        assert!(!port_in_ranges(444, &r));
+    }
+
+    #[test]
+    fn probe_ports_ok_none_means_any_port() {
+        assert!(probe_ports_ok(65535, &None));
+        assert!(probe_ports_ok(1, &None));
+    }
+
+    #[test]
+    fn probe_ports_ok_some_restricts_to_list() {
+        let spec = parse_port_ranges_list("22,443");
+        assert!(probe_ports_ok(22, &spec));
+        assert!(probe_ports_ok(443, &spec));
+        assert!(!probe_ports_ok(80, &spec));
+    }
+
+    #[test]
+    fn use_tls_only_when_port_on_sslports() {
+        let mut probe = TcpProbe {
+            name: "X".into(),
+            payload: vec![],
+            totalwait_ms: 1000,
+            rarity: 1,
+            ports: None,
+            sslports: parse_port_ranges_list("443,8443"),
+            matches: vec![],
+        };
+        assert!(use_tls_for_tcp(443, &probe));
+        assert!(use_tls_for_tcp(8443, &probe));
+        assert!(!use_tls_for_tcp(80, &probe));
+        probe.sslports = None;
+        assert!(!use_tls_for_tcp(443, &probe));
+    }
+
+    #[test]
+    fn parse_match_line_extracts_product_and_version_templates() {
+        let m = parse_match_line("match ssh m|^SSH-([\\d.]+)| p/OpenSSH/ v/$1/").unwrap();
+        let m = m.expect("match");
+        assert_eq!(m.service_name, "ssh");
+        assert_eq!(m.product_tpl.as_deref(), Some("OpenSSH"));
+        assert_eq!(m.version_tpl.as_deref(), Some("$1"));
+        assert!(!m.soft);
+    }
+
+    #[test]
+    fn parse_match_line_softmatch_flag() {
+        let m = parse_match_line("softmatch guess m|^.| p/?/").unwrap().unwrap();
+        assert!(m.soft);
+    }
+
+    #[test]
+    fn parse_match_line_invalid_regex_returns_none() {
+        assert!(parse_match_line("match bad m|[unclosed| p/x/").unwrap().is_none());
+    }
+
+    #[test]
+    fn apply_template_substitutes_capture_groups() {
+        let re = Regex::new(r"^SSH-(.+)-(.+)$").unwrap();
+        let caps = re.captures(b"SSH-8.2p1-Ubuntu").unwrap();
+        assert_eq!(apply_template("$1 on $2", &caps), "8.2p1 on Ubuntu");
+    }
+
+    #[test]
+    fn apply_template_dollar_dollar_is_literal() {
+        let re = Regex::new(r"x").unwrap();
+        let caps = re.captures(b"x").unwrap();
+        assert_eq!(apply_template("cost is $$5", &caps), "cost is $5");
+    }
+
+    #[test]
+    fn format_match_joins_product_version_and_info() {
+        let re = Regex::new(r"^HTTP/1\.1").unwrap();
+        let caps = re.captures(b"HTTP/1.1 200 OK").unwrap();
+        let m = ServiceMatch {
+            service_name: "http".into(),
+            regex: re,
+            product_tpl: Some("Apache".into()),
+            version_tpl: Some("2.4".into()),
+            info_tpl: Some("protocol 2.0".into()),
+            os_tpl: None,
+            device_tpl: None,
+            cpe_tpl: vec![],
+            soft: false,
+        };
+        let s = format_match(&m, &caps);
+        assert!(s.contains("Apache"));
+        assert!(s.contains("2.4"));
+        assert!(s.contains("(protocol 2.0)"));
+    }
+
+    #[test]
+    fn format_match_empty_templates_falls_back_to_service_name() {
+        let re = Regex::new(r".").unwrap();
+        let caps = re.captures(b"x").unwrap();
+        let m = ServiceMatch {
+            service_name: "unknown".into(),
+            regex: re,
+            product_tpl: None,
+            version_tpl: None,
+            info_tpl: None,
+            os_tpl: None,
+            device_tpl: None,
+            cpe_tpl: vec![],
+            soft: false,
+        };
+        assert_eq!(format_match(&m, &caps), "unknown");
+    }
+
+    #[test]
+    fn parses_sslports_and_rarity_on_tcp_probe() {
+        let fixture = r#"
+Probe TCP NULL q||
+sslports 443,8443
+rarity 3
+match x m|^.| p/x/
+"#;
+        let sp = parse_probes(fixture).unwrap();
+        let p = &sp.tcp[0];
+        assert_eq!(p.rarity, 3);
+        assert!(use_tls_for_tcp(443, p));
+    }
+
+    #[test]
+    fn hash_comment_and_exclude_lines_skipped() {
+        let fixture = r#"
+# comment line
+Exclude 1-65535
+Probe TCP NULL q||
+match x m|^.| p/x/
+"#;
+        let sp = parse_probes(fixture).unwrap();
+        assert_eq!(sp.tcp.len(), 1);
+    }
+
+    #[test]
+    fn consecutive_tcp_probes_both_parsed() {
+        let fixture = r#"
+Probe TCP A q|A|
+Probe TCP B q|B|
+"#;
+        let sp = parse_probes(fixture).unwrap();
+        assert_eq!(sp.tcp.len(), 2);
+        assert_eq!(sp.tcp[0].name, "A");
+        assert_eq!(sp.tcp[1].name, "B");
+    }
+
+    #[test]
+    fn parse_port_ranges_list_empty_string_is_none() {
+        assert!(parse_port_ranges_list("").is_none());
+        assert!(parse_port_ranges_list("  ,  ").is_none());
+    }
+
+    #[test]
+    fn parse_port_ranges_single_port_tuple() {
+        let r = parse_port_ranges_list("22").unwrap();
+        assert_eq!(r, vec![(22, 22)]);
+    }
+
+    #[test]
+    fn find_slash_field_extracts_info_template() {
+        let tail = " p/Apache/ v/2.4/ i/protocol 2.0/ o/Linux/";
+        assert_eq!(find_slash_field(tail, "i/"), Some("protocol 2.0".into()));
+        assert_eq!(find_slash_field(tail, "o/"), Some("Linux".into()));
+    }
+
+    #[test]
+    fn find_all_slash_fields_collects_cpe_entries() {
+        let tail = " p/x/ cpe:/a:vendor:product:1.0/ cpe:/b:other:thing/";
+        let cpe = find_all_slash_fields(tail, "cpe:/");
+        assert_eq!(cpe.len(), 2);
+        assert!(cpe[0].starts_with("cpe:/"));
+    }
+
+    #[test]
+    fn match_line_with_os_and_device_templates() {
+        let m = parse_match_line("match svc m|^ok| p/Px/o/FreeBSD/d/router/").unwrap();
+        let m = m.unwrap();
+        assert_eq!(m.os_tpl.as_deref(), Some("FreeBSD"));
+        assert_eq!(m.device_tpl.as_deref(), Some("router"));
+    }
+
+    #[test]
+    fn tcp_probe_then_udp_probe_flushes_tcp() {
+        let fixture = r#"
+Probe TCP T q|t|
+Probe UDP U q|u|
+"#;
+        let sp = parse_probes(fixture).unwrap();
+        assert_eq!(sp.tcp.len(), 1);
+        assert_eq!(sp.udp.len(), 1);
+        assert_eq!(sp.tcp[0].name, "T");
+        assert_eq!(sp.udp[0].name, "U");
+    }
+
+    #[test]
+    fn format_match_includes_os_and_device_brackets() {
+        let re = Regex::new(r"^x").unwrap();
+        let caps = re.captures(b"x").unwrap();
+        let m = ServiceMatch {
+            service_name: "svc".into(),
+            regex: re,
+            product_tpl: None,
+            version_tpl: None,
+            info_tpl: None,
+            os_tpl: Some("Linux".into()),
+            device_tpl: Some("switch".into()),
+            cpe_tpl: vec![],
+            soft: false,
+        };
+        let s = format_match(&m, &caps);
+        assert!(s.contains("[Linux]"));
+        assert!(s.contains("{switch}"));
+    }
+
+    #[test]
+    fn parse_match_line_cpe_template() {
+        let m = parse_match_line("match http m|^HTTP| p/Apache/ cpe:/a:apache:http_server/")
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.cpe_tpl.len(), 1);
+        assert!(m.cpe_tpl[0].contains("apache"));
+    }
+
+    #[test]
+    fn decode_nmap_escape_hex_lowercase() {
+        assert_eq!(decode_nmap_escape_bytes(r"\x41"), vec![0x41]);
+    }
+
+    #[test]
+    fn probe_ports_ok_empty_ranges_some() {
+        let spec = parse_port_ranges_list("8080");
+        assert!(probe_ports_ok(8080, &spec));
+        assert!(!probe_ports_ok(8081, &spec));
+    }
+
+    #[test]
+    fn parse_probes_default_totalwaitms_six_seconds() {
+        let fixture = "Probe TCP NULL q||\n";
+        let sp = parse_probes(fixture).unwrap();
+        assert_eq!(sp.tcp[0].totalwait_ms, 6000);
+    }
+
+    #[test]
+    fn parse_probes_default_rarity_five() {
+        let fixture = "Probe UDP X q||\n";
+        let sp = parse_probes(fixture).unwrap();
+        assert_eq!(sp.udp[0].rarity, 5);
+    }
+
+    #[test]
+    fn apply_template_missing_group_is_empty() {
+        let re = Regex::new(r"^x").unwrap();
+        let caps = re.captures(b"x").unwrap();
+        assert_eq!(apply_template("$9", &caps), "");
+    }
 }

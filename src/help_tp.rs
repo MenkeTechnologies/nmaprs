@@ -366,4 +366,57 @@ mod tests {
     fn version_constant_non_empty() {
         assert!(!VERSION.is_empty());
     }
+
+    #[test]
+    fn section_line_respects_requested_width() {
+        let narrow = section_line("X", 20, false);
+        let wide = section_line("X", 60, false);
+        assert!(wide.len() >= narrow.len());
+    }
+
+    #[test]
+    fn tp_line_short_flag_has_comment_separator() {
+        let line = tp_line("-V", "version", false);
+        let parts: Vec<_> = line.split("//").collect();
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].contains("-V"));
+    }
+
+    #[test]
+    fn tp_line_color_mode_wraps_flag_text() {
+        let c = tp_line("--help", "help", true);
+        assert!(c.contains("\x1b["));
+    }
+
+    #[test]
+    fn section_line_plain_has_no_escape_codes() {
+        let s = section_line("TARGETS", 50, false);
+        assert!(!s.contains("\x1b"));
+    }
+
+    #[test]
+    fn banner_plain_contains_nmaprs_art() {
+        use super::BANNER_PLAIN;
+        assert!(BANNER_PLAIN.contains('█'));
+        assert!(BANNER_PLAIN.lines().count() >= 6);
+    }
+
+    #[test]
+    fn tp_line_long_flag_still_has_comment() {
+        let line = tp_line("--very-long-flag-name-here", "desc", false);
+        assert!(line.contains("//"));
+        assert!(line.contains("desc"));
+    }
+
+    #[test]
+    fn section_line_zero_width_still_has_title() {
+        let s = section_line("X", 0, false);
+        assert!(s.contains("X"));
+    }
+
+    #[test]
+    fn tp_line_starts_with_two_spaces() {
+        let line = tp_line("-h", "help", false);
+        assert!(line.starts_with("  "));
+    }
 }

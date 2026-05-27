@@ -241,4 +241,36 @@ mod tests {
         assert_eq!(p.get_icmp_type(), IcmpTypes::AddressMaskRequest);
         assert_eq!(p.payload().len(), 8);
     }
+
+    #[test]
+    fn timestamp_request_checksum_non_zero() {
+        let buf = build_icmp_timestamp_request(0xbeef, 0x0001);
+        let p = IcmpPacket::new(&buf).unwrap();
+        assert_ne!(p.get_checksum(), 0);
+    }
+
+    #[test]
+    fn address_mask_request_checksum_non_zero() {
+        let buf = build_icmp_address_mask_request(99, 1);
+        let p = IcmpPacket::new(&buf).unwrap();
+        assert_ne!(p.get_checksum(), 0);
+    }
+
+    #[test]
+    fn timestamp_request_id_seq_in_payload() {
+        let buf = build_icmp_timestamp_request(0x1234, 0x5678);
+        let p = IcmpPacket::new(&buf).unwrap();
+        let pl = p.payload();
+        assert_eq!(u16::from_be_bytes([pl[0], pl[1]]), 0x1234);
+        assert_eq!(u16::from_be_bytes([pl[2], pl[3]]), 0x5678);
+    }
+
+    #[test]
+    fn timestamp_and_mask_requests_differ_in_length() {
+        let ts = build_icmp_timestamp_request(1, 1);
+        let am = build_icmp_address_mask_request(1, 1);
+        assert_eq!(ts.len(), 20);
+        assert_eq!(am.len(), 12);
+        assert_ne!(ts.len(), am.len());
+    }
 }
