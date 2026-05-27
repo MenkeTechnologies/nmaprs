@@ -1324,15 +1324,19 @@ mod tests {
         // Replacing the checksum bytes with the computed checksum AND
         // re-running the checksum must yield 0 (canonical "checksum of
         // a packet with its own checksum field is 0" property).
-        let mut data = vec![0x45, 0x00, 0x00, 0x14, 0x00, 0x00, 0x40, 0x00,
-                             0x40, 0x06, 0x00, 0x00,    // checksum slot
-                             192, 168, 0, 1,
-                             192, 168, 0, 2];
+        let mut data = vec![
+            0x45, 0x00, 0x00, 0x14, 0x00, 0x00, 0x40, 0x00, 0x40, 0x06, 0x00,
+            0x00, // checksum slot
+            192, 168, 0, 1, 192, 168, 0, 2,
+        ];
         let cs = internet_checksum(&data);
         data[10] = (cs >> 8) as u8;
         data[11] = cs as u8;
-        assert_eq!(internet_checksum(&data), 0,
-            "packet with embedded checksum must verify as 0");
+        assert_eq!(
+            internet_checksum(&data),
+            0,
+            "packet with embedded checksum must verify as 0"
+        );
     }
 
     #[test]
@@ -1380,8 +1384,13 @@ mod tests {
 
     #[test]
     fn flags_str_full_house() {
-        let all = TcpFlags::ECE | TcpFlags::URG | TcpFlags::ACK
-                | TcpFlags::PSH | TcpFlags::RST | TcpFlags::SYN | TcpFlags::FIN;
+        let all = TcpFlags::ECE
+            | TcpFlags::URG
+            | TcpFlags::ACK
+            | TcpFlags::PSH
+            | TcpFlags::RST
+            | TcpFlags::SYN
+            | TcpFlags::FIN;
         assert_eq!(flags_str(all), "EUAPRSF");
     }
 
@@ -1530,7 +1539,7 @@ mod tests {
     fn gcd_two_basic() {
         assert_eq!(gcd_two(48, 18), 6);
         assert_eq!(gcd_two(100, 25), 25);
-        assert_eq!(gcd_two(17, 13), 1);    // coprime
+        assert_eq!(gcd_two(17, 13), 1); // coprime
     }
 
     #[test]
@@ -1615,8 +1624,11 @@ mod tests {
         // byte-swapped form (0x6400, 0x6E00, ...) ALSO has orderly
         // small diffs. The BI check fires before "I", so a sequence
         // whose swap_bytes form also looks incremental gets BI.
-        assert_eq!(classify_ipid(&[100, 110, 120, 130, 140]), "BI",
-            "byte-swap-orderly sequence MUST trip BI before I");
+        assert_eq!(
+            classify_ipid(&[100, 110, 120, 130, 140]),
+            "BI",
+            "byte-swap-orderly sequence MUST trip BI before I"
+        );
     }
 
     #[test]
