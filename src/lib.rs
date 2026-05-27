@@ -1425,7 +1425,9 @@ mod host_batch_tests {
         ])
         .unwrap();
         let plan = ScanPlan::from_args(&args).expect("plan");
-        let hosts: Vec<_> = (1..=4).map(|n| IpAddr::V4(Ipv4Addr::new(127, 0, 0, n))).collect();
+        let hosts: Vec<_> = (1..=4)
+            .map(|n| IpAddr::V4(Ipv4Addr::new(127, 0, 0, n)))
+            .collect();
         let b = host_batches(&hosts, &plan);
         assert!(b.len() >= 2);
         assert!(b.iter().all(|chunk| chunk.len() <= 2));
@@ -1466,9 +1468,11 @@ mod host_batch_tests {
         ])
         .unwrap();
         let plan = ScanPlan::from_args(&args).expect("plan");
-        let hosts: Vec<_> = (1..=3).map(|n| IpAddr::V4(Ipv4Addr::new(127, 0, 0, n))).collect();
+        let hosts: Vec<_> = (1..=3)
+            .map(|n| IpAddr::V4(Ipv4Addr::new(127, 0, 0, n)))
+            .collect();
         let b = host_batches(&hosts, &plan);
-        assert!(b.len() >= 1);
+        assert!(!b.is_empty());
         let flat: Vec<_> = b.iter().flatten().copied().collect();
         assert_eq!(flat, hosts);
     }

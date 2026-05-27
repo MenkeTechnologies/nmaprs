@@ -521,15 +521,8 @@ mod effective_opts_tests {
 
     #[test]
     fn effective_verbosity_high_value_passthrough() {
-        let a = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--verbosity",
-            "4",
-            "127.0.0.1",
-        ])
-        .unwrap();
+        let a =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--verbosity", "4", "127.0.0.1"]).unwrap();
         assert_eq!(a.effective_verbosity(), 4);
     }
 
@@ -583,13 +576,15 @@ mod effective_opts_tests {
 
     #[test]
     fn version_scan_flag_parses() {
-        let a = Args::try_parse_from(["nmaprs", "-p", "80", "--version-scan", "127.0.0.1"]).unwrap();
+        let a =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--version-scan", "127.0.0.1"]).unwrap();
         assert!(a.version_scan);
     }
 
     #[test]
     fn script_default_flag_parses() {
-        let a = Args::try_parse_from(["nmaprs", "-p", "80", "--script-default", "127.0.0.1"]).unwrap();
+        let a =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--script-default", "127.0.0.1"]).unwrap();
         assert!(a.script_default);
     }
 }

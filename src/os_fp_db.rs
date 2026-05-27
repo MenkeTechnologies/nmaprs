@@ -459,7 +459,11 @@ mod tests {
         writeln!(f).unwrap();
         writeln!(f, "Fingerprint Example OS").unwrap();
         writeln!(f, "Class Linux | Linux | 4.X | general purpose").unwrap();
-        writeln!(f, "SEQ(SP=25%GCD=1%ISR=25%TI=100%CI=50%II=100%SS=80%TS=100)").unwrap();
+        writeln!(
+            f,
+            "SEQ(SP=25%GCD=1%ISR=25%TI=100%CI=50%II=100%SS=80%TS=100)"
+        )
+        .unwrap();
         f.flush().unwrap();
         let db = FingerprintDb::load(f.path()).unwrap();
         assert_eq!(db.references.len(), 1);

@@ -423,7 +423,7 @@ mod tests {
 
     use super::{port_line_text, split_version_info, xml_escape};
 
-    use super::{days_to_ymd, chrono_timestamp};
+    use super::{chrono_timestamp, days_to_ymd};
 
     #[test]
     fn xml_escape_escapes_markup_and_quotes() {
@@ -545,10 +545,7 @@ mod tests {
             latency_ms: None,
             version_info: None,
         };
-        assert_eq!(
-            port_line_text(&line, true),
-            "22/tcp\tclosed\tconn-refused"
-        );
+        assert_eq!(port_line_text(&line, true), "22/tcp\tclosed\tconn-refused");
     }
 
     #[test]

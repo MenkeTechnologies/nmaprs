@@ -466,7 +466,14 @@ fn unique_hosts_flag_runs() {
 fn randomize_hosts_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--randomize-hosts", "-p", "65508", "127.0.0.1", "127.0.0.2"])
+        .args([
+            "-Pn",
+            "--randomize-hosts",
+            "-p",
+            "65508",
+            "127.0.0.1",
+            "127.0.0.2",
+        ])
         .assert()
         .success();
 }

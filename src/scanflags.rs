@@ -159,6 +159,9 @@ mod tests {
 
     #[test]
     fn parses_lowercase_glued_synack() {
-        assert_eq!(parse_scanflags("synack").unwrap(), TcpFlags::SYN | TcpFlags::ACK);
+        assert_eq!(
+            parse_scanflags("synack").unwrap(),
+            TcpFlags::SYN | TcpFlags::ACK
+        );
     }
 }

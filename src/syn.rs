@@ -1354,10 +1354,7 @@ mod syn_shard_tests {
     #[test]
     fn split_preserves_element_order() {
         let v: Vec<u8> = (0..7).collect();
-        let flat: Vec<u8> = split_into_syn_chunks(v, 3)
-            .into_iter()
-            .flatten()
-            .collect();
+        let flat: Vec<u8> = split_into_syn_chunks(v, 3).into_iter().flatten().collect();
         assert_eq!(flat, (0..7).collect::<Vec<_>>());
     }
 

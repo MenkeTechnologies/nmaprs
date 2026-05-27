@@ -1136,14 +1136,9 @@ mod tests {
 
     #[test]
     fn has_explicit_discovery_flags_false_for_no_ping_only() {
-        let args = crate::cli::Args::try_parse_from([
-            "nmaprs",
-            "--no-ping",
-            "-p",
-            "80",
-            "127.0.0.1",
-        ])
-        .unwrap();
+        let args =
+            crate::cli::Args::try_parse_from(["nmaprs", "--no-ping", "-p", "80", "127.0.0.1"])
+                .unwrap();
         assert!(!has_explicit_discovery_flags(&args));
     }
 
@@ -1164,14 +1159,9 @@ mod tests {
 
     #[test]
     fn has_implemented_explicit_probes_false_when_only_no_ping() {
-        let args = crate::cli::Args::try_parse_from([
-            "nmaprs",
-            "--no-ping",
-            "-p",
-            "80",
-            "127.0.0.1",
-        ])
-        .unwrap();
+        let args =
+            crate::cli::Args::try_parse_from(["nmaprs", "--no-ping", "-p", "80", "127.0.0.1"])
+                .unwrap();
         assert!(!has_implemented_explicit_probes(&args));
     }
 

@@ -389,6 +389,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(non_snake_case)]
     fn expands_oX_and_oG_output_flags() {
         let v = expand_nmap_style_argv(vec![
             "nmaprs".into(),
@@ -429,7 +430,13 @@ mod tests {
         assert_eq!(
             v,
             vec![
-                "nmaprs", "--no-ping", "--top-ports", "10", "--scan-type", "T", "127.0.0.1",
+                "nmaprs",
+                "--no-ping",
+                "--top-ports",
+                "10",
+                "--scan-type",
+                "T",
+                "127.0.0.1",
             ]
         );
     }

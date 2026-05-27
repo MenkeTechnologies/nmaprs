@@ -281,7 +281,10 @@ mod tests {
 
     #[test]
     fn parse_exclude_ports_empty_errors() {
-        assert!(matches!(parse_exclude_ports(""), Err(PortParseError::Empty)));
+        assert!(matches!(
+            parse_exclude_ports(""),
+            Err(PortParseError::Empty)
+        ));
     }
 
     #[test]

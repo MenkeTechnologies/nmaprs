@@ -106,11 +106,7 @@ mod tests {
 
     #[test]
     fn long_hex_string_exact() {
-        assert!(expr_match(
-            "0123456789ABCDEF",
-            "0123456789ABCDEF",
-            false
-        ));
+        assert!(expr_match("0123456789ABCDEF", "0123456789ABCDEF", false));
     }
 
     #[test]

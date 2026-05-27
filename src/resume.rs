@@ -120,8 +120,7 @@ mod tests {
     #[test]
     fn is_done_ipv6_string_form() {
         let mut st = ResumeState::default();
-        st.completed
-            .push(("2001:db8::1".to_string(), 443));
+        st.completed.push(("2001:db8::1".to_string(), 443));
         let ip: IpAddr = "2001:db8::1".parse().unwrap();
         assert!(st.is_done(ip, 443));
         assert!(!st.is_done(ip, 80));

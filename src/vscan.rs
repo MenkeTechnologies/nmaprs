@@ -867,7 +867,10 @@ softmatch unknown m|^.| p/Guess/
 
     #[test]
     fn decode_nmap_escape_whitespace_controls() {
-        assert_eq!(decode_nmap_escape_bytes(r"\n\r\t"), vec![b'\n', b'\r', b'\t']);
+        assert_eq!(
+            decode_nmap_escape_bytes(r"\n\r\t"),
+            vec![b'\n', b'\r', b'\t']
+        );
     }
 
     #[test]
@@ -1087,13 +1090,17 @@ softmatch unknown m|^.| p/Guess/
 
     #[test]
     fn parse_match_line_softmatch_flag() {
-        let m = parse_match_line("softmatch guess m|^.| p/?/").unwrap().unwrap();
+        let m = parse_match_line("softmatch guess m|^.| p/?/")
+            .unwrap()
+            .unwrap();
         assert!(m.soft);
     }
 
     #[test]
     fn parse_match_line_invalid_regex_returns_none() {
-        assert!(parse_match_line("match bad m|[unclosed| p/x/").unwrap().is_none());
+        assert!(parse_match_line("match bad m|[unclosed| p/x/")
+            .unwrap()
+            .is_none());
     }
 
     #[test]

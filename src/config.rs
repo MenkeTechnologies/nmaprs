@@ -1491,30 +1491,17 @@ mod rate_validation_tests {
 
     #[test]
     fn host_timeout_parsed_from_seconds_suffix() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--host-timeout",
-            "30s",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--host-timeout", "30s", "127.0.0.1"])
+                .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.host_timeout, Some(Duration::from_secs(30)));
     }
 
     #[test]
     fn max_retries_increments_connect_retries() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--max-retries",
-            "2",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--max-retries", "2", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.connect_retries, 2);
     }
@@ -1537,8 +1524,8 @@ mod rate_validation_tests {
 
     #[test]
     fn osscan_limit_flag_parsed() {
-        let args =
-            Args::try_parse_from(["nmaprs", "-p", "80", "--osscan-limit", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--osscan-limit", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.osscan_limit);
     }
@@ -1578,46 +1565,33 @@ mod rate_validation_tests {
 
     #[test]
     fn source_port_parsed_into_evasion() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--source-port",
-            "53",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--source-port", "53", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.evasion.source_port, Some(53));
     }
 
     #[test]
     fn ttl_flag_parsed_into_evasion() {
-        let args =
-            Args::try_parse_from(["nmaprs", "-p", "80", "--ttl", "64", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--ttl", "64", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.evasion.ttl, Some(64));
     }
 
     #[test]
     fn decoys_csv_parsed_into_evasion() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "-D",
-            "10.0.0.1,10.0.0.2",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "-D", "10.0.0.1,10.0.0.2", "127.0.0.1"])
+                .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.evasion.decoys.len(), 2);
     }
 
     #[test]
     fn append_output_flag_sets_plan() {
-        let args =
-            Args::try_parse_from(["nmaprs", "-p", "80", "--append-output", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--append-output", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.append_output);
     }
@@ -1655,23 +1629,16 @@ mod rate_validation_tests {
 
     #[test]
     fn scan_delay_parsed_from_ms_suffix() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--scan-delay",
-            "250ms",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--scan-delay", "250ms", "127.0.0.1"])
+                .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.scan_delay, Some(Duration::from_millis(250)));
     }
 
     #[test]
     fn sequential_ports_flag_sets_plan() {
-        let args =
-            Args::try_parse_from(["nmaprs", "-p", "80", "-r", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "-r", "127.0.0.1"]).expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.sequential_ports);
         assert!(!plan.randomize_ports);
@@ -1686,15 +1653,9 @@ mod rate_validation_tests {
 
     #[test]
     fn script_timeout_parsed() {
-        let args = Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--script-timeout",
-            "5s",
-            "127.0.0.1",
-        ])
-        .expect("parse");
+        let args =
+            Args::try_parse_from(["nmaprs", "-p", "80", "--script-timeout", "5s", "127.0.0.1"])
+                .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert_eq!(plan.script_timeout, Some(Duration::from_secs(5)));
     }
@@ -1808,16 +1769,16 @@ mod rate_validation_tests {
 
     #[test]
     fn resolve_all_flag_sets_plan() {
-        let args =
-            Args::try_parse_from(["nmaprs", "-p", "80", "--resolve-all", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--resolve-all", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.resolve_all);
     }
 
     #[test]
     fn osscan_guess_flag_sets_plan() {
-        let args =
-            Args::try_parse_from(["nmaprs", "-p", "80", "--osscan-guess", "127.0.0.1"]).expect("parse");
+        let args = Args::try_parse_from(["nmaprs", "-p", "80", "--osscan-guess", "127.0.0.1"])
+            .expect("parse");
         let plan = ScanPlan::from_args(&args).expect("plan");
         assert!(plan.osscan_guess);
     }

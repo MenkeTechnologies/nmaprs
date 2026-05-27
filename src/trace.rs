@@ -97,10 +97,7 @@ mod tests {
 
     #[tokio::test]
     async fn traceroute_multiple_hosts_preserves_order() {
-        let hosts = vec![
-            "127.0.0.1".parse().unwrap(),
-            "127.0.0.1".parse().unwrap(),
-        ];
+        let hosts = vec!["127.0.0.1".parse().unwrap(), "127.0.0.1".parse().unwrap()];
         run_traceroute(&hosts, 2).await.unwrap();
     }
 }
