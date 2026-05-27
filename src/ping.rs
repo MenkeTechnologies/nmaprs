@@ -412,8 +412,7 @@ mod tests {
     fn ping_cmd_count_one_arg_present() {
         // All unix variants pass `-c 1` to send exactly one echo.
         let (_prog, args) = ping_cmd(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)));
-        let joined: Vec<&str> = args.iter().copied().collect();
-        assert!(joined.contains(&"-c"));
-        assert!(joined.contains(&"1"));
+        assert!(args.contains(&"-c"));
+        assert!(args.contains(&"1"));
     }
 }
