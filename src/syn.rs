@@ -1338,3 +1338,284 @@ mod syn_shard_tests {
         assert_eq!(c[0], vec![1, 2, 3]);
     }
 }
+
+#[cfg(test)]
+mod pure_compute_tests {
+    use super::{
+        port_line_from_syn_outcome, tcp_probe_fields, AtomicSynResults, RawTcpProbeKind,
+        SynOutcome, TcpPortScanKind,
+    };
+    use crate::scan::PortReason;
+    use pnet::packet::tcp::TcpFlags;
+    use rand::thread_rng;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    // ─── tcp_probe_fields: flag/ack invariants per probe kind ─────────
+
+    #[test]
+    fn syn_probe_has_syn_flag_and_zero_ack() {
+        let mut rng = thread_rng();
+        let (_, ack, flags) = tcp_probe_fields(RawTcpProbeKind::Syn, None, &mut rng);
+        assert_eq!(flags, TcpFlags::SYN);
+        assert_eq!(ack, 0);
+    }
+
+    #[test]
+    fn null_probe_has_no_flags_and_zero_ack() {
+        let mut rng = thread_rng();
+        let (_, ack, flags) = tcp_probe_fields(RawTcpProbeKind::Null, None, &mut rng);
+        assert_eq!(flags, 0);
+        assert_eq!(ack, 0);
+    }
+
+    #[test]
+    fn fin_probe_has_only_fin_flag() {
+        let mut rng = thread_rng();
+        let (_, ack, flags) = tcp_probe_fields(RawTcpProbeKind::Fin, None, &mut rng);
+        assert_eq!(flags, TcpFlags::FIN);
+        assert_eq!(ack, 0);
+    }
+
+    #[test]
+    fn xmas_probe_has_fin_psh_urg() {
+        let mut rng = thread_rng();
+        let (_, ack, flags) = tcp_probe_fields(RawTcpProbeKind::Xmas, None, &mut rng);
+        assert_eq!(flags, TcpFlags::FIN | TcpFlags::PSH | TcpFlags::URG);
+        assert_eq!(ack, 0);
+    }
+
+    #[test]
+    fn maimon_probe_has_fin_ack() {
+        let mut rng = thread_rng();
+        let (_, ack, flags) = tcp_probe_fields(RawTcpProbeKind::Maimon, None, &mut rng);
+        assert_eq!(flags, TcpFlags::FIN | TcpFlags::ACK);
+        assert_eq!(ack, 0);
+    }
+
+    #[test]
+    fn ack_probe_kinds_have_ack_flag_and_nonzero_odd_ack() {
+        for kind in [
+            RawTcpProbeKind::AckPortScan,
+            RawTcpProbeKind::WindowScan,
+            RawTcpProbeKind::AckPing,
+        ] {
+            let mut rng = thread_rng();
+            let (_, ack, flags) = tcp_probe_fields(kind, None, &mut rng);
+            assert_eq!(flags, TcpFlags::ACK);
+            assert_ne!(ack, 0, "ack-style probes set non-zero ack");
+            assert_eq!(ack & 1, 1, "ack is forced odd via `| 1`");
+        }
+    }
+
+    #[test]
+    fn flags_override_with_syn_zeroes_ack() {
+        let mut rng = thread_rng();
+        let (_, ack, flags) = tcp_probe_fields(RawTcpProbeKind::Syn, Some(TcpFlags::SYN), &mut rng);
+        assert_eq!(flags, TcpFlags::SYN);
+        assert_eq!(ack, 0);
+    }
+
+    #[test]
+    fn flags_override_with_ack_sets_odd_ack() {
+        let mut rng = thread_rng();
+        let (_, ack, flags) = tcp_probe_fields(RawTcpProbeKind::Syn, Some(TcpFlags::ACK), &mut rng);
+        assert_eq!(flags, TcpFlags::ACK);
+        assert_ne!(ack, 0);
+        assert_eq!(ack & 1, 1);
+    }
+
+    #[test]
+    fn flags_override_without_syn_or_ack_zeroes_ack() {
+        let mut rng = thread_rng();
+        let (_, ack, flags) = tcp_probe_fields(RawTcpProbeKind::Syn, Some(TcpFlags::RST), &mut rng);
+        assert_eq!(flags, TcpFlags::RST);
+        assert_eq!(ack, 0);
+    }
+
+    // ─── SynOutcome u8 round-trip ─────────────────────────────────────
+
+    #[test]
+    fn syn_outcome_roundtrip_all_variants() {
+        for v in 1..=5u8 {
+            let outcome = SynOutcome::from_u8(v).expect("known variant");
+            assert_eq!(outcome.to_u8(), v);
+        }
+    }
+
+    #[test]
+    fn syn_outcome_zero_is_pending() {
+        assert!(
+            SynOutcome::from_u8(0).is_none(),
+            "0 is the sentinel for pending"
+        );
+    }
+
+    #[test]
+    fn syn_outcome_unknown_codes_none() {
+        assert!(SynOutcome::from_u8(6).is_none());
+        assert!(SynOutcome::from_u8(255).is_none());
+    }
+
+    // ─── AtomicSynResults ─────────────────────────────────────────────
+
+    #[test]
+    fn atomic_syn_results_starts_unresolved() {
+        let r = AtomicSynResults::new(8);
+        for i in 0..8 {
+            assert!(!r.is_resolved(i));
+            assert!(r.get(i).is_none());
+        }
+    }
+
+    #[test]
+    fn atomic_syn_results_set_then_get_roundtrip() {
+        let r = AtomicSynResults::new(4);
+        r.set(0, SynOutcome::Open);
+        r.set(1, SynOutcome::Closed);
+        r.set(2, SynOutcome::Unfiltered);
+        r.set(3, SynOutcome::HostTimeout);
+        assert!(r.is_resolved(0));
+        assert!(matches!(r.get(0), Some(SynOutcome::Open)));
+        assert!(matches!(r.get(1), Some(SynOutcome::Closed)));
+        assert!(matches!(r.get(2), Some(SynOutcome::Unfiltered)));
+        assert!(matches!(r.get(3), Some(SynOutcome::HostTimeout)));
+    }
+
+    #[test]
+    fn atomic_syn_results_overwrites_last_write_wins() {
+        let r = AtomicSynResults::new(1);
+        r.set(0, SynOutcome::Open);
+        r.set(0, SynOutcome::Closed);
+        assert!(matches!(r.get(0), Some(SynOutcome::Closed)));
+    }
+
+    // ─── port_line_from_syn_outcome: state/reason matrix ──────────────
+
+    fn host() -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))
+    }
+
+    #[test]
+    fn open_outcome_maps_to_open_synack() {
+        let p =
+            port_line_from_syn_outcome(RawTcpProbeKind::Syn, Some(SynOutcome::Open), host(), 80);
+        assert_eq!(p.state, "open");
+        assert_eq!(p.reason, PortReason::SynAck);
+    }
+
+    #[test]
+    fn closed_outcome_maps_to_closed_connrefused() {
+        let p =
+            port_line_from_syn_outcome(RawTcpProbeKind::Syn, Some(SynOutcome::Closed), host(), 80);
+        assert_eq!(p.state, "closed");
+        assert_eq!(p.reason, PortReason::ConnRefused);
+    }
+
+    #[test]
+    fn unfiltered_outcome_maps_to_unfiltered_tcprst() {
+        let p = port_line_from_syn_outcome(
+            RawTcpProbeKind::AckPortScan,
+            Some(SynOutcome::Unfiltered),
+            host(),
+            80,
+        );
+        assert_eq!(p.state, "unfiltered");
+        assert_eq!(p.reason, PortReason::TcpRst);
+    }
+
+    #[test]
+    fn window_open_outcome_maps_to_open_tcpwindowrst() {
+        let p = port_line_from_syn_outcome(
+            RawTcpProbeKind::WindowScan,
+            Some(SynOutcome::WindowOpen),
+            host(),
+            80,
+        );
+        assert_eq!(p.state, "open");
+        assert_eq!(p.reason, PortReason::TcpWindowRst);
+    }
+
+    #[test]
+    fn host_timeout_maps_to_filtered_hosttimeout() {
+        let p = port_line_from_syn_outcome(
+            RawTcpProbeKind::Syn,
+            Some(SynOutcome::HostTimeout),
+            host(),
+            80,
+        );
+        assert_eq!(p.state, "filtered");
+        assert_eq!(p.reason, PortReason::HostTimeout);
+    }
+
+    #[test]
+    fn no_outcome_maps_to_filtered_timeout() {
+        let p = port_line_from_syn_outcome(RawTcpProbeKind::Syn, None, host(), 80);
+        assert_eq!(p.state, "filtered");
+        assert_eq!(p.reason, PortReason::Timeout);
+    }
+
+    // ─── TcpPortScanKind ──────────────────────────────────────────────
+
+    #[test]
+    fn syn_style_kinds_fall_back_to_tcp_connect() {
+        for k in [
+            TcpPortScanKind::Syn,
+            TcpPortScanKind::Null,
+            TcpPortScanKind::Fin,
+            TcpPortScanKind::Xmas,
+            TcpPortScanKind::Maimon,
+        ] {
+            assert!(
+                k.tcp_connect_fallback_on_raw_error(),
+                "{k:?} should fall back to TCP connect on raw error"
+            );
+        }
+    }
+
+    #[test]
+    fn ack_and_window_do_not_fall_back_to_tcp_connect() {
+        // ACK and Window scan have different semantics — fallback would corrupt results.
+        assert!(!TcpPortScanKind::Ack.tcp_connect_fallback_on_raw_error());
+        assert!(!TcpPortScanKind::Window.tcp_connect_fallback_on_raw_error());
+    }
+
+    #[test]
+    fn tcp_port_scan_kind_to_raw_probe_kind_matrix() {
+        for (k, expected) in [
+            (TcpPortScanKind::Syn, "Syn"),
+            (TcpPortScanKind::Null, "Null"),
+            (TcpPortScanKind::Fin, "Fin"),
+            (TcpPortScanKind::Xmas, "Xmas"),
+            (TcpPortScanKind::Maimon, "Maimon"),
+            (TcpPortScanKind::Ack, "AckPortScan"),
+            (TcpPortScanKind::Window, "WindowScan"),
+        ] {
+            let raw: RawTcpProbeKind = k.into();
+            let name = match raw {
+                RawTcpProbeKind::Syn => "Syn",
+                RawTcpProbeKind::Null => "Null",
+                RawTcpProbeKind::Fin => "Fin",
+                RawTcpProbeKind::Xmas => "Xmas",
+                RawTcpProbeKind::Maimon => "Maimon",
+                RawTcpProbeKind::AckPortScan => "AckPortScan",
+                RawTcpProbeKind::WindowScan => "WindowScan",
+                RawTcpProbeKind::AckPing => "AckPing",
+            };
+            assert_eq!(
+                name, expected,
+                "TcpPortScanKind {k:?} → wrong RawTcpProbeKind"
+            );
+        }
+    }
+
+    #[test]
+    fn tcp_port_scan_kind_display_matches_short_label() {
+        assert_eq!(TcpPortScanKind::Syn.to_string(), "SYN");
+        assert_eq!(TcpPortScanKind::Null.to_string(), "NULL");
+        assert_eq!(TcpPortScanKind::Fin.to_string(), "FIN");
+        assert_eq!(TcpPortScanKind::Xmas.to_string(), "Xmas");
+        assert_eq!(TcpPortScanKind::Maimon.to_string(), "Maimon");
+        assert_eq!(TcpPortScanKind::Ack.to_string(), "ACK");
+        assert_eq!(TcpPortScanKind::Window.to_string(), "Window");
+    }
+}

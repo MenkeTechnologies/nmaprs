@@ -841,3 +841,200 @@ pub fn parallel_ip_proto_scan_ipv6(
         "IPv6 IP protocol scan (-sO) requires Unix with raw sockets",
     ))
 }
+
+#[cfg(test)]
+mod pure_compute_tests {
+    use super::{
+        embedded_ipv4_from_dest_unreach, icmp_packet_from_recv_buffer, AtomicProtoResults,
+        ProtoOutcome,
+    };
+    use pnet::packet::icmp::{
+        destination_unreachable::MutableDestinationUnreachablePacket, IcmpCode, IcmpPacket,
+        IcmpType, IcmpTypes, MutableIcmpPacket,
+    };
+    use pnet::packet::ip::IpNextHeaderProtocols;
+    use pnet::packet::ipv4::{Ipv4Flags, MutableIpv4Packet};
+
+    // ─── ProtoOutcome u8 round-trip ───────────────────────────────────
+
+    #[test]
+    fn proto_outcome_roundtrip() {
+        assert!(matches!(
+            ProtoOutcome::from_u8(1),
+            Some(ProtoOutcome::Closed)
+        ));
+        assert!(matches!(
+            ProtoOutcome::from_u8(2),
+            Some(ProtoOutcome::HostTimeout)
+        ));
+        assert_eq!(ProtoOutcome::Closed.to_u8(), 1);
+        assert_eq!(ProtoOutcome::HostTimeout.to_u8(), 2);
+    }
+
+    #[test]
+    fn proto_outcome_pending_sentinel() {
+        assert!(ProtoOutcome::from_u8(0).is_none(), "0 = pending");
+    }
+
+    #[test]
+    fn proto_outcome_unknown_codes_none() {
+        assert!(ProtoOutcome::from_u8(3).is_none());
+        assert!(ProtoOutcome::from_u8(255).is_none());
+    }
+
+    // ─── AtomicProtoResults ───────────────────────────────────────────
+
+    #[test]
+    fn atomic_proto_starts_unresolved() {
+        let r = AtomicProtoResults::new(4);
+        for i in 0..4 {
+            assert!(!r.is_resolved(i));
+            assert!(r.get(i).is_none());
+        }
+    }
+
+    #[test]
+    fn atomic_proto_set_get_roundtrip() {
+        let r = AtomicProtoResults::new(2);
+        r.set(0, ProtoOutcome::Closed);
+        r.set(1, ProtoOutcome::HostTimeout);
+        assert!(matches!(r.get(0), Some(ProtoOutcome::Closed)));
+        assert!(matches!(r.get(1), Some(ProtoOutcome::HostTimeout)));
+        assert!(r.is_resolved(0));
+        assert!(r.is_resolved(1));
+    }
+
+    #[test]
+    fn atomic_proto_last_write_wins() {
+        let r = AtomicProtoResults::new(1);
+        r.set(0, ProtoOutcome::Closed);
+        r.set(0, ProtoOutcome::HostTimeout);
+        assert!(matches!(r.get(0), Some(ProtoOutcome::HostTimeout)));
+    }
+
+    // ─── icmp_packet_from_recv_buffer ─────────────────────────────────
+    // The receiver may deliver either (a) full IPv4 header + ICMP payload
+    // or (b) ICMP-only buffer. The helper must accept both.
+
+    fn build_icmp_only_buffer() -> Vec<u8> {
+        // 8-byte ICMP header + 4 bytes payload.
+        let mut buf = vec![0u8; 12];
+        {
+            let mut icmp = MutableIcmpPacket::new(&mut buf).unwrap();
+            icmp.set_icmp_type(IcmpTypes::EchoReply);
+            icmp.set_icmp_code(IcmpCode::new(0));
+        }
+        buf
+    }
+
+    fn build_ipv4_plus_icmp_buffer() -> Vec<u8> {
+        // IPv4 header (20 bytes) + ICMP (12 bytes) = 32 bytes total.
+        let mut buf = vec![0u8; 32];
+        {
+            let mut ip = MutableIpv4Packet::new(&mut buf).unwrap();
+            ip.set_version(4);
+            ip.set_header_length(5); // 5 × 4 = 20 bytes — no options.
+            ip.set_total_length(32);
+            ip.set_ttl(64);
+            ip.set_next_level_protocol(IpNextHeaderProtocols::Icmp);
+            ip.set_flags(Ipv4Flags::DontFragment);
+        }
+        {
+            let mut icmp = MutableIcmpPacket::new(&mut buf[20..]).unwrap();
+            icmp.set_icmp_type(IcmpTypes::EchoReply);
+            icmp.set_icmp_code(IcmpCode::new(0));
+        }
+        buf
+    }
+
+    #[test]
+    fn icmp_from_buffer_accepts_icmp_only() {
+        let buf = build_icmp_only_buffer();
+        let icmp = icmp_packet_from_recv_buffer(&buf).expect("must parse ICMP-only");
+        assert_eq!(icmp.get_icmp_type(), IcmpTypes::EchoReply);
+    }
+
+    #[test]
+    fn icmp_from_buffer_skips_ipv4_header() {
+        let buf = build_ipv4_plus_icmp_buffer();
+        let icmp = icmp_packet_from_recv_buffer(&buf).expect("must parse after IPv4 header");
+        // If we mistakenly parsed from offset 0, we'd see the IP version nibble (0x45)
+        // as icmp_type, not EchoReply (0).
+        assert_eq!(icmp.get_icmp_type(), IcmpTypes::EchoReply);
+    }
+
+    #[test]
+    fn icmp_from_buffer_empty_returns_none() {
+        assert!(icmp_packet_from_recv_buffer(&[]).is_none());
+    }
+
+    // ─── embedded_ipv4_from_dest_unreach ──────────────────────────────
+
+    fn build_dest_unreach_with_embedded_ipv4(
+        icmp_type: IcmpType,
+        code: u8,
+        include_embedded: bool,
+    ) -> Vec<u8> {
+        // ICMP dest-unreach: 4-byte header + 4-byte "unused" + embedded IPv4 (20 bytes).
+        let total = if include_embedded {
+            4 + 4 + 20
+        } else {
+            4 + 4 + 10
+        };
+        let mut buf = vec![0u8; total];
+        {
+            let mut du = MutableDestinationUnreachablePacket::new(&mut buf).unwrap();
+            du.set_icmp_type(icmp_type);
+            du.set_icmp_code(IcmpCode::new(code));
+        }
+        if include_embedded {
+            // The embedded IPv4 starts at byte offset 8.
+            let mut emb = MutableIpv4Packet::new(&mut buf[8..]).unwrap();
+            emb.set_version(4);
+            emb.set_header_length(5);
+            emb.set_total_length(20);
+            emb.set_ttl(64);
+            emb.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
+        }
+        buf
+    }
+
+    #[test]
+    fn embedded_ipv4_extracted_from_proto_unreach() {
+        // Type 3 (DestUnreachable), Code 2 (ProtocolUnreachable) → embedded IPv4 returned.
+        let buf = build_dest_unreach_with_embedded_ipv4(IcmpTypes::DestinationUnreachable, 2, true);
+        let icmp = IcmpPacket::new(&buf).unwrap();
+        let embedded = embedded_ipv4_from_dest_unreach(&icmp);
+        assert!(
+            embedded.is_some(),
+            "code 2 dest-unreach must yield embedded IPv4"
+        );
+        let inner = embedded.unwrap();
+        assert_eq!(inner.get_next_level_protocol(), IpNextHeaderProtocols::Tcp);
+    }
+
+    #[test]
+    fn embedded_ipv4_rejected_for_wrong_icmp_type() {
+        // EchoReply is not DestUnreachable — must reject.
+        let buf = build_dest_unreach_with_embedded_ipv4(IcmpTypes::EchoReply, 2, true);
+        let icmp = IcmpPacket::new(&buf).unwrap();
+        assert!(embedded_ipv4_from_dest_unreach(&icmp).is_none());
+    }
+
+    #[test]
+    fn embedded_ipv4_rejected_for_wrong_code() {
+        // Code 0 (NetworkUnreachable) is not ProtocolUnreachable (code 2).
+        let buf = build_dest_unreach_with_embedded_ipv4(IcmpTypes::DestinationUnreachable, 0, true);
+        let icmp = IcmpPacket::new(&buf).unwrap();
+        assert!(embedded_ipv4_from_dest_unreach(&icmp).is_none());
+    }
+
+    #[test]
+    fn embedded_ipv4_rejected_when_payload_truncated() {
+        // Payload too short to contain a full IPv4 header.
+        let buf =
+            build_dest_unreach_with_embedded_ipv4(IcmpTypes::DestinationUnreachable, 2, false);
+        let icmp = IcmpPacket::new(&buf).unwrap();
+        assert!(embedded_ipv4_from_dest_unreach(&icmp).is_none());
+    }
+}

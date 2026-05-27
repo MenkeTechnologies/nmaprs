@@ -282,3 +282,138 @@ fn parse_time_ms(s: &str) -> Option<u128> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_time_ms, parse_ttl, ping_cmd};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    // ─── parse_ttl: covers BSD/macOS, Linux iputils, Windows formats ──
+
+    #[test]
+    fn macos_ping_ttl_line_extracts_64() {
+        // macOS: "64 bytes from 8.8.8.8: icmp_seq=0 ttl=128 time=10.523 ms"
+        let s = "64 bytes from 8.8.8.8: icmp_seq=0 ttl=128 time=10.523 ms";
+        assert_eq!(parse_ttl(s), Some(128));
+    }
+
+    #[test]
+    fn linux_iputils_ttl_line_extracts() {
+        let s = "64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=12.3 ms";
+        assert_eq!(parse_ttl(s), Some(57));
+    }
+
+    #[test]
+    fn windows_ttl_uppercase_extracts() {
+        // Windows: "Reply from 8.8.8.8: bytes=32 time=15ms TTL=128"
+        let s = "Reply from 8.8.8.8: bytes=32 time=15ms TTL=128";
+        assert_eq!(parse_ttl(s), Some(128));
+    }
+
+    #[test]
+    fn ttl_with_trailing_comma_strips_comma() {
+        // Some flavors print "ttl=64,".
+        let s = "ttl=64,";
+        assert_eq!(parse_ttl(s), Some(64));
+    }
+
+    #[test]
+    fn ttl_max_u8_is_255() {
+        let s = "ttl=255";
+        assert_eq!(parse_ttl(s), Some(255));
+    }
+
+    #[test]
+    fn ttl_overflow_returns_none() {
+        // 256 exceeds u8::MAX.
+        let s = "ttl=256";
+        assert_eq!(parse_ttl(s), None);
+    }
+
+    #[test]
+    fn no_ttl_in_string_returns_none() {
+        assert_eq!(parse_ttl("nothing relevant here"), None);
+        assert_eq!(parse_ttl(""), None);
+    }
+
+    #[test]
+    fn ttl_mixed_case_matches() {
+        assert_eq!(parse_ttl("TtL=42"), Some(42));
+        assert_eq!(parse_ttl("Ttl=42"), Some(42));
+    }
+
+    // ─── parse_time_ms: covers BSD/macOS/Linux/Windows formats ────────
+
+    #[test]
+    fn macos_time_line_extracts_milliseconds() {
+        // "time=10.523 ms"
+        let s = "64 bytes from 8.8.8.8: icmp_seq=0 ttl=128 time=10.523 ms";
+        // Truncated to u128 → 10.
+        assert_eq!(parse_time_ms(s), Some(10));
+    }
+
+    #[test]
+    fn windows_time_no_decimal_extracts_integer_ms() {
+        // "time=15ms"
+        let s = "Reply from 8.8.8.8: bytes=32 time=15ms TTL=128";
+        assert_eq!(parse_time_ms(s), Some(15));
+    }
+
+    #[test]
+    fn time_less_than_one_ms_truncates_to_zero() {
+        let s = "time=0.5 ms";
+        assert_eq!(parse_time_ms(s), Some(0));
+    }
+
+    #[test]
+    fn time_searched_in_each_line() {
+        // First line has no time, second does.
+        let s = "PING google.com\n64 bytes from 8.8.8.8: time=5.5 ms\n";
+        assert_eq!(parse_time_ms(s), Some(5));
+    }
+
+    #[test]
+    fn no_time_returns_none() {
+        assert_eq!(parse_time_ms("nothing here"), None);
+        assert_eq!(parse_time_ms(""), None);
+    }
+
+    #[test]
+    fn invalid_time_value_returns_none() {
+        // "time=abc" has no numeric segment.
+        let s = "time=abc";
+        assert_eq!(parse_time_ms(s), None);
+    }
+
+    // ─── ping_cmd: platform dispatch ──────────────────────────────────
+
+    #[test]
+    fn ping_cmd_v4_uses_ping_binary() {
+        let (prog, _args) = ping_cmd(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)));
+        assert_eq!(prog, "ping");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn ping_cmd_v6_uses_ping6_on_macos() {
+        let (prog, _args) = ping_cmd(IpAddr::V6(Ipv6Addr::LOCALHOST));
+        assert_eq!(prog, "ping6");
+    }
+
+    #[test]
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn ping_cmd_v6_uses_ping6_on_linux() {
+        let (prog, _args) = ping_cmd(IpAddr::V6(Ipv6Addr::LOCALHOST));
+        assert_eq!(prog, "ping6");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn ping_cmd_count_one_arg_present() {
+        // All unix variants pass `-c 1` to send exactly one echo.
+        let (_prog, args) = ping_cmd(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)));
+        let joined: Vec<&str> = args.iter().copied().collect();
+        assert!(joined.contains(&"-c"));
+        assert!(joined.contains(&"1"));
+    }
+}
