@@ -780,4 +780,240 @@ mod merge_tests {
         merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Filtered);
         assert_eq!(*notes.get(&k).unwrap(), UdpIcmpOutcome::Closed);
     }
+
+    #[test]
+    fn merge_inserts_first_observation_unchanged() {
+        let notes: UdpIcmpNotes = Arc::new(DashMap::new());
+        let k = (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)), 11);
+        merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Filtered);
+        assert_eq!(*notes.get(&k).unwrap(), UdpIcmpOutcome::Filtered);
+    }
+
+    #[test]
+    fn merge_does_not_overwrite_closed_with_closed() {
+        let notes: UdpIcmpNotes = Arc::new(DashMap::new());
+        let k = (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 4)), 12);
+        merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Closed);
+        merge_udp_icmp_note(&notes, k, UdpIcmpOutcome::Closed);
+        assert_eq!(*notes.get(&k).unwrap(), UdpIcmpOutcome::Closed);
+    }
+
+    #[test]
+    fn merge_independent_keys_isolated() {
+        let notes: UdpIcmpNotes = Arc::new(DashMap::new());
+        let k1 = (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 13);
+        let k2 = (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 14);
+        merge_udp_icmp_note(&notes, k1, UdpIcmpOutcome::Closed);
+        merge_udp_icmp_note(&notes, k2, UdpIcmpOutcome::Filtered);
+        assert_eq!(*notes.get(&k1).unwrap(), UdpIcmpOutcome::Closed);
+        assert_eq!(*notes.get(&k2).unwrap(), UdpIcmpOutcome::Filtered);
+    }
+}
+
+#[cfg(test)]
+mod nano_duration_tests {
+    use super::duration_from_nanos_saturating;
+    use std::time::Duration;
+
+    #[test]
+    fn nanos_within_u64_range_round_trips() {
+        let d = duration_from_nanos_saturating(1_000_000_000);
+        assert_eq!(d, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn nanos_zero_yields_zero() {
+        assert_eq!(duration_from_nanos_saturating(0), Duration::ZERO);
+    }
+
+    #[test]
+    fn nanos_at_u64_max_does_not_overflow() {
+        let n = u64::MAX as u128;
+        let d = duration_from_nanos_saturating(n);
+        assert_eq!(d, Duration::from_nanos(u64::MAX));
+    }
+
+    #[test]
+    fn nanos_above_u64_max_saturates() {
+        let n = u128::MAX;
+        let d = duration_from_nanos_saturating(n);
+        // Saturates to Duration::from_nanos(u64::MAX) — never overflows.
+        assert_eq!(d, Duration::from_nanos(u64::MAX));
+    }
+}
+
+#[cfg(test)]
+mod sample_delay_tests {
+    use super::sample_inter_probe_delay;
+    use std::time::Duration;
+
+    #[test]
+    fn neither_set_returns_none() {
+        assert!(sample_inter_probe_delay(None, None).is_none());
+    }
+
+    #[test]
+    fn only_max_zero_returns_zero_duration() {
+        // span == 0 → Some(Duration::ZERO).
+        let d = sample_inter_probe_delay(None, Some(Duration::ZERO)).unwrap();
+        assert_eq!(d, Duration::ZERO);
+    }
+
+    #[test]
+    fn only_max_nonzero_returns_value_within_bounds() {
+        let max = Duration::from_millis(10);
+        for _ in 0..20 {
+            let d = sample_inter_probe_delay(None, Some(max)).unwrap();
+            assert!(d <= max, "got {d:?} > max {max:?}");
+        }
+    }
+
+    #[test]
+    fn both_min_equals_max_returns_min() {
+        let d = Duration::from_millis(5);
+        assert_eq!(sample_inter_probe_delay(Some(d), Some(d)).unwrap(), d);
+    }
+
+    #[test]
+    fn both_max_less_than_min_clamps_to_min() {
+        // Defensive: if max <= min, just use min.
+        let min = Duration::from_millis(10);
+        let max = Duration::from_millis(5);
+        assert_eq!(sample_inter_probe_delay(Some(min), Some(max)).unwrap(), min);
+    }
+
+    #[test]
+    fn both_min_lt_max_returns_within_inclusive_range() {
+        let min = Duration::from_millis(2);
+        let max = Duration::from_millis(8);
+        for _ in 0..20 {
+            let d = sample_inter_probe_delay(Some(min), Some(max)).unwrap();
+            assert!(d >= min && d <= max, "got {d:?} outside [{min:?}, {max:?}]");
+        }
+    }
+}
+
+#[cfg(test)]
+mod port_line_tests {
+    use super::{PortLine, PortReason};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    #[test]
+    fn new_sets_all_fields_and_defaults_version_info_to_none() {
+        let p = PortLine::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            22,
+            "tcp",
+            "open",
+            PortReason::SynAck,
+            Some(15),
+        );
+        assert_eq!(p.host, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(p.port, 22);
+        assert_eq!(p.proto, "tcp");
+        assert_eq!(p.state, "open");
+        assert_eq!(p.reason, PortReason::SynAck);
+        assert_eq!(p.latency_ms, Some(15));
+        assert!(p.version_info.is_none(), "version_info defaults to None");
+    }
+
+    #[test]
+    fn new_accepts_no_latency_measurement() {
+        let p = PortLine::new(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            80,
+            "tcp",
+            "filtered",
+            PortReason::Timeout,
+            None,
+        );
+        assert!(p.latency_ms.is_none());
+    }
+}
+
+#[cfg(test)]
+mod pacer_extra_tests {
+    use super::ProbeRatePacer;
+    use std::time::Duration;
+
+    #[test]
+    fn maybe_new_some_with_max_rate() {
+        let p = ProbeRatePacer::maybe_new(Some(100), None);
+        assert!(p.is_some());
+    }
+
+    #[test]
+    fn maybe_new_some_with_both_rates() {
+        // max_rate present means pacer installed — min_rate ignored here.
+        let p = ProbeRatePacer::maybe_new(Some(100), Some(10));
+        assert!(p.is_some());
+    }
+
+    #[test]
+    fn pacer_low_rate_enforces_spacing_sync() {
+        // 100 probes/sec → 10ms gap. Two calls should take >= 5ms together.
+        let p = ProbeRatePacer::new(100.0);
+        let t0 = std::time::Instant::now();
+        p.wait_turn_sync(); // first slot — no wait
+        p.wait_turn_sync(); // second slot — waits ~10ms
+        let elapsed = t0.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(5),
+            "second wait should be enforced, got {elapsed:?}"
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn pacer_panics_on_zero_rate() {
+        let _ = ProbeRatePacer::new(0.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn pacer_panics_on_negative_rate() {
+        let _ = ProbeRatePacer::new(-1.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn pacer_panics_on_infinite_rate() {
+        let _ = ProbeRatePacer::new(f64::INFINITY);
+    }
+}
+
+#[cfg(test)]
+mod host_deadline_extra_tests {
+    use super::host_over_deadline;
+    use dashmap::DashMap;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
+
+    #[test]
+    fn host_deadline_initial_call_records_start_and_is_under_limit() {
+        let m = DashMap::new();
+        let h = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        assert!(!host_over_deadline(&m, h, Duration::from_secs(60)));
+        assert_eq!(m.len(), 1, "first call records start instant for host");
+    }
+
+    #[test]
+    fn host_deadline_different_hosts_independent_starts() {
+        let m = DashMap::new();
+        let h1 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let h2 = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2));
+        let _ = host_over_deadline(&m, h1, Duration::from_secs(60));
+        let _ = host_over_deadline(&m, h2, Duration::from_secs(60));
+        assert_eq!(m.len(), 2);
+    }
+
+    #[test]
+    fn host_deadline_zero_limit_quickly_marks_over() {
+        let m = DashMap::new();
+        let h = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let _ = host_over_deadline(&m, h, Duration::ZERO);
+        // Sleep enough for the start instant to be measurably in the past.
+        std::thread::sleep(Duration::from_millis(2));
+        assert!(host_over_deadline(&m, h, Duration::ZERO));
+    }
 }
