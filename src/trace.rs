@@ -131,10 +131,7 @@ mod tests {
 
     #[tokio::test]
     async fn traceroute_mixed_ipv4_ipv6_completes() {
-        let hosts = vec![
-            "127.0.0.1".parse().unwrap(),
-            "::1".parse().unwrap(),
-        ];
+        let hosts = vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()];
         run_traceroute(&hosts, 2).await.unwrap();
     }
 
@@ -151,17 +148,12 @@ mod tests {
 
     #[tokio::test]
     async fn traceroute_ipv6_only_single_host() {
-        run_traceroute(&["::1".parse().unwrap()], 1)
-            .await
-            .unwrap();
+        run_traceroute(&["::1".parse().unwrap()], 1).await.unwrap();
     }
 
     #[tokio::test]
     async fn traceroute_parallel_one_processes_sequentially() {
-        let hosts = vec![
-            "127.0.0.1".parse().unwrap(),
-            "127.0.0.1".parse().unwrap(),
-        ];
+        let hosts = vec!["127.0.0.1".parse().unwrap(), "127.0.0.1".parse().unwrap()];
         run_traceroute(&hosts, 1).await.unwrap();
     }
 }

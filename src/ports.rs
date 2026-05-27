@@ -468,7 +468,10 @@ mod tests {
 
     #[test]
     fn parse_port_spec_mixed_t_and_plain_ports() {
-        assert_eq!(parse_port_spec("T:22,443,8080").unwrap(), vec![22, 443, 8080]);
+        assert_eq!(
+            parse_port_spec("T:22,443,8080").unwrap(),
+            vec![22, 443, 8080]
+        );
     }
 
     #[test]

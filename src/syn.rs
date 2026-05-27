@@ -1717,24 +1717,16 @@ mod pure_compute_tests {
 
     #[test]
     fn null_scan_open_outcome_maps_to_open_synack() {
-        let p = port_line_from_syn_outcome(
-            RawTcpProbeKind::Null,
-            Some(SynOutcome::Open),
-            host(),
-            443,
-        );
+        let p =
+            port_line_from_syn_outcome(RawTcpProbeKind::Null, Some(SynOutcome::Open), host(), 443);
         assert_eq!(p.state, "open");
         assert_eq!(p.reason, PortReason::SynAck);
     }
 
     #[test]
     fn fin_scan_closed_outcome_maps_to_closed() {
-        let p = port_line_from_syn_outcome(
-            RawTcpProbeKind::Fin,
-            Some(SynOutcome::Closed),
-            host(),
-            443,
-        );
+        let p =
+            port_line_from_syn_outcome(RawTcpProbeKind::Fin, Some(SynOutcome::Closed), host(), 443);
         assert_eq!(p.state, "closed");
     }
 

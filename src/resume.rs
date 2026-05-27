@@ -222,10 +222,7 @@ mod tests {
     #[test]
     fn load_roundtrip_multiple_hosts() {
         let st = ResumeState {
-            completed: vec![
-                ("10.0.0.1".to_string(), 22),
-                ("10.0.0.2".to_string(), 80),
-            ],
+            completed: vec![("10.0.0.1".to_string(), 22), ("10.0.0.2".to_string(), 80)],
         };
         let f = NamedTempFile::new().unwrap();
         st.save(f.path()).unwrap();

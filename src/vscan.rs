@@ -1289,13 +1289,17 @@ Probe UDP U q|u|
 
     #[test]
     fn parse_match_line_pipe_delimited_regex() {
-        let m = parse_match_line("match ssh m|^SSH-| p/OpenSSH/").unwrap().unwrap();
+        let m = parse_match_line("match ssh m|^SSH-| p/OpenSSH/")
+            .unwrap()
+            .unwrap();
         assert_eq!(m.service_name, "ssh");
     }
 
     #[test]
     fn parse_match_line_escaped_delimiter_in_pattern() {
-        let m = parse_match_line(r"match x m|^foo\|bar| p/X/").unwrap().unwrap();
+        let m = parse_match_line(r"match x m|^foo\|bar| p/X/")
+            .unwrap()
+            .unwrap();
         assert_eq!(m.service_name, "x");
     }
 
@@ -1315,7 +1319,8 @@ Probe UDP U q|u|
 
     #[test]
     fn parse_probe_tcp_line_decodes_payload() {
-        let (name, payload) = super::parse_probe_tcp_line("NULL q|GET / HTTP/1.0\\r\\n\\r\\n|").unwrap();
+        let (name, payload) =
+            super::parse_probe_tcp_line("NULL q|GET / HTTP/1.0\\r\\n\\r\\n|").unwrap();
         assert_eq!(name, "NULL");
         assert!(payload.starts_with(b"GET"));
     }
@@ -1345,7 +1350,9 @@ Probe UDP U q|u|
 
     #[test]
     fn split_first_token_via_match_line_service_name() {
-        let m = parse_match_line("match my-service m|^x| p/X/").unwrap().unwrap();
+        let m = parse_match_line("match my-service m|^x| p/X/")
+            .unwrap()
+            .unwrap();
         assert_eq!(m.service_name, "my-service");
     }
 

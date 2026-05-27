@@ -734,11 +734,7 @@ mod tests {
     #[test]
     fn expands_idle_scan_si_with_zombie() {
         assert_eq!(
-            expand_nmap_style_argv(vec![
-                "nmaprs".into(),
-                "-sI".into(),
-                "10.0.0.1".into()
-            ]),
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-sI".into(), "10.0.0.1".into()]),
             vec!["nmaprs", "--sI", "10.0.0.1"]
         );
     }
@@ -746,11 +742,7 @@ mod tests {
     #[test]
     fn expands_ftp_bounce_short_b() {
         assert_eq!(
-            expand_nmap_style_argv(vec![
-                "nmaprs".into(),
-                "-b".into(),
-                "user@127.0.0.1".into()
-            ]),
+            expand_nmap_style_argv(vec!["nmaprs".into(), "-b".into(), "user@127.0.0.1".into()]),
             vec!["nmaprs", "-b", "user@127.0.0.1"]
         );
     }

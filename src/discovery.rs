@@ -1364,27 +1364,17 @@ mod tests {
 
     #[test]
     fn has_implemented_explicit_probes_ping_ack() {
-        let args = crate::cli::Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--ping-A",
-            "127.0.0.1",
-        ])
-        .unwrap();
+        let args =
+            crate::cli::Args::try_parse_from(["nmaprs", "-p", "80", "--ping-A", "127.0.0.1"])
+                .unwrap();
         assert!(has_implemented_explicit_probes(&args));
     }
 
     #[test]
     fn has_implemented_explicit_probes_ping_sctp() {
-        let args = crate::cli::Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--ping-Y",
-            "127.0.0.1",
-        ])
-        .unwrap();
+        let args =
+            crate::cli::Args::try_parse_from(["nmaprs", "-p", "80", "--ping-Y", "127.0.0.1"])
+                .unwrap();
         assert!(has_implemented_explicit_probes(&args));
     }
 

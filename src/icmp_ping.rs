@@ -312,7 +312,10 @@ mod tests {
     #[test]
     fn timestamp_request_type_thirteen() {
         let buf = build_icmp_timestamp_request(1, 1);
-        assert_eq!(IcmpPacket::new(&buf).unwrap().get_icmp_type(), IcmpTypes::Timestamp);
+        assert_eq!(
+            IcmpPacket::new(&buf).unwrap().get_icmp_type(),
+            IcmpTypes::Timestamp
+        );
     }
 
     #[test]

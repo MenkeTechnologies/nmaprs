@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn read_input_list_skips_blank_lines() {
         let mut f = NamedTempFile::new().unwrap();
-        writeln!(f, "").unwrap();
+        writeln!(f).unwrap();
         writeln!(f, "10.0.0.1").unwrap();
         writeln!(f, "   ").unwrap();
         f.flush().unwrap();

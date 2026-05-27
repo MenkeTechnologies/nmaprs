@@ -778,7 +778,10 @@ mod tests {
 
     #[test]
     fn split_version_info_tab_not_split() {
-        assert_eq!(split_version_info("product\tversion"), ("product\tversion", ""));
+        assert_eq!(
+            split_version_info("product\tversion"),
+            ("product\tversion", "")
+        );
     }
 
     #[test]

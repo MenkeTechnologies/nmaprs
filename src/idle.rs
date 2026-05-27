@@ -544,14 +544,7 @@ mod packet_build_tests {
     #[test]
     fn build_ipv4_tcp_syn_data_offset_five() {
         let mut rng = StdRng::seed_from_u64(44);
-        let pkt = build_ipv4_tcp_syn(
-            Ipv4Addr::LOCALHOST,
-            Ipv4Addr::LOCALHOST,
-            1,
-            2,
-            3,
-            &mut rng,
-        );
+        let pkt = build_ipv4_tcp_syn(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1, 2, 3, &mut rng);
         let tcp = TcpPacket::new(&pkt[20..]).unwrap();
         assert_eq!(tcp.get_data_offset(), 5);
     }
@@ -559,14 +552,7 @@ mod packet_build_tests {
     #[test]
     fn build_ipv4_tcp_syn_urgent_pointer_zero() {
         let mut rng = StdRng::seed_from_u64(45);
-        let pkt = build_ipv4_tcp_syn(
-            Ipv4Addr::LOCALHOST,
-            Ipv4Addr::LOCALHOST,
-            1,
-            2,
-            3,
-            &mut rng,
-        );
+        let pkt = build_ipv4_tcp_syn(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1, 2, 3, &mut rng);
         assert_eq!(TcpPacket::new(&pkt[20..]).unwrap().get_urgent_ptr(), 0);
     }
 }

@@ -408,7 +408,9 @@ mod tests {
     fn buffer_exactly_40_bytes_no_payload_none_for_tcp() {
         let buf = v6_frame(IpNextHeaderProtocols::Tcp.0, 0);
         assert_eq!(
-            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0).unwrap().len(),
+            ipv6_l4_slice(&buf, IpNextHeaderProtocols::Tcp.0)
+                .unwrap()
+                .len(),
             0
         );
     }

@@ -1362,7 +1362,14 @@ fn datadir_short_expansion_runs() {
 fn max_scan_delay_ms_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--max-scan-delay", "15ms", "-p", "65299", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--max-scan-delay",
+            "15ms",
+            "-p",
+            "65299",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -1569,7 +1576,14 @@ fn data_length_flag_runs() {
 fn traceroute_two_hosts_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--traceroute", "-p", "65275", "127.0.0.1", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--traceroute",
+            "-p",
+            "65275",
+            "127.0.0.1",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -1659,14 +1673,7 @@ fn script_args_flag_runs() {
 fn exclude_single_host_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args([
-            "-Pn",
-            "--exclude",
-            "127.0.0.2",
-            "-p",
-            "65266",
-            "127.0.0.1",
-        ])
+        .args(["-Pn", "--exclude", "127.0.0.2", "-p", "65266", "127.0.0.1"])
         .assert()
         .success();
 }
@@ -1693,7 +1700,13 @@ fn nogcc_flag_runs() {
 fn deprecated_xml_osclass_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--deprecated-xml-osclass", "-p", "65262", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--deprecated-xml-osclass",
+            "-p",
+            "65262",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -1711,7 +1724,14 @@ fn max_rtt_timeout_short_runs() {
 fn min_rtt_timeout_short_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--min-rtt-timeout", "100ms", "-p", "65253", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--min-rtt-timeout",
+            "100ms",
+            "-p",
+            "65253",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -1763,14 +1783,7 @@ fn script_trace_flag_runs() {
 fn data_string_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args([
-            "-Pn",
-            "--data-string",
-            "probe",
-            "-p",
-            "65246",
-            "127.0.0.1",
-        ])
+        .args(["-Pn", "--data-string", "probe", "-p", "65246", "127.0.0.1"])
         .assert()
         .success();
 }
@@ -1779,7 +1792,14 @@ fn data_string_flag_runs() {
 fn nsock_engine_kqueue_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--nsock-engine", "kqueue", "-p", "65245", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--nsock-engine",
+            "kqueue",
+            "-p",
+            "65245",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -1806,7 +1826,14 @@ fn ip_options_flag_runs() {
 fn route_dst_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--route-dst", "127.0.0.1", "-p", "65242", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--route-dst",
+            "127.0.0.1",
+            "-p",
+            "65242",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -1824,7 +1851,14 @@ fn port_ratio_half_runs() {
 fn max_scan_delay_twenty_ms_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--max-scan-delay", "20ms", "-p", "65240", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--max-scan-delay",
+            "20ms",
+            "-p",
+            "65240",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -1842,7 +1876,14 @@ fn mtu_explicit_flag_runs() {
 fn dns_servers_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--dns-servers", "8.8.8.8", "-p", "65238", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--dns-servers",
+            "8.8.8.8",
+            "-p",
+            "65238",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -2014,7 +2055,14 @@ fn scanflags_syn_ack_runs() {
 fn initial_rtt_timeout_short_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--initial-rtt-timeout", "800ms", "-p", "65223", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--initial-rtt-timeout",
+            "800ms",
+            "-p",
+            "65223",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }

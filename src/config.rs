@@ -2052,7 +2052,10 @@ mod parse_helpers_tests {
 
     #[test]
     fn parse_duration_trims_whitespace() {
-        assert_eq!(parse_duration("  100ms  ").unwrap(), Duration::from_millis(100));
+        assert_eq!(
+            parse_duration("  100ms  ").unwrap(),
+            Duration::from_millis(100)
+        );
     }
 
     #[test]
@@ -2067,7 +2070,10 @@ mod parse_helpers_tests {
 
     #[test]
     fn parse_hex_data_two_bytes() {
-        assert_eq!(parse_hex_data("deadbeef").unwrap(), vec![0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(
+            parse_hex_data("deadbeef").unwrap(),
+            vec![0xde, 0xad, 0xbe, 0xef]
+        );
     }
 
     #[test]
