@@ -1303,3 +1303,337 @@ pub fn probe_ipv4_os(
 
     Ok(subject)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── internet_checksum (RFC 1071) ────────────────────────────────
+
+    #[test]
+    fn internet_checksum_known_vector_rfc1071() {
+        // RFC 1071 worked-example: data = 00 01 f2 03 f4 f5 f6 f7
+        // → sum = f201 + f203 + f4f5 + f6f7 = 2ddf0
+        // → carry-fold: ddf0 + 2 = ddf2 → !ddf2 = 220d.
+        let data = [0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6, 0xf7];
+        assert_eq!(internet_checksum(&data), 0x220d);
+    }
+
+    #[test]
+    fn internet_checksum_self_inverse() {
+        // Replacing the checksum bytes with the computed checksum AND
+        // re-running the checksum must yield 0 (canonical "checksum of
+        // a packet with its own checksum field is 0" property).
+        let mut data = vec![0x45, 0x00, 0x00, 0x14, 0x00, 0x00, 0x40, 0x00,
+                             0x40, 0x06, 0x00, 0x00,    // checksum slot
+                             192, 168, 0, 1,
+                             192, 168, 0, 2];
+        let cs = internet_checksum(&data);
+        data[10] = (cs >> 8) as u8;
+        data[11] = cs as u8;
+        assert_eq!(internet_checksum(&data), 0,
+            "packet with embedded checksum must verify as 0");
+    }
+
+    #[test]
+    fn internet_checksum_handles_odd_length() {
+        // Odd byte gets shifted left 8 per RFC 1071.
+        let data = [0xaa, 0xbb, 0xcc];
+        // sum = aabb + cc00 = 176bb → 76bb + 1 = 76bc → !76bc = 8943.
+        assert_eq!(internet_checksum(&data), 0x8943);
+    }
+
+    #[test]
+    fn internet_checksum_empty_returns_all_ones() {
+        assert_eq!(internet_checksum(&[]), 0xffff);
+    }
+
+    // ─── ttl_guess ───────────────────────────────────────────────────
+
+    #[test]
+    fn ttl_guess_buckets() {
+        // Common OS TTL defaults: Linux=64, Windows=128, Solaris/Cisco=255.
+        // ttl_guess rounds UP to the next standard.
+        assert_eq!(ttl_guess(1), 32);
+        assert_eq!(ttl_guess(32), 32);
+        assert_eq!(ttl_guess(33), 64);
+        assert_eq!(ttl_guess(64), 64);
+        assert_eq!(ttl_guess(65), 128);
+        assert_eq!(ttl_guess(128), 128);
+        assert_eq!(ttl_guess(129), 255);
+        assert_eq!(ttl_guess(255), 255);
+    }
+
+    // ─── flags_str ───────────────────────────────────────────────────
+
+    #[test]
+    fn flags_str_canonical_order_for_syn_ack() {
+        // Per nmap doc-spec the string order is E·U·A·P·R·S·F.
+        let s = flags_str(TcpFlags::SYN | TcpFlags::ACK);
+        assert_eq!(s, "AS");
+    }
+
+    #[test]
+    fn flags_str_empty_when_no_flags() {
+        assert_eq!(flags_str(0), "");
+    }
+
+    #[test]
+    fn flags_str_full_house() {
+        let all = TcpFlags::ECE | TcpFlags::URG | TcpFlags::ACK
+                | TcpFlags::PSH | TcpFlags::RST | TcpFlags::SYN | TcpFlags::FIN;
+        assert_eq!(flags_str(all), "EUAPRSF");
+    }
+
+    // ─── quirks_str ──────────────────────────────────────────────────
+
+    #[test]
+    fn quirks_reserved_bits_set() {
+        assert_eq!(quirks_str(1, 0, 0), "R");
+    }
+
+    #[test]
+    fn quirks_urg_pointer_set_without_urg_flag() {
+        // Probe stack quirk: URG pointer non-zero but URG flag clear.
+        assert_eq!(quirks_str(0, 0, 1234), "U");
+    }
+
+    #[test]
+    fn quirks_urg_pointer_with_urg_flag_no_quirk() {
+        // URG pointer is legitimate when URG flag is also set.
+        assert_eq!(quirks_str(0, TcpFlags::URG, 1234), "");
+    }
+
+    #[test]
+    fn quirks_both_reserved_and_urg() {
+        assert_eq!(quirks_str(1, 0, 100), "RU");
+    }
+
+    // ─── seq/ack relation classifiers (nmap fingerprint OPS) ────────
+
+    #[test]
+    fn seq_relation_zero_when_seq_is_zero() {
+        assert_eq!(seq_relation(0, 12345), "Z");
+    }
+
+    #[test]
+    fn seq_relation_equals_probe_ack_is_a() {
+        assert_eq!(seq_relation(12345, 12345), "A");
+    }
+
+    #[test]
+    fn seq_relation_one_above_probe_ack_is_a_plus() {
+        assert_eq!(seq_relation(12346, 12345), "A+");
+    }
+
+    #[test]
+    fn seq_relation_other_when_unrelated() {
+        assert_eq!(seq_relation(99999, 12345), "O");
+    }
+
+    #[test]
+    fn seq_relation_zero_branch_wins_over_wrapping() {
+        // probe_ack at u32::MAX, response seq at 0 — the Z check fires
+        // FIRST (resp_seq == 0), so even though wrap-around math would
+        // classify this as A+, the contract returns Z. Pinning so a
+        // future refactor doesn't silently flip the priority.
+        assert_eq!(seq_relation(0, u32::MAX), "Z");
+    }
+
+    #[test]
+    fn seq_relation_wrapping_a_plus_when_seq_nonzero() {
+        // probe_ack = u32::MAX - 1, resp_seq = u32::MAX exercises the
+        // wrap path: probe_ack.wrapping_add(1) == u32::MAX → A+.
+        assert_eq!(seq_relation(u32::MAX, u32::MAX - 1), "A+");
+    }
+
+    #[test]
+    fn ack_relation_zero() {
+        assert_eq!(ack_relation(0, 100), "Z");
+    }
+
+    #[test]
+    fn ack_relation_matches_probe_seq() {
+        assert_eq!(ack_relation(100, 100), "S");
+    }
+
+    #[test]
+    fn ack_relation_one_above_is_s_plus() {
+        assert_eq!(ack_relation(101, 100), "S+");
+    }
+
+    #[test]
+    fn ack_relation_other() {
+        assert_eq!(ack_relation(50000, 100), "O");
+    }
+
+    // ─── cc_str (CC field of nmap fingerprint) ──────────────────────
+
+    #[test]
+    fn cc_ece_only_is_y() {
+        assert_eq!(cc_str(TcpFlags::ECE), "Y");
+    }
+
+    #[test]
+    fn cc_neither_is_n() {
+        assert_eq!(cc_str(0), "N");
+    }
+
+    #[test]
+    fn cc_both_is_s() {
+        assert_eq!(cc_str(TcpFlags::ECE | TcpFlags::CWR), "S");
+    }
+
+    #[test]
+    fn cc_cwr_only_is_o() {
+        assert_eq!(cc_str(TcpFlags::CWR), "O");
+    }
+
+    // ─── rd_value (CRC32 of ICMP echo data) ─────────────────────────
+
+    #[test]
+    fn rd_value_empty_data_is_zero_literal() {
+        assert_eq!(rd_value(&[]), "0");
+    }
+
+    #[test]
+    fn rd_value_deterministic_for_same_input() {
+        let a = rd_value(b"hello");
+        let b = rd_value(b"hello");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn rd_value_diverges_on_one_byte_mutation() {
+        assert_ne!(rd_value(b"hello"), rd_value(b"hellp"));
+    }
+
+    // ─── next_ipid (IP ID counter with wrap) ────────────────────────
+
+    #[test]
+    fn next_ipid_returns_current_then_increments() {
+        let mut c: u16 = 42;
+        assert_eq!(next_ipid(&mut c), 42);
+        assert_eq!(c, 43);
+    }
+
+    #[test]
+    fn next_ipid_wraps_at_max() {
+        let mut c: u16 = u16::MAX;
+        assert_eq!(next_ipid(&mut c), u16::MAX);
+        assert_eq!(c, 0, "wraps cleanly to 0");
+    }
+
+    // ─── gcd helpers (used in TS-classifier and IP-ID GCD) ──────────
+
+    #[test]
+    fn gcd_two_basic() {
+        assert_eq!(gcd_two(48, 18), 6);
+        assert_eq!(gcd_two(100, 25), 25);
+        assert_eq!(gcd_two(17, 13), 1);    // coprime
+    }
+
+    #[test]
+    fn gcd_two_with_zero_returns_other_min_1() {
+        // The impl returns a.max(1) when b is 0 — so gcd(0,0) -> 1, not 0.
+        assert_eq!(gcd_two(0, 0), 1);
+        assert_eq!(gcd_two(7, 0), 7);
+        assert_eq!(gcd_two(0, 5), 5);
+    }
+
+    #[test]
+    fn gcd_many_empty_returns_one() {
+        assert_eq!(gcd_many(&[]), 1);
+    }
+
+    #[test]
+    fn gcd_many_single_value_returns_self() {
+        assert_eq!(gcd_many(&[42]), 42);
+    }
+
+    #[test]
+    fn gcd_many_reduces_across_values() {
+        // gcd(12, 18, 30) = 6.
+        assert_eq!(gcd_many(&[12, 18, 30]), 6);
+    }
+
+    #[test]
+    fn gcd_many_coprime_set_is_one() {
+        assert_eq!(gcd_many(&[7, 11, 13]), 1);
+    }
+
+    // ─── mod_diff_u32 (minimum circular distance) ───────────────────
+
+    #[test]
+    fn mod_diff_picks_shorter_arc() {
+        // |10 - 5| = 5 (direct) vs |5 - 10| wraps = u32::MAX - 5 + 1 ≈ huge.
+        // mod_diff returns the smaller of the two.
+        assert_eq!(mod_diff_u32(10, 5), 5);
+        assert_eq!(mod_diff_u32(5, 10), 5);
+    }
+
+    #[test]
+    fn mod_diff_wraps_around_u32_max() {
+        // Distance from u32::MAX to 0 going forward is 1.
+        assert_eq!(mod_diff_u32(u32::MAX, 0), 1);
+        assert_eq!(mod_diff_u32(0, u32::MAX), 1);
+    }
+
+    #[test]
+    fn mod_diff_self_is_zero() {
+        assert_eq!(mod_diff_u32(12345, 12345), 0);
+    }
+
+    // ─── classify_ipid (nmap OS-fingerprint IP-ID classifier) ───────
+
+    #[test]
+    fn classify_ipid_under_two_samples_is_other() {
+        assert_eq!(classify_ipid(&[]), "O");
+        assert_eq!(classify_ipid(&[100]), "O");
+    }
+
+    #[test]
+    fn classify_ipid_all_zero_is_z() {
+        assert_eq!(classify_ipid(&[0, 0, 0, 0]), "Z");
+    }
+
+    #[test]
+    fn classify_ipid_zero_diffs_is_z() {
+        // Non-zero values but no change between them.
+        assert_eq!(classify_ipid(&[42, 42, 42]), "Z");
+    }
+
+    #[test]
+    fn classify_ipid_random_jumps_is_rd() {
+        // Any single diff > 20,000 forces RD (random-distribution).
+        assert_eq!(classify_ipid(&[100, 60_000, 5_000]), "RD");
+    }
+
+    #[test]
+    fn classify_ipid_small_byte_swapped_increments_is_bi() {
+        // Values 100/110/.../140 have low-byte increments — and their
+        // byte-swapped form (0x6400, 0x6E00, ...) ALSO has orderly
+        // small diffs. The BI check fires before "I", so a sequence
+        // whose swap_bytes form also looks incremental gets BI.
+        assert_eq!(classify_ipid(&[100, 110, 120, 130, 140]), "BI",
+            "byte-swap-orderly sequence MUST trip BI before I");
+    }
+
+    #[test]
+    fn classify_ipid_incremental_when_byte_swap_path_disqualified() {
+        // To reach "I" the swap_bytes form must FAIL the BI check —
+        // some adjacent swap_diff > 20,000. 100, 200, 300 swap to
+        // 0x6400, 0xC800, 0x2C01 → 0xC800-0x6400 = 25,600 > 20k → BI
+        // rejected → falls through to "I" via low-var low-avg path.
+        assert_eq!(classify_ipid(&[100, 200, 300]), "I");
+    }
+
+    // ─── hex_val ────────────────────────────────────────────────────
+
+    #[test]
+    fn hex_val_uppercase_no_prefix() {
+        assert_eq!(hex_val(0xdeadbeef), "DEADBEEF");
+        assert_eq!(hex_val(0), "0");
+        assert_eq!(hex_val(0xff), "FF");
+    }
+}
