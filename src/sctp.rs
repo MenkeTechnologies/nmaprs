@@ -868,3 +868,200 @@ pub fn parallel_sctp_scan_ipv6(
     }
     Ok(merged)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    // ─── sctp_first_chunk_type ───────────────────────────────────────
+
+    #[test]
+    fn first_chunk_type_under_13_bytes_is_none() {
+        // Common header is 12 bytes; chunk type is the 13th (idx 12).
+        // Anything shorter can't have a chunk type.
+        assert_eq!(sctp_first_chunk_type(&[]), None);
+        assert_eq!(sctp_first_chunk_type(&[0u8; 12]), None);
+    }
+
+    #[test]
+    fn first_chunk_type_returns_byte_12() {
+        let mut p = vec![0u8; 13];
+        p[12] = CHUNK_INIT;
+        assert_eq!(sctp_first_chunk_type(&p), Some(CHUNK_INIT));
+        p[12] = CHUNK_INIT_ACK;
+        assert_eq!(sctp_first_chunk_type(&p), Some(CHUNK_INIT_ACK));
+        p[12] = CHUNK_ABORT;
+        assert_eq!(sctp_first_chunk_type(&p), Some(CHUNK_ABORT));
+        p[12] = CHUNK_COOKIE_ECHO;
+        assert_eq!(sctp_first_chunk_type(&p), Some(CHUNK_COOKIE_ECHO));
+    }
+
+    #[test]
+    fn first_chunk_type_ignores_bytes_beyond_12() {
+        // The fn looks at index 12 only — trailing bytes don't matter.
+        let mut p = vec![0u8; 100];
+        p[12] = 99;
+        assert_eq!(sctp_first_chunk_type(&p), Some(99));
+    }
+
+    // ─── set_sctp_checksum (CRC32c per RFC 3309) ─────────────────────
+
+    #[test]
+    fn set_sctp_checksum_under_12_bytes_is_noop() {
+        // Too small to fit the checksum field at offset 8 — must not panic.
+        let mut p: Vec<u8> = vec![0u8; 8];
+        let before = p.clone();
+        set_sctp_checksum(&mut p);
+        assert_eq!(p, before, "noop on undersized packets");
+    }
+
+    #[test]
+    fn set_sctp_checksum_zeros_field_before_computing() {
+        // Per RFC 3309: the checksum is computed with the checksum field
+        // zeroed. If the existing bytes weren't zeroed before crc32c, the
+        // output would be wrong.
+        let mut p = vec![0u8; 32];
+        p[8..12].copy_from_slice(&[0xff, 0xff, 0xff, 0xff]); // dirty
+        set_sctp_checksum(&mut p);
+        // Recompute as a witness: zero, crc32c, store BE.
+        let mut witness = p.clone();
+        witness[8..12].fill(0);
+        let expected = crc32c_fn(&witness).to_be_bytes();
+        assert_eq!(
+            &p[8..12],
+            &expected,
+            "checksum bytes must match crc32c of packet with checksum field pre-zeroed"
+        );
+    }
+
+    #[test]
+    fn set_sctp_checksum_writes_big_endian() {
+        // RFC 3309 specifies the checksum bytes are network byte order.
+        let mut p = vec![0u8; 12];
+        p[0] = 0x12;
+        p[1] = 0x34;
+        set_sctp_checksum(&mut p);
+        let stored = u32::from_be_bytes([p[8], p[9], p[10], p[11]]);
+        let mut witness = p.clone();
+        witness[8..12].fill(0);
+        assert_eq!(
+            stored,
+            crc32c_fn(&witness),
+            "stored u32 (BE-interpreted) must equal crc32c of zeroed packet"
+        );
+    }
+
+    #[test]
+    fn set_sctp_checksum_is_idempotent() {
+        // Running twice produces the same output: the second call also
+        // zeroes the field before computing, so the result is stable.
+        let mut p = vec![0u8; 32];
+        for (i, b) in p.iter_mut().enumerate() {
+            *b = (i as u8) * 3;
+        }
+        p[8..12].fill(0); // start clean
+        set_sctp_checksum(&mut p);
+        let first = p.clone();
+        set_sctp_checksum(&mut p);
+        assert_eq!(p, first, "double-checksum must be idempotent");
+    }
+
+    // ─── build_sctp_segment ──────────────────────────────────────────
+
+    #[test]
+    fn build_init_segment_layout() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let pkt = build_sctp_segment(SctpProbeKind::Init, 5555, 9999, &mut rng);
+        assert_eq!(
+            pkt.len(),
+            32,
+            "INIT packet is 12-byte common hdr + 20-byte chunk"
+        );
+        // Source port
+        assert_eq!(u16::from_be_bytes([pkt[0], pkt[1]]), 5555);
+        // Dest port
+        assert_eq!(u16::from_be_bytes([pkt[2], pkt[3]]), 9999);
+        // Verification tag: 0 for INIT (RFC 4960 §5.1)
+        assert_eq!(u32::from_be_bytes([pkt[4], pkt[5], pkt[6], pkt[7]]), 0);
+        // Chunk type
+        assert_eq!(pkt[12], CHUNK_INIT);
+        // Chunk length = 20
+        assert_eq!(u16::from_be_bytes([pkt[14], pkt[15]]), 20);
+        // a_rwnd = 65535
+        assert_eq!(
+            u32::from_be_bytes([pkt[20], pkt[21], pkt[22], pkt[23]]),
+            65535
+        );
+        // outbound streams = 10
+        assert_eq!(u16::from_be_bytes([pkt[24], pkt[25]]), 10);
+        // inbound streams = 10
+        assert_eq!(u16::from_be_bytes([pkt[26], pkt[27]]), 10);
+    }
+
+    #[test]
+    fn build_cookie_echo_segment_layout() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let pkt = build_sctp_segment(SctpProbeKind::CookieEcho, 1024, 38412, &mut rng);
+        assert_eq!(pkt.len(), 28);
+        assert_eq!(u16::from_be_bytes([pkt[0], pkt[1]]), 1024);
+        assert_eq!(u16::from_be_bytes([pkt[2], pkt[3]]), 38412);
+        assert_eq!(pkt[12], CHUNK_COOKIE_ECHO);
+        assert_eq!(
+            u16::from_be_bytes([pkt[14], pkt[15]]),
+            16,
+            "chunk length = 4 hdr + 8 cookie"
+        );
+    }
+
+    #[test]
+    fn build_segment_checksum_validates() {
+        // The packet returned by build_sctp_segment must already have a
+        // correct CRC32c checksum at offset 8..12.
+        let mut rng = StdRng::seed_from_u64(42);
+        let pkt = build_sctp_segment(SctpProbeKind::Init, 100, 200, &mut rng);
+        let mut witness = pkt.clone();
+        witness[8..12].fill(0);
+        let expected = crc32c_fn(&witness).to_be_bytes();
+        assert_eq!(&pkt[8..12], &expected, "embedded checksum must verify");
+    }
+
+    #[test]
+    fn build_init_with_same_seed_deterministic() {
+        // Init contains 2 rng-derived u32s (initiate tag, initial TSN).
+        // Same seed → byte-for-byte identical packets.
+        let mut r1 = StdRng::seed_from_u64(99);
+        let mut r2 = StdRng::seed_from_u64(99);
+        let a = build_sctp_segment(SctpProbeKind::Init, 100, 200, &mut r1);
+        let b = build_sctp_segment(SctpProbeKind::Init, 100, 200, &mut r2);
+        assert_eq!(a, b, "same seed must produce identical INIT packets");
+    }
+
+    #[test]
+    fn build_segments_differ_with_different_seeds() {
+        let mut r1 = StdRng::seed_from_u64(1);
+        let mut r2 = StdRng::seed_from_u64(2);
+        let a = build_sctp_segment(SctpProbeKind::Init, 100, 200, &mut r1);
+        let b = build_sctp_segment(SctpProbeKind::Init, 100, 200, &mut r2);
+        assert_ne!(
+            a, b,
+            "different seeds must produce different INIT packets (initiate tag + TSN)"
+        );
+    }
+
+    #[test]
+    fn cookie_echo_with_different_ports_differs_in_header() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let a = build_sctp_segment(SctpProbeKind::CookieEcho, 100, 200, &mut rng);
+        let mut rng = StdRng::seed_from_u64(0);
+        let b = build_sctp_segment(SctpProbeKind::CookieEcho, 300, 400, &mut rng);
+        assert_ne!(&a[0..4], &b[0..4], "src+dst port bytes must differ");
+        // Rest of body (cookie) is the same since rng was reset.
+        assert_eq!(
+            &a[16..],
+            &b[16..],
+            "cookie bytes identical when rng matches"
+        );
+    }
+}
