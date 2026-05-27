@@ -1250,14 +1250,9 @@ mod tests {
 
     #[test]
     fn has_explicit_discovery_flags_ping_syn_short_flag() {
-        let args = crate::cli::Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--ping-S",
-            "127.0.0.1",
-        ])
-        .unwrap();
+        let args =
+            crate::cli::Args::try_parse_from(["nmaprs", "-p", "80", "--ping-S", "127.0.0.1"])
+                .unwrap();
         assert!(has_explicit_discovery_flags(&args));
     }
 
@@ -1298,41 +1293,24 @@ mod tests {
     #[test]
     fn port_lines_to_alive_open_only_counts() {
         let ip = IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 20));
-        let open = PortLine::new(
-            ip,
-            80,
-            "tcp",
-            "open",
-            crate::scan::PortReason::SynAck,
-            None,
-        );
+        let open = PortLine::new(ip, 80, "tcp", "open", crate::scan::PortReason::SynAck, None);
         let alive = port_lines_to_alive_hosts(vec![open]);
         assert_eq!(alive.len(), 1);
     }
 
     #[test]
     fn has_implemented_explicit_probes_ping_echo() {
-        let args = crate::cli::Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--ping-E",
-            "127.0.0.1",
-        ])
-        .unwrap();
+        let args =
+            crate::cli::Args::try_parse_from(["nmaprs", "-p", "80", "--ping-E", "127.0.0.1"])
+                .unwrap();
         assert!(has_implemented_explicit_probes(&args));
     }
 
     #[test]
     fn has_implemented_explicit_probes_ping_udp() {
-        let args = crate::cli::Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--ping-U",
-            "127.0.0.1",
-        ])
-        .unwrap();
+        let args =
+            crate::cli::Args::try_parse_from(["nmaprs", "-p", "80", "--ping-U", "127.0.0.1"])
+                .unwrap();
         assert!(has_implemented_explicit_probes(&args));
     }
 
@@ -1348,14 +1326,9 @@ mod tests {
 
     #[test]
     fn has_explicit_discovery_flags_no_ping_syn() {
-        let args = crate::cli::Args::try_parse_from([
-            "nmaprs",
-            "-p",
-            "80",
-            "--no-ping",
-            "127.0.0.1",
-        ])
-        .unwrap();
+        let args =
+            crate::cli::Args::try_parse_from(["nmaprs", "-p", "80", "--no-ping", "127.0.0.1"])
+                .unwrap();
         assert!(!has_explicit_discovery_flags(&args));
     }
 

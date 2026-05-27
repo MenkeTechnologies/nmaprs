@@ -469,28 +469,14 @@ mod packet_build_tests {
     #[test]
     fn build_ipv4_tcp_syn_ttl_is_sixty_four() {
         let mut rng = StdRng::seed_from_u64(8);
-        let pkt = build_ipv4_tcp_syn(
-            Ipv4Addr::LOCALHOST,
-            Ipv4Addr::LOCALHOST,
-            1,
-            2,
-            3,
-            &mut rng,
-        );
+        let pkt = build_ipv4_tcp_syn(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1, 2, 3, &mut rng);
         assert_eq!(Ipv4Packet::new(&pkt).unwrap().get_ttl(), 64);
     }
 
     #[test]
     fn build_ipv4_tcp_syn_window_is_64240() {
         let mut rng = StdRng::seed_from_u64(13);
-        let pkt = build_ipv4_tcp_syn(
-            Ipv4Addr::LOCALHOST,
-            Ipv4Addr::LOCALHOST,
-            1,
-            2,
-            3,
-            &mut rng,
-        );
+        let pkt = build_ipv4_tcp_syn(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1, 2, 3, &mut rng);
         let tcp = TcpPacket::new(&pkt[20..]).unwrap();
         assert_eq!(tcp.get_window(), 64240);
     }
@@ -498,14 +484,7 @@ mod packet_build_tests {
     #[test]
     fn build_ipv4_tcp_syn_no_ack_flag() {
         let mut rng = StdRng::seed_from_u64(17);
-        let pkt = build_ipv4_tcp_syn(
-            Ipv4Addr::LOCALHOST,
-            Ipv4Addr::LOCALHOST,
-            1,
-            2,
-            3,
-            &mut rng,
-        );
+        let pkt = build_ipv4_tcp_syn(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1, 2, 3, &mut rng);
         let tcp = TcpPacket::new(&pkt[20..]).unwrap();
         assert_eq!(tcp.get_flags() & TcpFlags::ACK, 0);
     }
@@ -514,22 +493,8 @@ mod packet_build_tests {
     fn build_ipv4_tcp_syn_identification_varies_by_seed() {
         let mut r1 = StdRng::seed_from_u64(1);
         let mut r2 = StdRng::seed_from_u64(2);
-        let a = build_ipv4_tcp_syn(
-            Ipv4Addr::LOCALHOST,
-            Ipv4Addr::LOCALHOST,
-            1,
-            2,
-            3,
-            &mut r1,
-        );
-        let b = build_ipv4_tcp_syn(
-            Ipv4Addr::LOCALHOST,
-            Ipv4Addr::LOCALHOST,
-            1,
-            2,
-            3,
-            &mut r2,
-        );
+        let a = build_ipv4_tcp_syn(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1, 2, 3, &mut r1);
+        let b = build_ipv4_tcp_syn(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1, 2, 3, &mut r2);
         assert_ne!(
             Ipv4Packet::new(&a).unwrap().get_identification(),
             Ipv4Packet::new(&b).unwrap().get_identification()
@@ -539,28 +504,14 @@ mod packet_build_tests {
     #[test]
     fn build_ipv4_tcp_syn_ipv4_version_is_four() {
         let mut rng = StdRng::seed_from_u64(21);
-        let pkt = build_ipv4_tcp_syn(
-            Ipv4Addr::LOCALHOST,
-            Ipv4Addr::LOCALHOST,
-            1,
-            2,
-            3,
-            &mut rng,
-        );
+        let pkt = build_ipv4_tcp_syn(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1, 2, 3, &mut rng);
         assert_eq!(Ipv4Packet::new(&pkt).unwrap().get_version(), 4);
     }
 
     #[test]
     fn build_ipv4_tcp_syn_header_length_twenty_bytes() {
         let mut rng = StdRng::seed_from_u64(22);
-        let pkt = build_ipv4_tcp_syn(
-            Ipv4Addr::LOCALHOST,
-            Ipv4Addr::LOCALHOST,
-            1,
-            2,
-            3,
-            &mut rng,
-        );
+        let pkt = build_ipv4_tcp_syn(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1, 2, 3, &mut rng);
         assert_eq!(Ipv4Packet::new(&pkt).unwrap().get_header_length(), 5);
     }
 

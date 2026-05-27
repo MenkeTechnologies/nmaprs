@@ -639,7 +639,12 @@ mod tests {
 
     #[test]
     fn port_line_text_ftp_bounce_closed_reason() {
-        assert_reason_line(PortReason::FtpBounceClosed, "tcp", "closed", "ftp-bounce-closed");
+        assert_reason_line(
+            PortReason::FtpBounceClosed,
+            "tcp",
+            "closed",
+            "ftp-bounce-closed",
+        );
     }
 
     #[test]
@@ -664,12 +669,22 @@ mod tests {
 
     #[test]
     fn port_line_text_idle_ipid_closed_reason() {
-        assert_reason_line(PortReason::IdleIpIdClosed, "tcp", "closed", "idle-ipid-closed");
+        assert_reason_line(
+            PortReason::IdleIpIdClosed,
+            "tcp",
+            "closed",
+            "idle-ipid-closed",
+        );
     }
 
     #[test]
     fn port_line_text_idle_probe_failed_reason() {
-        assert_reason_line(PortReason::IdleProbeFailed, "tcp", "filtered", "idle-probe-failed");
+        assert_reason_line(
+            PortReason::IdleProbeFailed,
+            "tcp",
+            "filtered",
+            "idle-probe-failed",
+        );
     }
 
     #[test]
@@ -710,10 +725,7 @@ mod tests {
 
     #[test]
     fn xml_escape_all_special_chars_together() {
-        assert_eq!(
-            xml_escape("<a&\"b>"),
-            "&lt;a&amp;&quot;b&gt;"
-        );
+        assert_eq!(xml_escape("<a&\"b>"), "&lt;a&amp;&quot;b&gt;");
     }
 
     #[test]

@@ -552,6 +552,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(non_snake_case)]
     fn expands_oN_output_flag() {
         assert_eq!(
             expand_nmap_style_argv(vec!["nmaprs".into(), "-oN".into(), "out".into()]),
@@ -576,6 +577,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(non_snake_case)]
     fn expands_oX_grepable_output_flag() {
         assert_eq!(
             expand_nmap_style_argv(vec!["nmaprs".into(), "-oX".into(), "out.xml".into()]),
@@ -584,6 +586,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(non_snake_case)]
     fn expands_oG_normal_grepable_flag() {
         assert_eq!(
             expand_nmap_style_argv(vec!["nmaprs".into(), "-oG".into(), "out.gnmap".into()]),
@@ -656,6 +659,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(non_snake_case)]
     fn expands_oM_machine_output_flag() {
         assert_eq!(
             expand_nmap_style_argv(vec!["nmaprs".into(), "-oM".into(), "out".into()]),

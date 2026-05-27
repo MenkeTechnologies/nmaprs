@@ -626,7 +626,14 @@ fn osscan_limit_flag_runs() {
 fn initial_rtt_timeout_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--initial-rtt-timeout", "1s", "-p", "65492", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--initial-rtt-timeout",
+            "1s",
+            "-p",
+            "65492",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -742,7 +749,14 @@ fn ping_udp_discovery_flag_runs() {
 fn version_intensity_mid_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--version-intensity", "5", "-p", "65374", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--version-intensity",
+            "5",
+            "-p",
+            "65374",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -760,7 +774,14 @@ fn traceroute_flag_runs() {
 fn max_scan_delay_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--max-scan-delay", "20ms", "-p", "65370", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--max-scan-delay",
+            "20ms",
+            "-p",
+            "65370",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -769,7 +790,14 @@ fn max_scan_delay_flag_runs() {
 fn exclude_ports_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args(["-Pn", "--exclude-ports", "65368", "-p", "65368,65367", "127.0.0.1"])
+        .args([
+            "-Pn",
+            "--exclude-ports",
+            "65368",
+            "-p",
+            "65368,65367",
+            "127.0.0.1",
+        ])
         .assert()
         .success();
 }
@@ -1145,14 +1173,7 @@ fn privileged_short_flag_parses_cli() {
 fn ping_ip_proto_long_flag_runs() {
     Command::cargo_bin("nmaprs")
         .expect("binary")
-        .args([
-            "-Pn",
-            "--ping-ip-proto",
-            "1,6",
-            "-p",
-            "65318",
-            "127.0.0.1",
-        ])
+        .args(["-Pn", "--ping-ip-proto", "1,6", "-p", "65318", "127.0.0.1"])
         .assert()
         .success();
 }
