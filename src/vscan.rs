@@ -864,4 +864,175 @@ softmatch unknown m|^.| p/Guess/
         let p = parse_q_field(r"q|\\\0\x41|").expect("q");
         assert_eq!(p, vec![b'\\', 0, b'A']);
     }
+
+    // ─── port range helpers ───────────────────────────────────────────
+
+    #[test]
+    fn parse_port_ranges_single_port() {
+        let r = parse_port_ranges_list("8080").expect("ranges");
+        assert_eq!(r, vec![(8080, 8080)]);
+    }
+
+    #[test]
+    fn parse_port_ranges_mixed_singles_and_ranges() {
+        let r = parse_port_ranges_list("22,80,443,8000-8010").expect("ranges");
+        assert!(port_in_ranges(22, &r));
+        assert!(port_in_ranges(80, &r));
+        assert!(port_in_ranges(443, &r));
+        assert!(port_in_ranges(8005, &r));
+        assert!(!port_in_ranges(8011, &r));
+    }
+
+    #[test]
+    fn parse_port_ranges_whitespace_tolerant() {
+        // Trims whitespace within and around segments.
+        let r = parse_port_ranges_list(" 80 , 443 , 1000 - 2000 ").expect("ranges");
+        assert!(port_in_ranges(80, &r));
+        assert!(port_in_ranges(1500, &r));
+    }
+
+    #[test]
+    fn parse_port_ranges_empty_input_returns_none() {
+        assert!(parse_port_ranges_list("").is_none());
+        assert!(parse_port_ranges_list("  ").is_none());
+        assert!(parse_port_ranges_list(",,").is_none());
+    }
+
+    #[test]
+    fn parse_port_ranges_invalid_returns_none() {
+        assert!(parse_port_ranges_list("abc").is_none());
+        assert!(parse_port_ranges_list("80,abc,443").is_none());
+        assert!(parse_port_ranges_list("99999").is_none()); // > u16::MAX
+    }
+
+    #[test]
+    fn port_in_ranges_boundary_inclusive() {
+        let r: PortRanges = vec![(100, 200)];
+        // Both endpoints inclusive.
+        assert!(port_in_ranges(100, &r));
+        assert!(port_in_ranges(200, &r));
+        assert!(!port_in_ranges(99, &r));
+        assert!(!port_in_ranges(201, &r));
+    }
+
+    #[test]
+    fn probe_ports_ok_with_no_spec_allows_any_port() {
+        // None means no restriction — every port is acceptable.
+        assert!(probe_ports_ok(22, &None));
+        assert!(probe_ports_ok(8080, &None));
+        assert!(probe_ports_ok(65535, &None));
+    }
+
+    #[test]
+    fn probe_ports_ok_with_spec_restricts_to_listed() {
+        let spec = Some(vec![(80, 80), (443, 443)]);
+        assert!(probe_ports_ok(80, &spec));
+        assert!(probe_ports_ok(443, &spec));
+        assert!(!probe_ports_ok(22, &spec));
+        assert!(!probe_ports_ok(8080, &spec));
+    }
+
+    // ─── hex_nibble ───────────────────────────────────────────────────
+
+    #[test]
+    fn hex_nibble_decimal_digits() {
+        assert_eq!(hex_nibble('0'), Some(0));
+        assert_eq!(hex_nibble('5'), Some(5));
+        assert_eq!(hex_nibble('9'), Some(9));
+    }
+
+    #[test]
+    fn hex_nibble_lowercase_letters() {
+        assert_eq!(hex_nibble('a'), Some(10));
+        assert_eq!(hex_nibble('f'), Some(15));
+    }
+
+    #[test]
+    fn hex_nibble_uppercase_letters() {
+        assert_eq!(hex_nibble('A'), Some(10));
+        assert_eq!(hex_nibble('F'), Some(15));
+    }
+
+    #[test]
+    fn hex_nibble_invalid_returns_none() {
+        assert_eq!(hex_nibble('g'), None);
+        assert_eq!(hex_nibble('G'), None);
+        assert_eq!(hex_nibble('Z'), None);
+        assert_eq!(hex_nibble(' '), None);
+        assert_eq!(hex_nibble('-'), None);
+    }
+
+    // ─── decode_nmap_escape_bytes: full escape table ──────────────────
+
+    #[test]
+    fn decode_plain_ascii_passes_through() {
+        assert_eq!(decode_nmap_escape_bytes("hello"), b"hello");
+        assert_eq!(decode_nmap_escape_bytes(""), b"");
+    }
+
+    #[test]
+    fn decode_known_letter_escapes() {
+        assert_eq!(decode_nmap_escape_bytes(r"\n"), b"\n");
+        assert_eq!(decode_nmap_escape_bytes(r"\r"), b"\r");
+        assert_eq!(decode_nmap_escape_bytes(r"\t"), b"\t");
+        assert_eq!(decode_nmap_escape_bytes(r"\\"), b"\\");
+        assert_eq!(decode_nmap_escape_bytes(r"\0"), &[0u8]);
+    }
+
+    #[test]
+    fn decode_hex_byte_lowercase_and_upper_prefix() {
+        // Both \xhh and \Xhh accepted.
+        assert_eq!(decode_nmap_escape_bytes(r"\x41"), b"A");
+        assert_eq!(decode_nmap_escape_bytes(r"\X41"), b"A");
+        assert_eq!(decode_nmap_escape_bytes(r"\xff"), &[0xffu8]);
+        assert_eq!(decode_nmap_escape_bytes(r"\x00"), &[0u8]);
+    }
+
+    #[test]
+    fn decode_unknown_escape_takes_following_char_verbatim() {
+        // \q → b'q' (catch-all arm).
+        assert_eq!(decode_nmap_escape_bytes(r"\q"), b"q");
+        assert_eq!(decode_nmap_escape_bytes(r"\Z"), b"Z");
+    }
+
+    #[test]
+    fn decode_trailing_backslash_dropped() {
+        // Backslash at end with no following char → silently ignored.
+        let out = decode_nmap_escape_bytes("hi\\");
+        assert_eq!(out, b"hi");
+    }
+
+    #[test]
+    fn decode_mixed_escapes_in_sequence() {
+        assert_eq!(decode_nmap_escape_bytes(r"a\nb\tc\\d"), b"a\nb\tc\\d");
+        assert_eq!(decode_nmap_escape_bytes(r"GET /\r\n\r\n"), b"GET /\r\n\r\n");
+    }
+
+    // ─── parse_q_field ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_q_field_with_non_pipe_delimiter() {
+        // Delimiter is whatever char follows 'q' — pipe is conventional but not required.
+        let p = parse_q_field("q/hello/").expect("q with /");
+        assert_eq!(p, b"hello");
+    }
+
+    #[test]
+    fn parse_q_field_missing_closing_delimiter_returns_none() {
+        // No second pipe in payload → no end position → None.
+        assert!(parse_q_field("q|unterminated").is_none());
+    }
+
+    #[test]
+    fn parse_q_field_empty_payload() {
+        // The NULL probe — `q||` is empty payload.
+        let p = parse_q_field("q||").expect("q||");
+        assert!(p.is_empty());
+    }
+
+    #[test]
+    fn parse_q_field_without_q_prefix_returns_none() {
+        assert!(parse_q_field("|hello|").is_none());
+        assert!(parse_q_field("hello").is_none());
+    }
 }
