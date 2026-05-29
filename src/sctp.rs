@@ -45,7 +45,6 @@ impl Packet for RawSctp<'_> {
 const RECV_SLICE: Duration = Duration::from_millis(50);
 const RX_BUF: usize = 65536;
 /// `MAX_SCTP_PARALLEL_SHARDS` constant.
-
 pub const MAX_SCTP_PARALLEL_SHARDS: usize = 16;
 
 const CHUNK_INIT: u8 = 1;
@@ -54,7 +53,6 @@ const CHUNK_ABORT: u8 = 6;
 const CHUNK_COOKIE_ECHO: u8 = 10;
 const CHUNK_COOKIE_ACK: u8 = 11;
 /// `SctpProbeKind` — see variants.
-
 #[derive(Clone, Copy)]
 pub enum SctpProbeKind {
     /// `Init` variant.

@@ -119,7 +119,6 @@ pub struct EvasionOpts {
     pub fragment_mtu: u16,
 }
 /// `ScanPlan` — see fields for layout.
-
 #[derive(Debug, Clone)]
 pub struct ScanPlan {
     /// `ports` field.
@@ -259,7 +258,6 @@ pub struct ProxySpec {
     pub port: u16,
 }
 /// `ProxyKind` — see variants.
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProxyKind {
     /// `Socks4` variant.
@@ -330,7 +328,6 @@ fn parse_mac(s: &str) -> Result<[u8; 6]> {
     Ok(mac)
 }
 /// `ScanKind` — see variants.
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanKind {
     /// `TcpConnect` variant.
@@ -429,7 +426,6 @@ impl ScanPlan {
         base.max(floor)
     }
     /// `from_args` — see implementation.
-
     pub fn from_args(args: &Args) -> Result<Self> {
         let unimplemented: Vec<String> = Vec::new();
 

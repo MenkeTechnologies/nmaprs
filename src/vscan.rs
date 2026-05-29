@@ -47,7 +47,6 @@ pub struct ServiceMatch {
 /// Inclusive port ranges `(lo, hi)` from Nmap `ports` / `sslports` lines.
 pub type PortRanges = Vec<(u16, u16)>;
 /// `TcpProbe` — see fields for layout.
-
 #[derive(Debug)]
 pub struct TcpProbe {
     /// `name` field.
@@ -66,7 +65,6 @@ pub struct TcpProbe {
     pub matches: Vec<ServiceMatch>,
 }
 /// `UdpProbe` — see fields for layout.
-
 #[derive(Debug)]
 pub struct UdpProbe {
     /// `name` field.
@@ -83,7 +81,6 @@ pub struct UdpProbe {
     pub matches: Vec<ServiceMatch>,
 }
 /// `ServiceProbes` — see fields for layout.
-
 #[derive(Debug, Default)]
 pub struct ServiceProbes {
     /// `tcp` field.
@@ -113,7 +110,6 @@ fn server_name(host: IpAddr) -> ServerName<'static> {
     }
 }
 /// `load_service_probes` — see implementation.
-
 pub fn load_service_probes(path: &Path) -> Result<ServiceProbes> {
     let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     parse_probes(&text).context("parse nmap-service-probes")

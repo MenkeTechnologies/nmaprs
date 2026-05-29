@@ -5,7 +5,6 @@ use std::sync::OnceLock;
 
 use thiserror::Error;
 /// `PortParseError` — see variants.
-
 #[derive(Debug, Error)]
 pub enum PortParseError {
     /// `InvalidToken` variant.
@@ -138,7 +137,6 @@ pub fn parse_port_spec(spec: &str) -> Result<Vec<u16>, PortParseError> {
     Ok(out)
 }
 /// `parse_exclude_ports` — see implementation.
-
 pub fn parse_exclude_ports(spec: &str) -> Result<HashSet<u16>, PortParseError> {
     let v = parse_port_spec(spec)?;
     Ok(v.into_iter().collect())

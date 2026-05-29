@@ -318,7 +318,6 @@ pub fn print_help(bin: &str) {
     print_footer(color);
 }
 /// `print_version` — see implementation.
-
 pub fn print_version(bin: &str) {
     if use_color() {
         println!("\x1b[35m{bin} {VERSION}\x1b[0m");

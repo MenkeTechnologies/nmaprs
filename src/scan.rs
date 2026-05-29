@@ -102,7 +102,6 @@ impl ProbeRatePacer {
         max_rate.map(|n| Arc::new(Self::new(n as f64)))
     }
     /// `new` — see implementation.
-
     pub fn new(probes_per_second: f64) -> Self {
         assert!(probes_per_second > 0.0 && probes_per_second.is_finite());
         Self {
@@ -178,7 +177,6 @@ pub(crate) fn merge_udp_icmp_note(notes: &UdpIcmpNotes, k: (IpAddr, u16), new: U
         .or_insert(new);
 }
 /// `PortReason` — see variants.
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortReason {
     /// `SynAck` variant.
@@ -221,7 +219,6 @@ pub enum PortReason {
     IdleProbeFailed,
 }
 /// `PortLine` — see fields for layout.
-
 #[derive(Debug, Clone)]
 pub struct PortLine {
     /// `host` field.

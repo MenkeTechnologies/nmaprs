@@ -38,7 +38,6 @@ pub const TEST_ATTRS: [&[&str]; NUM_FP_TESTS] = [
     &["R", "DFI", "T", "TG", "CD"],
 ];
 /// `MatchPoints` — see fields for layout.
-
 #[derive(Debug, Clone)]
 pub struct MatchPoints {
     /// `weights` field.
@@ -89,7 +88,6 @@ impl MatchPoints {
     }
 }
 /// `ReferenceFingerprint` — see fields for layout.
-
 #[derive(Debug, Clone)]
 pub struct ReferenceFingerprint {
     /// `name` field.
@@ -102,7 +100,6 @@ pub struct ReferenceFingerprint {
     pub tests: [Option<HashMap<String, String>>; NUM_FP_TESTS],
 }
 /// `FingerprintDb` — see fields for layout.
-
 #[derive(Debug, Default, Clone)]
 pub struct FingerprintDb {
     /// `match_points` field.

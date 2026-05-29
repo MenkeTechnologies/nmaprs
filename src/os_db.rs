@@ -10,7 +10,6 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 /// `OsEntry` — see fields for layout.
-
 #[derive(Debug, Clone)]
 pub struct OsEntry {
     /// `name` field.
@@ -19,7 +18,6 @@ pub struct OsEntry {
     pub family: String,
 }
 /// `OsDb` — see fields for layout.
-
 #[derive(Debug, Default, Clone)]
 pub struct OsDb {
     /// `entries` field.

@@ -19,7 +19,6 @@ pub struct PingOutcome {
     pub latency_ms: Option<u128>,
 }
 /// `ping_hosts` — see implementation.
-
 pub async fn ping_hosts(hosts: &[IpAddr], concurrency: usize) -> Vec<PingOutcome> {
     let c = concurrency.max(1);
     stream::iter(hosts.iter().copied())

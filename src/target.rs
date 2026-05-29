@@ -13,7 +13,6 @@ use thiserror::Error;
 /// Hard cap to avoid accidental memory blow-ups on wide CIDRs.
 const MAX_HOSTS_PER_TARGET: usize = 65_536;
 /// `ExpandOpts` — see fields for layout.
-
 #[derive(Debug, Clone)]
 pub struct ExpandOpts {
     /// `-6`: resolve and expand IPv6 only.
@@ -26,7 +25,6 @@ pub struct ExpandOpts {
     pub dns_servers: Vec<IpAddr>,
 }
 /// `TargetError` — see variants.
-
 #[derive(Debug, Error)]
 pub enum TargetError {
     /// `Invalid` variant.
@@ -227,7 +225,6 @@ async fn resolve_host(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr>, Targ
     Ok(out)
 }
 /// `resolve_host_blocking` — see implementation.
-
 pub fn resolve_host_blocking(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr>, TargetError> {
     let mut out: Vec<IpAddr> = (host, 0)
         .to_socket_addrs()
@@ -253,7 +250,6 @@ pub fn resolve_host_blocking(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr
     Ok(out)
 }
 /// `apply_exclude` — see implementation.
-
 pub fn apply_exclude(
     hosts: Vec<IpAddr>,
     exclude: Option<&str>,
