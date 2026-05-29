@@ -537,4 +537,56 @@ mod tests {
             PortParseError::Empty
         ));
     }
+
+    // ─── parse_exclude_ports cross-contract pins ─────────────────────
+    //
+    // `--exclude-ports` shares its parser with `-p`; users expect the
+    // same grammar. Pin that:
+    //   - HashSet output is iteration-order-independent
+    //   - dedup happens (set semantics, not list)
+    //   - all the same shapes that parse_port_spec accepts work here
+    //   - same errors surface unchanged
+
+    #[test]
+    fn parse_exclude_ports_dedupes_into_set() {
+        let s = parse_exclude_ports("80,80,80-82,81").unwrap();
+        assert_eq!(s.len(), 3);
+        assert!(s.contains(&80));
+        assert!(s.contains(&81));
+        assert!(s.contains(&82));
+    }
+
+    #[test]
+    fn parse_exclude_ports_dash_covers_full_u16() {
+        let s = parse_exclude_ports("-").unwrap();
+        assert_eq!(s.len(), 65536);
+        assert!(s.contains(&0));
+        assert!(s.contains(&u16::MAX));
+    }
+
+    #[test]
+    fn parse_exclude_ports_propagates_parser_errors() {
+        // Same blank/empty errors as parse_port_spec must surface
+        // unchanged. Catch any future drift between the two surfaces.
+        assert!(matches!(
+            parse_exclude_ports("").unwrap_err(),
+            PortParseError::Empty
+        ));
+        assert!(matches!(
+            parse_exclude_ports("   ").unwrap_err(),
+            PortParseError::Empty
+        ));
+    }
+
+    #[test]
+    fn parse_exclude_ports_tcp_prefix_unwraps_to_naked_port_numbers() {
+        // The `T:` / `U:` / `S:` protocol prefixes are stripped by
+        // the underlying parser; the resulting set must contain
+        // bare port numbers regardless of which prefix the user used.
+        let s = parse_exclude_ports("T:22,U:53,S:80").unwrap();
+        assert!(s.contains(&22));
+        assert!(s.contains(&53));
+        assert!(s.contains(&80));
+        assert_eq!(s.len(), 3);
+    }
 }
