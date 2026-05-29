@@ -18,8 +18,11 @@ use crate::ports::{
 /// Parsed `-b user:pass@host:port` FTP relay (classic `PORT` is IPv4-only on the target side).
 #[derive(Debug, Clone)]
 pub struct FtpBounceTarget {
+    /// `user` field.
     pub user: String,
+    /// `pass` field.
     pub pass: String,
+    /// `server` field.
     pub server: SocketAddr,
 }
 
@@ -73,7 +76,9 @@ fn parse_host_colon_port(s: &str, default_port: u16) -> Result<(String, u16)> {
 /// `-sI zombie[:probeport]` — IPv4 zombie only; `probeport` should be **closed** on the zombie (default **65535**).
 #[derive(Debug, Clone)]
 pub struct IdleScanTarget {
+    /// `zombie` field.
     pub zombie: Ipv4Addr,
+    /// `probe_port` field.
     pub probe_port: u16,
 }
 
@@ -113,46 +118,69 @@ pub struct EvasionOpts {
     /// `-f` / `--mtu`: IP fragmentation MTU (8-byte aligned); 0 means no fragmentation.
     pub fragment_mtu: u16,
 }
+/// `ScanPlan` — see fields for layout.
 
 #[derive(Debug, Clone)]
 pub struct ScanPlan {
+    /// `ports` field.
     pub ports: Vec<u16>,
     /// Resolved parallelism (timing template + `--min-parallelism` / `--max-parallelism`).
     pub concurrency: usize,
     /// `true` when the user set `--max-parallelism` (caps probe concurrency even with `--min-rate`).
     pub max_parallelism_explicit: bool,
+    /// `connect_timeout` field.
     pub connect_timeout: Duration,
+    /// `no_ping` field.
     pub no_ping: bool,
+    /// `scan_kind` field.
     pub scan_kind: ScanKind,
     /// Additional scan kinds to run alongside `scan_kind` (e.g. `-sS -sU` combines SYN + UDP).
     pub extra_scan_kinds: Vec<ScanKind>,
     /// TCP flag byte from `--scanflags` (only with raw `-s*` TCP scans).
     pub tcp_scan_flags: Option<u8>,
+    /// `verbosity` field.
     pub verbosity: u8,
+    /// `debug` field.
     pub debug: u8,
+    /// `sequential_ports` field.
     pub sequential_ports: bool,
+    /// `list_scan` field.
     pub list_scan: bool,
+    /// `ping_only` field.
     pub ping_only: bool,
+    /// `output_normal` field.
     pub output_normal: Option<PathBuf>,
+    /// `output_grepable` field.
     pub output_grepable: Option<PathBuf>,
+    /// `output_xml` field.
     pub output_xml: Option<PathBuf>,
     /// Script-kiddie (`-oS`) — same content as normal output, transformed (mirrors `-oN` style lines).
     pub output_script_kiddie: Option<PathBuf>,
+    /// `output_all_base` field.
     pub output_all_base: Option<PathBuf>,
     /// Nmap data directory (`--datadir`); defaults to `./data` when resolving `nmap-service-probes` / `nmap-os-db`.
     pub datadir: Option<PathBuf>,
+    /// `append_output` field.
     pub append_output: bool,
+    /// `show_reason` field.
     pub show_reason: bool,
+    /// `open_only` field.
     pub open_only: bool,
+    /// `randomize_ports` field.
     pub randomize_ports: bool,
+    /// `aggressive` field.
     pub aggressive: bool,
+    /// `version_scan_requested` field.
     pub version_scan_requested: bool,
     /// Nmap `--version-intensity` (0–9), after `--version-light` / `--version-all` overrides.
     pub version_intensity: u8,
+    /// `os_detect_requested` field.
     pub os_detect_requested: bool,
+    /// `script_requested` field.
     pub script_requested: bool,
     /// `--traceroute` or implied by **`-A`** (Nmap aggressive scan).
     pub traceroute: bool,
+    /// `resume_path` field.
     pub resume_path: Option<PathBuf>,
     /// Cap on probe **starts** per second (`--max-rate`). `None` = no limit.
     pub max_probe_rate: Option<u64>,
@@ -166,10 +194,13 @@ pub struct ScanPlan {
     pub connect_retries: u32,
     /// Minimum delay before each probe (`--scan-delay`); with `--max-scan-delay`, delay is uniform in `[min, max]`.
     pub scan_delay: Option<Duration>,
+    /// `max_scan_delay` field.
     pub max_scan_delay: Option<Duration>,
     /// `--min-hostgroup` / `--max-hostgroup` (Nmap-style host batches). `None` for both = scan all hosts in one batch.
     pub hostgroup_min: Option<u32>,
+    /// `hostgroup_max` field.
     pub hostgroup_max: Option<u32>,
+    /// `unimplemented` field.
     pub unimplemented: Vec<String>,
     /// `-b user:pass@host:port` — FTP bounce TCP scan (IPv4 targets only).
     pub ftp_bounce: Option<FtpBounceTarget>,
@@ -183,13 +214,21 @@ pub struct ScanPlan {
     pub unique: bool,
     /// Nmap `--max-os-tries` (1–50; probe rounds — full TCP/IP OS scan not implemented).
     pub max_os_tries: u8,
+    /// `osscan_limit` field.
     pub osscan_limit: bool,
+    /// `osscan_guess` field.
     pub osscan_guess: bool,
+    /// `defeat_rst_ratelimit` field.
     pub defeat_rst_ratelimit: bool,
+    /// `defeat_icmp_ratelimit` field.
     pub defeat_icmp_ratelimit: bool,
+    /// `discovery_ignore_rst` field.
     pub discovery_ignore_rst: bool,
+    /// `disable_arp_ping` field.
     pub disable_arp_ping: bool,
+    /// `stats_every` field.
     pub stats_every: Option<Duration>,
+    /// `script_timeout` field.
     pub script_timeout: Option<Duration>,
     /// Override path for `nmap-service-probes` (Nmap `--versiondb`).
     pub versiondb: Option<PathBuf>,
@@ -212,14 +251,20 @@ pub struct ScanPlan {
 /// Parsed proxy specification from `--proxies`.
 #[derive(Debug, Clone)]
 pub struct ProxySpec {
+    /// `kind` field.
     pub kind: ProxyKind,
+    /// `host` field.
     pub host: String,
+    /// `port` field.
     pub port: u16,
 }
+/// `ProxyKind` — see variants.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProxyKind {
+    /// `Socks4` variant.
     Socks4,
+    /// `Http` variant.
     Http,
 }
 
@@ -284,24 +329,35 @@ fn parse_mac(s: &str) -> Result<[u8; 6]> {
     }
     Ok(mac)
 }
+/// `ScanKind` — see variants.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanKind {
+    /// `TcpConnect` variant.
     TcpConnect,
     /// IPv4 IP protocol scan (`-sO` / `--sO`).
     IpProto,
+    /// `TcpSyn` variant.
     TcpSyn,
+    /// `TcpNull` variant.
     TcpNull,
+    /// `TcpFin` variant.
     TcpFin,
+    /// `TcpXmas` variant.
     TcpXmas,
+    /// `TcpAck` variant.
     TcpAck,
+    /// `TcpWindow` variant.
     TcpWindow,
+    /// `TcpMaimon` variant.
     TcpMaimon,
     /// SCTP INIT / COOKIE-ECHO (`-sY` / `-sZ`) — IPv4 raw only in nmaprs.
     SctpInit,
+    /// `SctpCookieEcho` variant.
     SctpCookieEcho,
     /// TCP idle scan (`-sI zombie`) — spoofed SYN, IP-ID delta on zombie (IPv4 only).
     Idle,
+    /// `Udp` variant.
     Udp,
 }
 
@@ -372,6 +428,7 @@ impl ScanPlan {
         let floor = (mr as usize).clamp(1, 65_535);
         base.max(floor)
     }
+    /// `from_args` — see implementation.
 
     pub fn from_args(args: &Args) -> Result<Self> {
         let unimplemented: Vec<String> = Vec::new();

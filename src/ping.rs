@@ -9,11 +9,16 @@ use futures::stream::{self, StreamExt};
 /// Outcome of probing a single host with ICMP echo.
 #[derive(Debug, Clone)]
 pub struct PingOutcome {
+    /// `host` field.
     pub host: IpAddr,
+    /// `up` field.
     pub up: bool,
+    /// `ttl` field.
     pub ttl: Option<u8>,
+    /// `latency_ms` field.
     pub latency_ms: Option<u128>,
 }
+/// `ping_hosts` — see implementation.
 
 pub async fn ping_hosts(hosts: &[IpAddr], concurrency: usize) -> Vec<PingOutcome> {
     let c = concurrency.max(1);

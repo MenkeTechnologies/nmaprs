@@ -24,9 +24,13 @@ use tokio_rustls::TlsConnector;
 /// One compiled `match` / `softmatch` rule attached to a probe.
 #[derive(Debug)]
 pub struct ServiceMatch {
+    /// `service_name` field.
     pub service_name: String,
+    /// `regex` field.
     pub regex: Regex,
+    /// `product_tpl` field.
     pub product_tpl: Option<String>,
+    /// `version_tpl` field.
     pub version_tpl: Option<String>,
     /// `i/` — extra info (e.g. "protocol 2.0").
     pub info_tpl: Option<String>,
@@ -42,32 +46,49 @@ pub struct ServiceMatch {
 
 /// Inclusive port ranges `(lo, hi)` from Nmap `ports` / `sslports` lines.
 pub type PortRanges = Vec<(u16, u16)>;
+/// `TcpProbe` — see fields for layout.
 
 #[derive(Debug)]
 pub struct TcpProbe {
+    /// `name` field.
     pub name: String,
+    /// `payload` field.
     pub payload: Vec<u8>,
+    /// `totalwait_ms` field.
     pub totalwait_ms: u64,
+    /// `rarity` field.
     pub rarity: u8,
     /// `None` ⇒ probe may run against any port (Nmap default when `ports` omitted for some probes).
     pub ports: Option<PortRanges>,
+    /// `sslports` field.
     pub sslports: Option<PortRanges>,
+    /// `matches` field.
     pub matches: Vec<ServiceMatch>,
 }
+/// `UdpProbe` — see fields for layout.
 
 #[derive(Debug)]
 pub struct UdpProbe {
+    /// `name` field.
     pub name: String,
+    /// `payload` field.
     pub payload: Vec<u8>,
+    /// `totalwait_ms` field.
     pub totalwait_ms: u64,
+    /// `rarity` field.
     pub rarity: u8,
+    /// `ports` field.
     pub ports: Option<PortRanges>,
+    /// `matches` field.
     pub matches: Vec<ServiceMatch>,
 }
+/// `ServiceProbes` — see fields for layout.
 
 #[derive(Debug, Default)]
 pub struct ServiceProbes {
+    /// `tcp` field.
     pub tcp: Vec<TcpProbe>,
+    /// `udp` field.
     pub udp: Vec<UdpProbe>,
 }
 
@@ -91,6 +112,7 @@ fn server_name(host: IpAddr) -> ServerName<'static> {
         IpAddr::V6(a) => ServerName::IpAddress(a.into()),
     }
 }
+/// `load_service_probes` — see implementation.
 
 pub fn load_service_probes(path: &Path) -> Result<ServiceProbes> {
     let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;

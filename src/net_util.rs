@@ -54,6 +54,7 @@ pub struct AtomicDeadline {
 }
 
 impl AtomicDeadline {
+    /// `new` — see implementation.
     pub fn new(epoch: Instant) -> Self {
         Self {
             epoch,

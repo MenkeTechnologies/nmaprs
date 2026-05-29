@@ -9,19 +9,25 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};
+/// `OsEntry` — see fields for layout.
 
 #[derive(Debug, Clone)]
 pub struct OsEntry {
+    /// `name` field.
     pub name: String,
+    /// `family` field.
     pub family: String,
 }
+/// `OsDb` — see fields for layout.
 
 #[derive(Debug, Default, Clone)]
 pub struct OsDb {
+    /// `entries` field.
     pub entries: Vec<OsEntry>,
 }
 
 impl OsDb {
+    /// `load` — see implementation.
     pub fn load(path: &Path) -> Result<Self> {
         let f = File::open(path).with_context(|| format!("open {}", path.display()))?;
         let reader = BufReader::new(f);

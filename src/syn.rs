@@ -224,10 +224,15 @@ enum RawTcpProbeKind {
 /// User-facing TCP scan using the raw half-open pipeline (same recv classification as SYN).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TcpPortScanKind {
+    /// `Syn` variant.
     Syn,
+    /// `Null` variant.
     Null,
+    /// `Fin` variant.
     Fin,
+    /// `Xmas` variant.
     Xmas,
+    /// `Maimon` variant.
     Maimon,
     /// TCP ACK scan (`-sA`); no TCP connect fallback on raw failure (semantics differ).
     Ack,

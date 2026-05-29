@@ -1,5 +1,8 @@
 //! Heuristic OS guess from ICMP TTL (`-O` / `-A` with `-sn` or ping).
 
+/// Bucket a reply TTL into a coarse OS family label. Linux/Unix
+/// defaults to TTL 64; Windows uses TTL 128; routers/network kit
+/// usually emit TTL 255. None → "unknown".
 pub fn guess_from_ttl(ttl: Option<u8>) -> &'static str {
     match ttl {
         Some(t) if t <= 64 => "Linux/Unix (TTL heuristic)",

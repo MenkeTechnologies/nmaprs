@@ -8,10 +8,14 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::scan::PortLine;
+/// `OutputSet` — see fields for layout.
 
 pub struct OutputSet {
+    /// `normal` field.
     pub normal: Option<File>,
+    /// `grep` field.
     pub grep: Option<File>,
+    /// `xml` field.
     pub xml: Option<File>,
     /// Mirrors `-oN`-style lines in script-kiddie form (Nmap `-oS`).
     pub skiddie: Option<File>,
@@ -22,6 +26,7 @@ pub struct OutputSet {
 }
 
 impl OutputSet {
+    /// `open` — see implementation.
     pub fn open(
         normal: Option<&Path>,
         grep: Option<&Path>,
@@ -47,6 +52,7 @@ impl OutputSet {
             hex: hex.map(open).transpose().with_context(|| "oH")?,
         })
     }
+    /// `write_headers` — see implementation.
 
     pub fn write_headers(
         &mut self,
@@ -85,6 +91,7 @@ impl OutputSet {
         }
         Ok(())
     }
+    /// `write_scaninfo` — see implementation.
 
     pub fn write_scaninfo(
         &mut self,
@@ -103,6 +110,7 @@ impl OutputSet {
         }
         Ok(())
     }
+    /// `write_footer` — see implementation.
 
     pub fn write_footer(
         &mut self,
@@ -199,6 +207,7 @@ pub fn port_line_text(l: &PortLine, show_reason: bool) -> String {
     }
     s
 }
+/// `print_stdout` — see implementation.
 
 pub fn print_stdout(lines: &[PortLine], open_only: bool, show_reason: bool, verbosity: u8) {
     for l in lines {
@@ -321,6 +330,7 @@ pub fn write_sn_host_files(
     }
     Ok(())
 }
+/// `write_grep` — see implementation.
 
 pub fn write_grep(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> {
     for l in lines {
@@ -332,6 +342,7 @@ pub fn write_grep(f: &mut File, host: IpAddr, lines: &[PortLine]) -> Result<()> 
     }
     Ok(())
 }
+/// `write_xml_host` — see implementation.
 
 pub fn write_xml_host(
     f: &mut File,

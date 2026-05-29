@@ -317,6 +317,7 @@ pub fn print_help(bin: &str) {
 
     print_footer(color);
 }
+/// `print_version` — see implementation.
 
 pub fn print_version(bin: &str) {
     if use_color() {

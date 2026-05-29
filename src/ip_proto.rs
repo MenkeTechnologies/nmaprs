@@ -819,6 +819,7 @@ pub fn parallel_ip_proto_scan_ipv6(
     }
     Ok(merged)
 }
+/// `parallel_ip_proto_scan_ipv6` — see implementation.
 
 #[allow(clippy::too_many_arguments)]
 #[cfg(not(unix))]

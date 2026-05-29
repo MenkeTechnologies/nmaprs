@@ -12,6 +12,7 @@ use thiserror::Error;
 
 /// Hard cap to avoid accidental memory blow-ups on wide CIDRs.
 const MAX_HOSTS_PER_TARGET: usize = 65_536;
+/// `ExpandOpts` — see fields for layout.
 
 #[derive(Debug, Clone)]
 pub struct ExpandOpts {
@@ -24,13 +25,17 @@ pub struct ExpandOpts {
     /// `--dns-servers`: custom DNS resolver addresses.
     pub dns_servers: Vec<IpAddr>,
 }
+/// `TargetError` — see variants.
 
 #[derive(Debug, Error)]
 pub enum TargetError {
+    /// `Invalid` variant.
     #[error("invalid target: {0}")]
     Invalid(String),
+    /// `Dns` variant.
     #[error("DNS resolution failed for {0}: {1}")]
     Dns(String, String),
+    /// `Io` variant.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -221,6 +226,7 @@ async fn resolve_host(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr>, Targ
     }
     Ok(out)
 }
+/// `resolve_host_blocking` — see implementation.
 
 pub fn resolve_host_blocking(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr>, TargetError> {
     let mut out: Vec<IpAddr> = (host, 0)
@@ -246,6 +252,7 @@ pub fn resolve_host_blocking(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr
     }
     Ok(out)
 }
+/// `apply_exclude` — see implementation.
 
 pub fn apply_exclude(
     hosts: Vec<IpAddr>,

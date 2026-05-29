@@ -101,6 +101,7 @@ impl ProbeRatePacer {
     pub fn maybe_new(max_rate: Option<u64>, _min_rate: Option<u64>) -> Option<Arc<Self>> {
         max_rate.map(|n| Arc::new(Self::new(n as f64)))
     }
+    /// `new` — see implementation.
 
     pub fn new(probes_per_second: f64) -> Self {
         assert!(probes_per_second > 0.0 && probes_per_second.is_finite());
@@ -176,20 +177,29 @@ pub(crate) fn merge_udp_icmp_note(notes: &UdpIcmpNotes, k: (IpAddr, u16), new: U
         })
         .or_insert(new);
 }
+/// `PortReason` — see variants.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortReason {
+    /// `SynAck` variant.
     SynAck,
+    /// `ConnRefused` variant.
     ConnRefused,
     /// RST on raw TCP ACK scan (`-sA`) — reported as `unfiltered`.
     TcpRst,
     /// RST with non-zero window on TCP window scan (`-sW`) — reported as `open` (BSD-style stacks).
     TcpWindowRst,
+    /// `Timeout` variant.
     Timeout,
+    /// `HostTimeout` variant.
     HostTimeout,
+    /// `Error` variant.
     Error,
+    /// `UdpResponse` variant.
     UdpResponse,
+    /// `IcmpPortUnreachable` variant.
     IcmpPortUnreachable,
+    /// `IcmpUnreachableFiltered` variant.
     IcmpUnreachableFiltered,
     /// ICMP type 3 code 2 (protocol unreachable) on `-sO` IP protocol scan.
     IcmpProtoUnreachable,
@@ -205,18 +215,26 @@ pub enum PortReason {
     SctpAbort,
     /// Idle scan: IP-ID delta suggests open (spoof path).
     IdleIpIdOpen,
+    /// `IdleIpIdClosed` variant.
     IdleIpIdClosed,
     /// Idle scan: could not read zombie IP-ID (probe port / privileges / network).
     IdleProbeFailed,
 }
+/// `PortLine` — see fields for layout.
 
 #[derive(Debug, Clone)]
 pub struct PortLine {
+    /// `host` field.
     pub host: IpAddr,
+    /// `port` field.
     pub port: u16,
+    /// `proto` field.
     pub proto: &'static str,
+    /// `state` field.
     pub state: &'static str,
+    /// `reason` field.
     pub reason: PortReason,
+    /// `latency_ms` field.
     pub latency_ms: Option<u128>,
     /// Filled after scan when `-sV` matches `nmap-service-probes`.
     pub version_info: Option<String>,

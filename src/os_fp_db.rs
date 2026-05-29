@@ -12,6 +12,9 @@ use crate::fp_match::expr_match;
 /// Test order matches Nmap `FingerPrintDef` (`osscan.cc` `test_attrs`).
 pub const NUM_FP_TESTS: usize = 13;
 
+/// Per-test names matching `osscan.cc` `test_attrs` order. Indexed by
+/// the same `usize` positions as `FingerPrintDef.tests[]` so a row
+/// lookup is `TEST_NAMES[i]`.
 pub const TEST_NAMES: [&str; NUM_FP_TESTS] = [
     "SEQ", "OPS", "WIN", "ECN", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "U1", "IE",
 ];
@@ -34,9 +37,11 @@ pub const TEST_ATTRS: [&[&str]; NUM_FP_TESTS] = [
     ],
     &["R", "DFI", "T", "TG", "CD"],
 ];
+/// `MatchPoints` — see fields for layout.
 
 #[derive(Debug, Clone)]
 pub struct MatchPoints {
+    /// `weights` field.
     pub weights: [HashMap<String, u16>; NUM_FP_TESTS],
 }
 
@@ -49,6 +54,7 @@ impl Default for MatchPoints {
 }
 
 impl MatchPoints {
+    /// `parse_block` — see implementation.
     pub fn parse_block(lines: &[String]) -> Result<Self> {
         let mut weights: [HashMap<String, u16>; NUM_FP_TESTS] =
             std::array::from_fn(|_| HashMap::new());
@@ -82,22 +88,31 @@ impl MatchPoints {
         Ok(MatchPoints { weights })
     }
 }
+/// `ReferenceFingerprint` — see fields for layout.
 
 #[derive(Debug, Clone)]
 pub struct ReferenceFingerprint {
+    /// `name` field.
     pub name: String,
+    /// `line` field.
     pub line: usize,
+    /// `family` field.
     pub family: Option<String>,
+    /// `tests` field.
     pub tests: [Option<HashMap<String, String>>; NUM_FP_TESTS],
 }
+/// `FingerprintDb` — see fields for layout.
 
 #[derive(Debug, Default, Clone)]
 pub struct FingerprintDb {
+    /// `match_points` field.
     pub match_points: MatchPoints,
+    /// `references` field.
     pub references: Vec<ReferenceFingerprint>,
 }
 
 impl FingerprintDb {
+    /// `load` — see implementation.
     pub fn load(path: &Path) -> Result<Self> {
         let f = File::open(path).with_context(|| format!("open {}", path.display()))?;
         let reader = BufReader::new(f);
@@ -225,6 +240,7 @@ impl FingerprintDb {
 /// Observed fingerprint values (ASCII test values, no reference expressions).
 #[derive(Debug, Clone, Default)]
 pub struct SubjectFingerprint {
+    /// `tests` field.
     pub tests: [Option<HashMap<String, String>>; NUM_FP_TESTS],
 }
 
