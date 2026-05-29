@@ -480,4 +480,61 @@ mod tests {
     fn parse_port_spec_dash_is_all_ports() {
         assert_eq!(parse_port_spec("-").unwrap().len(), 65536);
     }
+
+    // ─── parse_port_spec invariant pins ──────────────────────────────
+    //
+    // The CLI promises sorted-and-deduped output (downstream raw-scan
+    // pipelines depend on the monotonic order to coalesce probes).
+    // Drift here silently doubles work or breaks coalescing.
+
+    #[test]
+    fn parse_port_spec_output_is_sorted_ascending() {
+        let v = parse_port_spec("443,80,22,8080,1024").unwrap();
+        let mut sorted = v.clone();
+        sorted.sort_unstable();
+        assert_eq!(v, sorted, "output must be sorted ascending");
+    }
+
+    #[test]
+    fn parse_port_spec_output_is_deduped() {
+        let v = parse_port_spec("80,80,80-82,81").unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for p in &v {
+            assert!(seen.insert(*p), "duplicate port {p} in output");
+        }
+        assert_eq!(v, vec![80, 81, 82]);
+    }
+
+    #[test]
+    fn parse_port_spec_dash_covers_full_u16_range() {
+        // `-` shorthand must cover EVERY u16 value, not just 1..65535
+        // (port 0 is technically valid in some scan modes).
+        let v = parse_port_spec("-").unwrap();
+        assert_eq!(*v.first().unwrap(), 0);
+        assert_eq!(*v.last().unwrap(), u16::MAX);
+    }
+
+    #[test]
+    fn parse_port_spec_empty_after_trim_errors() {
+        // Pure whitespace must be rejected as `Empty`, not silently
+        // coerced to "no ports."
+        assert!(matches!(
+            parse_port_spec("   ").unwrap_err(),
+            PortParseError::Empty
+        ));
+        assert!(matches!(
+            parse_port_spec("\t\n").unwrap_err(),
+            PortParseError::Empty
+        ));
+    }
+
+    #[test]
+    fn parse_port_spec_only_commas_is_empty() {
+        // `,,,` has all empty segments — every one is skipped, so
+        // the output is empty → must return Empty rather than `Ok([])`.
+        assert!(matches!(
+            parse_port_spec(",,,").unwrap_err(),
+            PortParseError::Empty
+        ));
+    }
 }
