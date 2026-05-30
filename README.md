@@ -89,6 +89,15 @@ If you need **authoritative** Nmap NSE/OS DB behavior, use **[Nmap](https://nmap
 
 ## [0x02] BUILDING THE PAYLOAD
 
+Fastest path — Homebrew tap (auto-bumped by each release):
+
+```bash
+brew tap MenkeTechnologies/menketech    # one-time
+brew install nmaprs
+```
+
+Or build from source:
+
 ```bash
 cargo build --release
 ```
