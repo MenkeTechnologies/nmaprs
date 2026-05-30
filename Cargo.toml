@@ -6,6 +6,7 @@ authors = ["MenkeTechnologies"]
 description = "High-performance parallel network scanner with nmap-compatible CLI surface"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/MenkeTechnologies/nmaprs"
+homepage = "https://menketechnologies.github.io/nmaprs/"
 readme = "README.md"
 keywords = ["nmap", "network", "scanner", "security", "port-scan"]
 categories = ["command-line-utilities", "network-programming"]
