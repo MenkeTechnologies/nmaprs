@@ -37,14 +37,13 @@ jobs:
           # --- Linux glibc native ---
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            # Cross-compile from ubuntu-latest x86_64 via cross-rs
-            # Docker container — more reliable than ubuntu-24.04-arm
-            # native runners which occasionally evict mid-build.
-            # No allow_failure: this target must succeed so the
-            # Homebrew formula's on_linux/on_arm block emits.
-            use_cross: true
+            # Native aarch64 runner. Cross-rs's aarch64-linux-gnu-g++
+            # in its Docker image defaults to pre-C++11, so the
+            # build.rs cc::Build (c/expr_match.cpp uses `nullptr`)
+            # fails with `'nullptr' was not declared`. ubuntu-24.04-arm
+            # ships a modern g++ that defaults to GNU++17.
           # --- Linux musl static (portable across glibc/musl distros) ---
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
