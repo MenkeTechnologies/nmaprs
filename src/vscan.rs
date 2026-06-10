@@ -1449,4 +1449,51 @@ Probe UDP U q|u|
     fn parse_match_line_no_m_field_returns_none() {
         assert!(parse_match_line("match ssh p/OpenSSH/").unwrap().is_none());
     }
+
+    // Round-trip every byte 0x00..=0xFF through `\xNN` escapes (both nibble cases).
+    // Catches: (a) off-by-one in `hex_nibble` boundary letters ('A'/'F'/'a'/'f');
+    // (b) byte-order swap if the implementation accidentally computes `lo << 4 | hi`;
+    // (c) sign-extension if the impl promotes the nibble to a signed type;
+    // (d) accidental case-fold drop (existing tests cover only `ff` lower and `00`).
+    #[test]
+    fn decode_nmap_escape_bytes_hex_round_trip_full_byte_range() {
+        for byte in 0u8..=255 {
+            let upper = format!("\\x{byte:02X}");
+            let lower = format!("\\x{byte:02x}");
+            assert_eq!(
+                decode_nmap_escape_bytes(&upper),
+                vec![byte],
+                "uppercase \\x{byte:02X} did not round-trip"
+            );
+            assert_eq!(
+                decode_nmap_escape_bytes(&lower),
+                vec![byte],
+                "lowercase \\x{byte:02x} did not round-trip"
+            );
+        }
+    }
+
+    // `$0` per regex convention refers to the whole match. The implementation
+    // uses `caps.get(n)` which DOES support n=0, so this should substitute the
+    // entire matched text. Catches: a future refactor that special-cases or
+    // skips index 0 (a common interpretation bug where `$0` means "literal $0").
+    #[test]
+    fn apply_template_dollar_zero_is_whole_match() {
+        let re = Regex::new(r"S(SH)-(\d+)").unwrap();
+        let caps = re.captures(b"prefix SSH-22 suffix").unwrap();
+        assert_eq!(apply_template("[$0]", &caps), "[SSH-22]");
+    }
+
+    // `$N` for an out-of-range capture group must NOT panic — the function
+    // is called per-banner across every match probe, so any out-of-range
+    // template index would crash the version-scan worker. Catches: a regression
+    // to `caps.get(n).unwrap()` instead of the current `if let Some(m) = ...`.
+    #[test]
+    fn apply_template_out_of_range_capture_silently_omitted_no_panic() {
+        let re = Regex::new(r"^(\w+)$").unwrap();
+        let caps = re.captures(b"hello").unwrap();
+        // Group 1 = "hello", groups 2-9 do not exist. Mix of valid + invalid.
+        let out = apply_template("[$1][$9]", &caps);
+        assert_eq!(out, "[hello][]");
+    }
 }
