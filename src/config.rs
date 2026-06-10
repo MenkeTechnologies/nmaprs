@@ -975,18 +975,34 @@ fn parse_duration(s: &str) -> Result<Duration> {
     }
     if let Some(sec) = s.strip_suffix('s') {
         let v: f64 = sec.trim().parse().context("parse seconds")?;
-        return Ok(Duration::from_secs_f64(v));
+        return secs_to_duration(v, "seconds");
     }
     if let Some(m) = s.strip_suffix('m') {
         let v: f64 = m.trim().parse().context("parse minutes")?;
-        return Ok(Duration::from_secs_f64(v * 60.0));
+        return secs_to_duration(v * 60.0, "minutes");
     }
     if let Some(h) = s.strip_suffix('h') {
         let v: f64 = h.trim().parse().context("parse hours")?;
-        return Ok(Duration::from_secs_f64(v * 3600.0));
+        return secs_to_duration(v * 3600.0, "hours");
     }
     let v: f64 = s.parse().context("parse duration")?;
-    Ok(Duration::from_secs_f64(v))
+    secs_to_duration(v, "duration")
+}
+
+/// `Duration::from_secs_f64` panics on NaN / negative / `secs >= u64::MAX`.
+/// Validate before the conversion so user-supplied strings produce a clean
+/// error instead of taking down the process.
+fn secs_to_duration(secs: f64, what: &str) -> Result<Duration> {
+    if secs.is_nan() {
+        anyhow::bail!("`{what}` must not be NaN");
+    }
+    if !secs.is_finite() {
+        anyhow::bail!("`{what}` must be finite, got {secs}");
+    }
+    if secs < 0.0 {
+        anyhow::bail!("`{what}` must be non-negative, got {secs}");
+    }
+    Ok(Duration::from_secs_f64(secs))
 }
 
 #[cfg(test)]
@@ -2266,5 +2282,33 @@ mod parse_helpers_tests {
     #[test]
     fn parse_hex_data_uppercase_ok() {
         assert_eq!(parse_hex_data("ABCD").unwrap(), vec![0xAB, 0xCD]);
+    }
+
+    /// `Duration::from_secs_f64` panics on NaN / negative / infinite secs.
+    /// `parse_duration` previously fed user input straight into that fn for
+    /// the s/m/h/bare-numeric suffixes — `--scan-delay -1` and `--scan-delay
+    /// NaN` took down the process. Now they return a clean error.
+    #[test]
+    fn parse_duration_negative_rejects_without_panic() {
+        for s in ["-1s", "-0.5m", "-1h", "-100"] {
+            let r = parse_duration(s);
+            assert!(r.is_err(), "{s:?} must error, not panic; got {:?}", r);
+        }
+    }
+
+    #[test]
+    fn parse_duration_nan_rejects_without_panic() {
+        for s in ["NaNs", "nans", "nanm", "naNh", "NaN"] {
+            let r = parse_duration(s);
+            assert!(r.is_err(), "{s:?} must error, not panic; got {:?}", r);
+        }
+    }
+
+    #[test]
+    fn parse_duration_infinity_rejects_without_panic() {
+        for s in ["infs", "infm", "infh", "inf"] {
+            let r = parse_duration(s);
+            assert!(r.is_err(), "{s:?} must error, not panic; got {:?}", r);
+        }
     }
 }
