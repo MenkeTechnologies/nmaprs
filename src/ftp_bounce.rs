@@ -236,7 +236,58 @@ pub async fn ftp_bounce_scan(
 mod tests {
     use std::net::Ipv4Addr;
 
-    use super::port_command_line;
+    use super::{port_command_line, read_ftp_reply};
+    use tokio::io::BufReader;
+
+    /// Drive `read_ftp_reply` against an in-memory byte buffer (`&[u8]` is `AsyncRead + Unpin`).
+    fn reply(bytes: &'static [u8]) -> super::Result<(u16, String)> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let mut reader = BufReader::new(bytes);
+            read_ftp_reply(&mut reader).await
+        })
+    }
+
+    #[test]
+    fn read_ftp_reply_single_line_strips_crlf_and_parses_code() {
+        // Body must be the trimmed line (no trailing CRLF), code parsed from the first 3 bytes.
+        let (code, body) = reply(b"220 ProFTPD ready\r\n").unwrap();
+        assert_eq!(code, 220);
+        assert_eq!(body, "220 ProFTPD ready");
+    }
+
+    #[test]
+    fn read_ftp_reply_multiline_terminates_only_on_matching_code() {
+        // A continuation line with a DIFFERENT code and a space at byte 3 must NOT end the
+        // reply; only `<code><space>` with the SAME opening code terminates. A naive parser
+        // that stops at the first "NNN " line would wrongly return at "200 inner".
+        let (code, body) = reply(b"230-Welcome\r\n200 inner status\r\n230 Login ok\r\n").unwrap();
+        assert_eq!(code, 230);
+        assert_eq!(body, "230-Welcome\n200 inner status\n230 Login ok");
+    }
+
+    #[test]
+    fn read_ftp_reply_three_byte_line_is_single_not_multiline() {
+        // Exactly 3 bytes: `as_bytes().get(3)` is None, so the dash/space-at-index-3
+        // multiline path must not fire and must not panic on the missing 4th byte.
+        let (code, body) = reply(b"220\r\n").unwrap();
+        assert_eq!(code, 220);
+        assert_eq!(body, "220");
+    }
+
+    #[test]
+    fn read_ftp_reply_short_reply_under_three_bytes_errors() {
+        // `first.len() < 3` guard: prevents `first[..3]` from slicing out of bounds.
+        assert!(reply(b"22\r\n").is_err());
+    }
+
+    #[test]
+    fn read_ftp_reply_non_numeric_code_maps_to_error() {
+        // First 3 bytes are non-digits -> u16 parse fails -> mapped error, never a panic.
+        assert!(reply(b"abc def\r\n").is_err());
+    }
 
     #[test]
     fn port_command_line_classic_ftp_encoding() {
