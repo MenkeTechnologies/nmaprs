@@ -183,7 +183,7 @@ All runs on **127.0.0.1**, TCP connect (`-sT`), `-n -Pn`, `--min-rtt-timeout 50m
 | `-F` (fast, ~100 ports) | 15.4 ms | 5.6 ms | **2.8× faster** |
 | `--top-ports 100` | 15.9 ms | 5.4 ms | **2.9× faster** |
 | `--top-ports 1000` | 40.3 ms | 23.7 ms | **1.7× faster** |
-| `-p-` (all 65535) | 1.81 s | 1.15 s | **1.6× faster** |
+| `-p-` (all 65536) | 1.81 s | 1.15 s | **1.6× faster** |
 
 #### BY PARALLELISM (`--top-ports 1000`)
 
@@ -192,7 +192,7 @@ All runs on **127.0.0.1**, TCP connect (`-sT`), `-n -Pn`, `--min-rtt-timeout 50m
 | M=64 | 39.1 ms | 19.2 ms | **2.0× faster** |
 | M=256 | 40.3 ms | 23.7 ms | **1.7× faster** |
 
-#### BY PARALLELISM (`-p-`, all 65535)
+#### BY PARALLELISM (`-p-`, all 65536)
 
 | Parallelism | nmap | nmaprs | Speedup |
 |-------------|------|--------|---------|
@@ -215,7 +215,7 @@ All runs on **127.0.0.1**, TCP connect (`-sT`), `-n -Pn`, `--min-rtt-timeout 50m
 
 #### ANALYSIS
 
-nmaprs is **1.5–5.1× faster** across all port counts. Small scans (2–100 ports) see the largest gains (**3–5×**) because nmap's startup overhead (Lua/NSE, libpcap, service databases) dominates. Full 65535-port sweeps show **1.5–1.6×** speedup thanks to a worker-pool architecture with blocking `std::net::TcpStream::connect_timeout` (fewer syscalls than tokio async — no per-socket `ioctl`/`fcntl` non-blocking setup) plus lock-free `UnsafeCell` result slots indexed by atomic work counter. Ping scan shows **1.5×** improvement. Output format has negligible impact on either tool.
+nmaprs is **1.5–5.1× faster** across all port counts. Small scans (2–100 ports) see the largest gains (**3–5×**) because nmap's startup overhead (Lua/NSE, libpcap, service databases) dominates. Full 65536-port sweeps show **1.5–1.6×** speedup thanks to a worker-pool architecture with blocking `std::net::TcpStream::connect_timeout` (fewer syscalls than tokio async — no per-socket `ioctl`/`fcntl` non-blocking setup) plus lock-free `UnsafeCell` result slots indexed by atomic work counter. Ping scan shows **1.5×** improvement. Output format has negligible impact on either tool.
 
 #### CRITERION // RUST INTERNALS
 
