@@ -114,6 +114,7 @@
         <div class="stat-card"><div class="stat-val">9</div><div class="stat-label">Discovery probes (-P*)</div></div>
         <div class="stat-card"><div class="stat-val green">5</div><div class="stat-label">Output formats (nmap-compatible)</div></div>
         <div class="stat-card"><div class="stat-val">2</div><div class="stat-label">Binaries (nmaprs + nms)</div></div>
+        <div class="stat-card"><div class="stat-val accent">29</div><div class="stat-label">src modules (lib.rs)</div></div>
         <div class="stat-card"><div class="stat-val">1,028</div><div class="stat-label">man nmaprsall lines</div></div>
       </div>
 
@@ -134,7 +135,7 @@
           <tr><td>UDP ICMP unreach listener</td><td>One <code>poll(2)</code> + burst-recv thread per scan (not per host batch); IPv4 type-3 + ICMPv6 type-1 classification</td></tr>
           <tr><td>SCTP CRC32c</td><td>In-tree CRC32c for SCTP common header + chunks; INIT-ACK / COOKIE-ACK &rarr; <code>open</code>, ABORT &rarr; <code>closed</code></td></tr>
           <tr><td>Service / version</td><td><code>nmap-service-probes</code> parser; <code>match</code> / <code>softmatch</code> via Rust <code>regex</code> (Perl-only features skipped); TLS probes via <code>rustls</code> when port matches <code>sslports</code></td></tr>
-          <tr><td>OS detection</td><td>Subject fingerprint (SEQ / OPS / WIN subset, extras in progress); scored against <code>nmap-os-db</code> with <strong>MatchPoints + expr_match</strong> (same algorithm nmap uses); falls back to ICMP TTL heuristic on minimal data</td></tr>
+          <tr><td>OS detection</td><td>Subject fingerprint from the Nmap 2nd-gen probe set &mdash; <strong>SEQ</strong> / <strong>OPS</strong> / <strong>WIN</strong> / <strong>ECN</strong> / <strong>T1&ndash;T7</strong> / <strong>U1</strong> / <strong>IE</strong> tests (<code>os_scan.rs</code>); scored against <code>nmap-os-db</code> reference fingerprints with <strong>MatchPoints + expr_match</strong> (same algorithm nmap uses, via the in-tree <code>c/expr_match.cpp</code>); falls back to ICMP TTL heuristic on minimal data</td></tr>
           <tr><td>DNS</td><td><code>hickory-resolver</code> with <code>--dns-servers</code> overrides, async, parallel; <code>--system-dns</code> escape hatch</td></tr>
           <tr><td>Proxy</td><td><code>tokio-socks</code> for SOCKS4; in-tree HTTP CONNECT; both apply to TCP connect scans</td></tr>
           <tr><td>Rate limiting</td><td>One global token-bucket limiter on probe <em>starts</em>; IPv4 + IPv6 share; respects <code>--min-rate</code> floor by inferring parallelism upward when needed</td></tr>
@@ -173,7 +174,7 @@
           <tr><td><code>--min-rate</code> / <code>--max-rate</code> / parallelism / hostgroup / RTT / retries / scan-delay / <code>--stats-every</code></td><td class="ok">Implemented &mdash; one global rate limiter across families</td></tr>
           <tr><td><code>--scanflags</code> (custom TCP flags)</td><td class="ok">Implemented &mdash; SYN/ACK/FIN/RST/PSH/URG/ECE/CWR; raw TCP scans only</td></tr>
           <tr><td>Port specs (<code>-p</code>, <code>-F</code>, <code>--top-ports</code>, <code>--port-ratio</code>)</td><td class="ok">Implemented &mdash; embedded TCP frequency list; <code>-p -</code> for all 65536</td></tr>
-          <tr><td>OS detection (<code>-O</code>)</td><td class="part">Partial &mdash; IPv4 raw + MatchPoints scoring against <code>nmap-os-db</code> when DB available + open/closed TCP found. IPv6 = TTL heuristic only</td></tr>
+          <tr><td>OS detection (<code>-O</code>)</td><td class="part">Partial &mdash; IPv4 raw 2nd-gen probe set (SEQ/OPS/WIN/ECN/T1&ndash;T7/U1/IE) + MatchPoints scoring against <code>nmap-os-db</code> when the DB is available and open/closed TCP found. IPv6 = TTL heuristic only; no multi-round retry</td></tr>
           <tr><td>Service / version (<code>-sV</code>)</td><td class="part">Partial &mdash; full <code>nmap-service-probes</code> support except Perl-only regex features</td></tr>
           <tr><td>Scripts (<code>--script</code> / <code>-sC</code>)</td><td class="part">Partial &mdash; <code>default</code> + <code>banner</code> builtins; no Lua engine</td></tr>
           <tr><td><code>-oM</code> / <code>-oH</code></td><td class="part">Partial &mdash; <code>-oM</code> = grepable; <code>-oH</code> placeholder</td></tr>
@@ -200,10 +201,10 @@
       <h3 style="color:var(--cyan); font-family:'Orbitron',sans-serif; letter-spacing:1.5px; margin-top:1.2rem;">// nmap-os-db SCORING</h3>
       <p>When <code>-O</code> is on, IPv4 is privileged, the scan found both <strong>open</strong> and <strong>closed</strong> TCP ports, and <code>--datadir</code> contains <code>nmap-os-db</code>:</p>
       <ol>
-        <li>Raw Layer-3 probes build a subject fingerprint &mdash; <strong>SEQ</strong>, <strong>OPS</strong>, <strong>WIN</strong> subsets implemented today; the full nmap probe set (T1..T7, ECN, U1, IE1, etc.) is in progress.</li>
-        <li>Each candidate <code>nmap-os-db</code> entry is scored via <strong>MatchPoints + expr_match</strong> &mdash; the same algorithm upstream nmap uses.</li>
+        <li>Raw Layer-3 probes build a subject fingerprint with the Nmap 2nd-gen probe set &mdash; <strong>SEQ</strong>, <strong>OPS</strong>, <strong>WIN</strong>, <strong>ECN</strong>, <strong>T1&ndash;T7</strong>, <strong>U1</strong> (UDP), and <strong>IE</strong> (ICMP echo) tests assembled in <code>os_scan.rs::probe_ipv4_os()</code>.</li>
+        <li>Each candidate <code>nmap-os-db</code> reference fingerprint is scored via <strong>MatchPoints + expr_match</strong> &mdash; the same algorithm upstream nmap uses (<code>compare_fingerprints</code>), driven by the in-tree <code>c/expr_match.cpp</code> binding (<code>fp_match.rs</code>) and the reference DB loaded by <code>os_fp_db.rs</code>.</li>
         <li>Top-scoring matches print with their <code>OS:</code> / <code>Class:</code> / <code>CPE:</code> values.</li>
-        <li>When raw probes or matching data are unavailable, falls back to <strong>ICMP TTL heuristic</strong> + example <code>Class:</code> titles from the legacy DB parse.</li>
+        <li>When raw probes or matching data are unavailable, falls back to the <strong>ICMP TTL heuristic</strong> (<code>os_detect.rs</code>) + example <code>Class:</code> titles streamed from the DB parse (<code>os_db.rs</code>).</li>
       </ol>
       <p>IPv6 OS detection currently uses only the TTL heuristic.</p>
 
@@ -216,6 +217,23 @@
         <li><strong>rarity vs <code>--version-intensity</code></strong> &mdash; high-rarity probes are skipped at low intensity, identical to nmap's behavior.</li>
         <li><strong>match / softmatch with full template fields</strong> &mdash; <code>p/</code> (product), <code>v/</code> (version), <code>i/</code> (info), <code>o/</code> (OS), <code>d/</code> (device type), <code>cpe:/</code> (CPE URIs).</li>
         <li><strong>Perl-only regex features</strong> in the upstream patterns are detected and the matcher skips that entry &mdash; this is the source of the "partial" parity rating.</li>
+      </ul>
+
+      <h3 style="color:var(--cyan); font-family:'Orbitron',sans-serif; letter-spacing:1.5px; margin-top:1.2rem;">// HOST DISCOVERY ENGINE</h3>
+      <p>Discovery (<code>discovery.rs</code>) runs before the port scan unless <code>-Pn</code> / <code>--no-ping</code> is set. The default (no explicit <code>-P*</code>) fires raw ICMP echo in parallel with raw TCP SYN to ports <strong>443</strong> and <strong>80</strong>, with a TCP-connect fallback when raw fails. Explicit probes carry nmap's default ports:</p>
+      <ul>
+        <li><strong><code>-PS</code> / <code>-PA</code></strong> &mdash; raw TCP SYN / ACK; RST or SYN-ACK marks the host up; same sharded pipelines + connect fallback as the port scan.</li>
+        <li><strong><code>-PU</code></strong> (default <strong>40125</strong>) &mdash; UDP / ICMP-style socket errors.</li>
+        <li><strong><code>-PY</code></strong> (default port <strong>80</strong>) &mdash; SCTP INIT; INIT-ACK / ABORT &rarr; up; privileged; IPv4/IPv6 merged independently on partial failure.</li>
+        <li><strong><code>-PO</code></strong> (default protocols <strong>1,2,4</strong>) &mdash; IP-protocol ping; open or closed &rarr; up; privileged.</li>
+        <li><strong><code>-PP</code> / <code>-PM</code></strong> &mdash; ICMP timestamp / address-mask requests (IPv4 only, Unix raw via <code>icmp_ping.rs</code>); reply &rarr; up; <code>connect_timeout</code> bounds the wait; skipped with a warning on non-Unix.</li>
+        <li><strong><code>-PR</code></strong> &mdash; ARP ping; auto on local IPv4 subnets unless <code>--disable-arp-ping</code>.</li>
+      </ul>
+
+      <h3 style="color:var(--cyan); font-family:'Orbitron',sans-serif; letter-spacing:1.5px; margin-top:1.2rem;">// IDLE &amp; FTP-BOUNCE INDIRECT SCANS</h3>
+      <ul>
+        <li><strong>Idle scan (<code>-sI zombie[:probeport]</code>, <code>idle.rs</code>)</strong> &mdash; spoofed TCP SYN with the source set to the zombie; sequential IP-ID sampling on the zombie (RST to a closed probe port, default <strong>65535</strong>) keeps global IP-ID deltas interpretable; delta &ge; 2 &rarr; <code>open</code>, else <code>closed</code>; probe/RST failures &rarr; <code>filtered</code> (<code>idle-probe-failed</code>). IPv4 only; IPv6 targets are skipped with a warning.</li>
+        <li><strong>FTP bounce (<code>-b user:pass@host:port</code>, <code>ftp_bounce.rs</code>)</strong> &mdash; parallel <code>buffer_unordered</code> sessions, one control connection per probe, issuing <code>PORT</code> against a misconfigured FTP server; <code>150</code>/<code>125</code>/<code>250</code> &rarr; <code>open</code>, <code>425</code>/<code>426</code>/<code>421</code> &rarr; <code>closed</code>; IPv4 only; strict servers may yield <code>filtered</code>.</li>
       </ul>
 
       <h3 style="color:var(--cyan); font-family:'Orbitron',sans-serif; letter-spacing:1.5px; margin-top:1.2rem;">// EVASION AT PACKET LEVEL</h3>
@@ -241,7 +259,7 @@
       <table class="parity-table">
         <thead><tr><th>Item</th><th>Value</th></tr></thead>
         <tbody>
-          <tr><td>License</td><td>MIT</td></tr>
+          <tr><td>License</td><td>MIT OR Apache-2.0 (dual)</td></tr>
           <tr><td>Author</td><td><a href="https://github.com/MenkeTechnologies">MenkeTechnologies</a></td></tr>
           <tr><td>Repository</td><td><a href="https://github.com/MenkeTechnologies/nmaprs">github.com/MenkeTechnologies/nmaprs</a></td></tr>
           <tr><td>Crate</td><td><a href="https://crates.io/crates/nmaprs">crates.io/crates/nmaprs</a></td></tr>

@@ -345,6 +345,36 @@ nmaprs -sS --spoof-mac 00:11:22:33:44:55 target   # spoof source MAC on ARP fram
       </section>
 
       <section class="tutorial-section">
+        <h2>Host discovery probes &mdash; exact defaults</h2>
+        <p>Discovery runs <strong>before</strong> the port scan unless you pass <code>-Pn</code> / <code>--no-ping</code>. On local IPv4 subnets, <code>-PR</code> ARP ping runs automatically (turn off with <code>--disable-arp-ping</code>). Default discovery (no explicit <code>-P*</code>) runs raw ICMP echo in parallel with raw TCP SYN to ports <strong>443</strong> and <strong>80</strong>, falling back to TCP connect if raw fails.</p>
+        <table class="parity-table">
+          <thead><tr><th>Flag</th><th>Probe &amp; default</th></tr></thead>
+          <tbody>
+            <tr><td><code>-PS</code></td><td>Raw TCP SYN; RST / SYN-ACK &rarr; up. Sharded pipeline + connect fallback.</td></tr>
+            <tr><td><code>-PA</code></td><td>Raw TCP ACK; RST / SYN-ACK &rarr; up. Same pipeline + connect fallback.</td></tr>
+            <tr><td><code>-PU</code></td><td>UDP / ICMP-style socket errors. Default port <strong>40125</strong>.</td></tr>
+            <tr><td><code>-PY</code></td><td>SCTP INIT (default port <strong>80</strong>); INIT-ACK / ABORT &rarr; up. Privileged.</td></tr>
+            <tr><td><code>-PO</code></td><td>IP-protocol ping; default protocols <strong>1,2,4</strong>; open or closed &rarr; up. Privileged.</td></tr>
+            <tr><td><code>-PE</code></td><td>ICMP echo request (the classic ping).</td></tr>
+            <tr><td><code>-PP</code> / <code>-PM</code></td><td>ICMP timestamp / address-mask requests (IPv4 only, Unix raw); reply &rarr; up. Skipped with a warning on non-Unix.</td></tr>
+            <tr><td><code>-PR</code></td><td>ARP ping; auto on local IPv4 subnets. <code>--disable-arp-ping</code> opts out.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="tutorial-section">
+        <h2>Privilege model &amp; troubleshooting</h2>
+        <ul>
+          <li><strong>Auto privilege detect.</strong> nmaprs checks <code>geteuid()</code>. Unprivileged, the default downgrades SYN &rarr; TCP connect (<code>-sT</code>); <code>--privileged</code> forces raw even when not root, <code>--unprivileged</code> forces connect.</li>
+          <li><strong>Raw-only modes need root.</strong> <code>-sO</code>, <code>-sI</code>, and SCTP (<code>-sY</code> / <code>-sZ</code>) are rejected when unprivileged &mdash; run them under <code>sudo</code>.</li>
+          <li><strong>Raw send failures fall back per family.</strong> SYN / NULL / FIN / Xmas / Maimon retry as TCP connect on outright raw-socket failure (PERM, EAFNOSUPPORT). <code>-sA</code> / <code>-sW</code> do <em>not</em> fall back &mdash; connect can't produce ACK/Window states.</li>
+          <li><strong>Windows.</strong> Only TCP connect + UDP via system sockets are built; raw modes are unavailable (no <code>pnet</code> raw).</li>
+          <li><strong>OS / version DB.</strong> <code>-O</code> and <code>-sV</code> read <code>nmap-os-db</code> / <code>nmap-service-probes</code> from <code>--datadir</code> (default <code>./data</code>). Without the DB present, <code>-O</code> falls back to the ICMP-TTL heuristic.</li>
+          <li><strong>OS detection preconditions.</strong> IPv4 raw OS scoring needs both an <strong>open</strong> and a <strong>closed</strong> TCP port in the results (nmap's own requirement); otherwise it degrades to the TTL guess.</li>
+        </ul>
+      </section>
+
+      <section class="tutorial-section">
         <h2>Parity matrix vs nmap (abridged)</h2>
         <table class="parity-table">
           <thead><tr><th>Area</th><th>Status</th></tr></thead>
@@ -367,7 +397,7 @@ nmaprs -sS --spoof-mac 00:11:22:33:44:55 target   # spoof source MAC on ARP fram
             <tr><td>Auto privilege detect (<code>geteuid</code>)</td><td class="ok">Implemented</td></tr>
             <tr><td>Output: <code>-oN</code> / <code>-oG</code> / <code>-oX</code> / <code>-oA</code> / <code>-oS</code></td><td class="ok">Implemented (nmap-compatible XML)</td></tr>
             <tr><td>Timing template / rate caps / parallelism / hostgroup / RTT / retries / scan-delay / stats-every</td><td class="ok">Implemented</td></tr>
-            <tr><td>OS detection (<code>-O</code>)</td><td class="part">Partial &mdash; IPv4 raw + <code>nmap-os-db</code> MatchPoints; IPv6 TTL only</td></tr>
+            <tr><td>OS detection (<code>-O</code>)</td><td class="part">Partial &mdash; IPv4 raw 2nd-gen probes (SEQ/OPS/WIN/ECN/T1&ndash;T7/U1/IE) + <code>nmap-os-db</code> MatchPoints; IPv6 TTL only; no multi-round retry</td></tr>
             <tr><td>Service / version (<code>-sV</code>)</td><td class="part">Partial &mdash; no Perl-only regex features; rest implemented</td></tr>
             <tr><td><code>--script</code> / <code>-sC</code></td><td class="part">Partial &mdash; <code>default</code> + <code>banner</code> builtins only</td></tr>
             <tr><td><code>-oM</code> / <code>-oH</code></td><td class="part">Partial &mdash; <code>-oM</code> = grepable; <code>-oH</code> placeholder</td></tr>
@@ -379,37 +409,46 @@ nmaprs -sS --spoof-mac 00:11:22:33:44:55 target   # spoof source MAC on ARP fram
 
       <section class="tutorial-section">
         <h2>Architecture in one screen</h2>
-<pre>src/
-&#9500;&#9472;&#9472; main.rs              # CLI dispatch (clap), privilege detect, top-level scan loop
-&#9500;&#9472;&#9472; cli.rs               # 128 clap args, nmap-compatible long/short option set
-&#9500;&#9472;&#9472; lib.rs               # public API for programmatic use (re-exports core types)
-&#9500;&#9472;&#9472; bin/nms.rs           # short-name launcher (alias)
-&#9500;&#9472;&#9472; scan/
-&#9474;   &#9500;&#9472;&#9472; tcp_connect.rs   # async tokio TcpStream (incl. SOCKS4 / HTTP CONNECT)
-&#9474;   &#9500;&#9472;&#9472; raw_tcp.rs       # SYN/NULL/FIN/Xmas/ACK/Window/Maimon (pnet, sharded pipeline)
-&#9474;   &#9500;&#9472;&#9472; udp.rs           # UDP probe + raw ICMP unreach listener
-&#9474;   &#9500;&#9472;&#9472; sctp.rs          # SCTP INIT / COOKIE_ECHO (CRC32c)
-&#9474;   &#9500;&#9472;&#9472; ip_proto.rs      # -sO (IPv4 + IPv6 raw)
-&#9474;   &#9500;&#9472;&#9472; idle.rs          # -sI zombie IP-ID sampling
-&#9474;   &#9500;&#9472;&#9472; ftp_bounce.rs    # -b parallel control sessions
-&#9474;   &#9500;&#9472;&#9472; ping.rs          # -sn + -P* discovery dispatch
-&#9474;   &#9492;&#9472;&#9472; arp.rs           # ARP on local IPv4 subnets
-&#9500;&#9472;&#9472; service_probes.rs    # nmap-service-probes parser + matcher (regex crate)
-&#9500;&#9472;&#9472; os_db.rs             # nmap-os-db MatchPoints scoring (subject fingerprint)
-&#9500;&#9472;&#9472; output/
-&#9474;   &#9500;&#9472;&#9472; normal.rs        # -oN
-&#9474;   &#9500;&#9472;&#9472; grepable.rs      # -oG / -oM
-&#9474;   &#9500;&#9472;&#9472; xml.rs           # -oX (nmap-compatible &lt;nmaprun&gt;)
-&#9474;   &#9492;&#9472;&#9472; skiddie.rs       # -oS
-&#9500;&#9472;&#9472; resume.rs            # JSON checkpoint format
-&#9500;&#9472;&#9472; rate.rs              # --min-rate / --max-rate global limiter
-&#9500;&#9472;&#9472; resolver.rs          # hickory-resolver wrapper + --dns-servers
-&#9500;&#9472;&#9472; parallelism.rs       # timing template &harr; parallelism inference
-&#9492;&#9472;&#9472; data/                # embedded nmap-services, nmap-protocols, ...
+<pre>src/                       # flat module tree (29 modules declared in lib.rs)
+&#9500;&#9472;&#9472; main.rs             # binary entry: argv expand, privilege detect, scan loop
+&#9500;&#9472;&#9472; lib.rs              # public API + module roots (re-exports core types)
+&#9500;&#9472;&#9472; bin/nms.rs          # short-name launcher (same code, alias)
+&#9500;&#9472;&#9472; argv_expand.rs      # expand glued nmap short opts (-sS, -PS80, -T4) pre-clap
+&#9500;&#9472;&#9472; cli.rs              # 128 clap args, nmap-compatible long/short option set
+&#9500;&#9472;&#9472; config.rs           # resolve cli::Args into an executable ScanPlan
+&#9500;&#9472;&#9472; scan.rs             # parallel TCP connect + UDP probes (tokio, bounded)
+&#9500;&#9472;&#9472; syn.rs              # raw half-open SYN/NULL/FIN/Xmas/ACK/Window/Maimon (pnet)
+&#9500;&#9472;&#9472; sctp.rs             # raw SCTP -sY INIT / -sZ COOKIE_ECHO (CRC32c)
+&#9500;&#9472;&#9472; ip_proto.rs         # -sO IP protocol scan (IPv4 + IPv6 raw)
+&#9500;&#9472;&#9472; idle.rs             # -sI zombie IP-ID sampling
+&#9500;&#9472;&#9472; ftp_bounce.rs       # -b parallel FTP-bounce control sessions
+&#9500;&#9472;&#9472; ping.rs             # -sn raw ICMP echo discovery (pnet)
+&#9500;&#9472;&#9472; icmp_ping.rs        # -PP timestamp / -PM address-mask discovery
+&#9500;&#9472;&#9472; icmp_listen.rs      # ICMP/ICMPv6 unreach listeners (UDP closed/filtered)
+&#9500;&#9472;&#9472; discovery.rs        # -P* host discovery dispatch (incl. ARP auto)
+&#9500;&#9472;&#9472; ipv6_l4.rs          # locate L4 header inside IPv6 frame (+ ext headers)
+&#9500;&#9472;&#9472; net_util.rs         # cached local-IP lookup, lock-free deadlines
+&#9500;&#9472;&#9472; vscan.rs            # -sV nmap-service-probes matcher (regex + rustls TLS)
+&#9500;&#9472;&#9472; os_scan.rs          # IPv4 2nd-gen OS probes: SEQ/OPS/WIN/ECN/T1-T7/U1/IE
+&#9500;&#9472;&#9472; os_fp_db.rs         # nmap-os-db reference fingerprints + MatchPoints scoring
+&#9500;&#9472;&#9472; fp_match.rs         # expr_match binding (c/expr_match.cpp) for fingerprints
+&#9500;&#9472;&#9472; os_db.rs            # stream-parse nmap-os-db metadata (titles/classes)
+&#9500;&#9472;&#9472; os_detect.rs        # ICMP-TTL OS heuristic fallback
+&#9500;&#9472;&#9472; nse.rs              # built-in Rust "scripts" (banner) for --script / -sC
+&#9500;&#9472;&#9472; scanflags.rs        # parse --scanflags TCP flag names
+&#9500;&#9472;&#9472; ports.rs            # -p / -F / --top-ports resolution + -sO -F protocols
+&#9500;&#9472;&#9472; target.rs           # hostnames, IPv4/IPv6, CIDR, octet ranges, -iL lines
+&#9500;&#9472;&#9472; trace.rs            # --traceroute via system traceroute / tracert
+&#9500;&#9472;&#9472; resume.rs           # --resume JSON checkpoint of completed (host, port)
+&#9500;&#9472;&#9472; output.rs           # -oN normal / -oG grepable / -oX Xml writers
+&#9500;&#9472;&#9472; skiddie.rs          # -oS script-kiddie text transform (nmap skid_output)
+&#9492;&#9472;&#9472; help_tp.rs          # tp-style --help banner / columns / section rules
+c/expr_match.cpp           # upstream nmap fingerprint expr_match (linked via build.rs)
+data/                      # embedded top_ports.txt + nmap_ip_protocols_fast.txt
 man/man1/
-&#9500;&#9472;&#9472; nmaprs.1             # man page &mdash; short reference (roff)
-&#9492;&#9472;&#9472; nmaprsall.1          # man page &mdash; full reference (1028 lines)</pre>
-        <p>Two binaries (<code>nmaprs</code> + <code>nms</code> &mdash; same code, short alias), comprehensive man pages (<code>man nmaprs</code> + <code>man nmaprsall</code>).</p>
+&#9500;&#9472;&#9472; nmaprs.1            # man page &mdash; short reference (506 lines, roff)
+&#9492;&#9472;&#9472; nmaprsall.1         # man page &mdash; full reference (1028 lines)</pre>
+        <p>Two binaries (<code>nmaprs</code> + <code>nms</code> &mdash; same code, short alias), two man pages (<code>man nmaprs</code> short / <code>man nmaprsall</code> full), zsh completions in <code>completions/_nmaprs</code> (completes both names), a Criterion microbenchmark in <code>benches/scan.rs</code>, and a vs-nmap harness in <code>scripts/benchmark_vs_nmap.sh</code>. Dual-licensed <code>MIT OR Apache-2.0</code>.</p>
       </section>
 
       <section class="tutorial-section">
@@ -423,7 +462,7 @@ man/man1/
           <li><strong>One ICMP unreach listener thread per scan</strong> (not per batch) for UDP / SCTP / IP-proto.</li>
           <li><strong>Global rate limiter</strong> shared across IPv4 + IPv6 &mdash; <code>--min-rate</code> / <code>--max-rate</code> behave like nmap, not per-family.</li>
         </ul>
-        <p>For OS detection, IPv4 raw probes build a subject fingerprint (SEQ / OPS / WIN subset; more in progress) and score it against <code>nmap-os-db</code> entries with the same <strong>MatchPoints + expr_match</strong> algorithm nmap uses.</p>
+        <p>For OS detection, IPv4 raw probes build a subject fingerprint from the Nmap 2nd-gen probe set &mdash; <strong>SEQ / OPS / WIN / ECN / T1&ndash;T7 / U1 / IE</strong> tests (<code>os_scan.rs</code>) &mdash; and score it against <code>nmap-os-db</code> reference fingerprints with the same <strong>MatchPoints + expr_match</strong> algorithm nmap uses (<code>fp_match.rs</code> binding over <code>c/expr_match.cpp</code>). IPv6 OS detection is a TTL heuristic only.</p>
       </section>
 
       <section class="tutorial-section">
