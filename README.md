@@ -20,6 +20,8 @@
 
 > *"Every port has a story. We read them all in parallel."*
 
+### [`Read the Docs`](https://menketechnologies.github.io/nmaprs/) &middot; [`Engineering Report`](https://menketechnologies.github.io/nmaprs/report.html)
+
 ---
 
 ## [0x00] OVERVIEW
