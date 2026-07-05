@@ -2,7 +2,7 @@
 name = "nmaprs"
 version = "0.1.9"
 edition = "2021"
-authors = ["MenkeTechnologies"]
+authors = ["MenkeTechnologies <linux.dev25@gmail.com>"]
 description = "High-performance parallel network scanner with nmap-compatible CLI surface"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/MenkeTechnologies/nmaprs"
