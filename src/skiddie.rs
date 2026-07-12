@@ -20,7 +20,7 @@ fn skid_bytes(s: &mut [u8]) {
                 b'A' => s[i] = b'4',
                 b'e' | b'E' => s[i] = b'3',
                 b'i' | b'I' => {
-                    s[i] = [b'!', b'|', b'1'][rng.gen_range(0..3)];
+                    s[i] = b"!|1"[rng.gen_range(0..3)];
                 }
                 b'o' | b'O' => s[i] = b'0',
                 b's' | b'S' => {
