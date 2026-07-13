@@ -10,7 +10,7 @@
 [![CI](https://github.com/MenkeTechnologies/nmaprs/actions/workflows/ci.yml/badge.svg)](https://github.com/MenkeTechnologies/nmaprs/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/nmaprs.svg)](https://crates.io/crates/nmaprs)
 [![Downloads](https://img.shields.io/crates/d/nmaprs.svg)](https://crates.io/crates/nmaprs)
-[![License: MIT](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ### `[RUST GRID SCANNER // NEON WIRE // PARALLEL SOCKETS // NMAP-SHAPED CLI]`
 
