@@ -97,10 +97,12 @@ ICMP timestamp request.
 .B \-PM
 ICMP address mask request.
 .TP
-.B \-PR
-ARP ping (auto on local IPv4 subnets;
+ARP ping (no flag)
+Automatic for local-subnet IPv4 hosts;
 .B \-\-disable-arp-ping
-to suppress).
+to suppress. nmap's
+.B \-PR
+is not accepted.
 .TP
 .B \-n
 Never do DNS resolution.
@@ -290,7 +292,7 @@ Periodic progress to stderr (% done, ETC, probes/sec).
 Spoof source port.
 .TP
 .B \-\-ttl \fIVAL\fR
-Set IP TTL.
+Set IP TTL. Parsed and validated only; not yet applied to emitted packets.
 .TP
 .B \-\-badsum
 Use bad TCP/UDP/SCTP checksum.
@@ -309,10 +311,10 @@ Spoof source address.
 Append payload to packets.
 .TP
 .B \-f
-Fragment packets (8-byte default).
+Fragment packets (8-byte default). Parsed only; no fragmentation is performed.
 .TP
 .B \-\-mtu \fIVAL\fR
-Custom fragmentation MTU.
+Custom fragmentation MTU (must be a multiple of 8). Parsed only.
 .TP
 .B \-\-spoof-mac \fIMAC\fR
 Spoof source MAC on ARP frames.
@@ -450,39 +452,30 @@ nmaprs \-\-iflist
 Scan completed (regardless of host/port states).
 .TP
 .B 1
-Invalid CLI usage, required privileges missing, or fatal I/O error.
+Fatal error: required privileges missing, no target resolved, no host
+responded to discovery, or an I/O error.
 .TP
 .B 2
-At least one target failed to resolve.
+Invalid CLI usage (unknown flag, missing or malformed argument value).
 .SH FILES
 .TP
-.I ./data/nmap-services
-.TQ
 .I ./data/nmap-service-probes
 .TQ
 .I ./data/nmap-os-db
-.TQ
-.I ./data/nmap-protocols
-Nmap reference data (location override via
-.BR \-\-datadir
-or
-.B NMAPDIR
-env var).
-.TP
-.I nmaprs.checkpoint.json
-Default checkpoint path for
-.BR \-\-resume .
+Nmap reference data for
+.B \-sV
+and
+.BR \-O .
+Not committed; fetch with
+.IR scripts/fetch_nmap_data.sh .
+Location override via
+.BR \-\-datadir .
 .TP
 .I /usr/local/share/man/man1/nmaprs.1
 .TQ
 .I /usr/local/share/man/man1/nmaprsall.1
 This man page + the full reference.
 .SH ENVIRONMENT
-.TP
-.B NMAPDIR
-Override the default
-.B \-\-datadir
-search path for Nmap reference files.
 .TP
 .B NO_COLOR
 Suppress ANSI color in terminal output.
@@ -494,7 +487,7 @@ Suppress ANSI color in terminal output.
 .BR lsofrsall (1),
 .BR strykeall (1)
 .SH AUTHORS
-.B Jacob Menke
+.B MenkeTechnologies
 .RI < https://github.com/MenkeTechnologies >
 .SH BUGS
 Report bugs at

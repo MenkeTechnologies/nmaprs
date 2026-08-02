@@ -79,10 +79,11 @@ impl OutputSet {
             let now = chrono_timestamp();
             writeln!(
                 f,
-                r#"<nmaprun scanner="nmaprs" args="{}" start="{}" startstr="{}" version="0.1.0" xmloutputversion="1.05">"#,
+                r#"<nmaprun scanner="nmaprs" args="{}" start="{}" startstr="{}" version="{}" xmloutputversion="1.05">"#,
                 xml_escape(cmdline),
                 now.0,
-                xml_escape(&now.1)
+                xml_escape(&now.1),
+                env!("CARGO_PKG_VERSION")
             )?;
             writeln!(f, r#"<verbose level="0"/>"#)?;
             writeln!(f, r#"<debugging level="0"/>"#)?;

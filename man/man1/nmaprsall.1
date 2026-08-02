@@ -23,7 +23,7 @@ single page so you can grep with `/`:
 .RB "\(em " "-iL, -iR, --exclude, --excludefile, IPv4/IPv6/CIDR/range"
 .br
 .B 3.  HOST DISCOVERY
-.RB "\(em " "-sL, -sn, -Pn, -PS/PA/PU/PY/PE/PP/PM/PR, --dns-servers"
+.RB "\(em " "-sL, -sn, -Pn, -PS/PA/PU/PY/PE/PP/PM/PO, auto ARP, --dns-servers"
 .br
 .B 4.  SCAN TECHNIQUES
 .RB "\(em " "-sT, -sS, -sU, -sY/sZ SCTP, -sA/sW, -sN/sF/sX/sM, -sO, -sI, -b"
@@ -41,7 +41,7 @@ single page so you can grep with `/`:
 .RB "\(em " "-T0..T5, --min/max-rate, parallelism, hostgroup, RTT, retries"
 .br
 .B 9.  FIREWALL / IDS EVASION
-.RB "\(em " "-g, --ttl, --badsum, -D decoys, -S spoof, --data*, -f/--mtu, --spoof-mac"
+.RB "\(em " "-g, --badsum, -D decoys, -S spoof, --data*, --spoof-mac (--ttl, -f/--mtu parsed only)"
 .br
 .B 10. PROXY
 .RB "\(em " "--proxies / --proxy (SOCKS4 + HTTP CONNECT)"
@@ -106,15 +106,18 @@ as an alias of
 for raw TCP scans: evasion flags
 .RB ( \-g
 source port,
-.BR \-\-ttl ,
 .BR \-\-badsum ,
 .B \-D
 decoys,
 .B \-S
 source spoofing,
-.BR \-\-data / \-\-data-string / \-\-data-length ,
+.BR \-\-data / \-\-data-string / \-\-data-length ).
+.BR \-\-ttl ,
 .BR \-f / \-\-mtu
-fragmentation).
+fragmentation and
+.B \-\-ip-options
+are parsed and validated for CLI parity but are not applied to the
+emitted packets.
 .PP
 .B \-\-proxies
 routes TCP-connect scans through SOCKS4 or HTTP CONNECT proxies.
@@ -257,9 +260,12 @@ ICMP timestamp request (IPv4, Unix raw ICMP).
 .B \-PM
 ICMP address-mask request (IPv4, Unix raw ICMP).
 .TP
-.B \-PR
-ARP ping. Auto-runs for local-subnet IPv4 hosts; disable with
+ARP ping (no flag)
+Auto-runs for local-subnet IPv4 hosts; disable with
 .BR \-\-disable-arp-ping .
+nmap's
+.B \-PR
+is not accepted.
 .TP
 .B \-n
 Never resolve DNS.
@@ -578,15 +584,13 @@ Reduce wait for RST replies from rate-limited hosts.
 Reduce wait for ICMP replies from rate-limited hosts.
 .TP
 .B \-\-nsock-engine \fIENGINE\fR
-.TQ
-.B \-\-nmaprs-engine \fIENGINE\fR
-Reserved for nmap parity.
+Accepted and ignored; reserved for nmap parity.
 .TP
 .B \-\-stats-every \fITIME\fR
 Periodic scan progress to stderr (% done, ETC, probes/sec).
 Per-probe granularity for TCP connect.
 .SH "9.  FIREWALL / IDS EVASION"
-All evasion flags below are wired
+Unless a flag says otherwise below, the evasion flags in this section are wired
 .B at the packet level
 for raw TCP scans.
 .TP
@@ -596,7 +600,7 @@ for raw TCP scans.
 Spoof source port (default fast SYN scans use random high port).
 .TP
 .B \-\-ttl \fIVAL\fR
-Set IP TTL.
+Set IP TTL. Parsed and validated only; not yet applied to emitted packets.
 .TP
 .B \-\-badsum
 Use a bad TCP/UDP/SCTP checksum (firewall vs end-host fingerprint).
@@ -616,22 +620,26 @@ when needed.
 .B \-\-data-string \fITEXT\fR
 .TQ
 .B \-\-data-length \fIN\fR
-Append payload to packets (random when only
+Append payload to packets.
 .B \-\-data-length
-is set).
+alone appends
+.I N
+zero bytes.
 .TP
 .B \-f
-Use small fragments (8-byte payload chunks).
+Use small fragments (8-byte payload chunks). Parsed only; no fragmentation
+is performed.
 .TP
 .B \-\-mtu \fIVAL\fR
-Custom fragmentation MTU.
+Custom fragmentation MTU (must be a multiple of 8). Parsed only.
 .TP
 .B \-\-spoof-mac \fIMAC\fR
 Spoof source MAC on ARP discovery frames (full MAC, prefix, or vendor
 name).
 .TP
 .B \-e \fIIFACE\fR
-Force use of a specific interface.
+Force use of a specific interface. Parsed only; ARP discovery still picks the
+first up, non-loopback IPv4 interface.
 .SH "10. PROXY"
 .TP
 .B \-\-proxies \fIURLS\fR
@@ -715,8 +723,9 @@ Not full nmap NSE/Lua.
 .B \-\-resume \fIFILE\fR
 Resume from JSON checkpoint of completed
 .BR "(host, port)" .
-Applies to TCP connect, UDP, raw half-open TCP, IP protocol scan
-(remaining pairs only after the checkpoint).
+The checkpoint is subtracted from the work list before scan dispatch, so it
+applies to every port-scan kind: TCP connect, UDP, raw half-open TCP, SCTP,
+IP protocol, idle and FTP bounce (remaining pairs only).
 .TP
 .B \-\-iflist
 List interfaces via
@@ -782,11 +791,11 @@ Idle scan (-sI)|Implemented (IPv4 only, sequential IP-ID)
 FTP bounce (-b)|Implemented (IPv4 only)
 IP protocol (-sO)|Implemented (IPv4 + IPv6 on Unix)
 Ping scan (-sn)|Implemented
-Host discovery (-PS/-PA/-PU/-PY/-PO/-PE/-PP/-PM/-PR)|Implemented
-ARP ping (-PR, local IPv4)|Implemented (auto)
+Host discovery (-PS/-PA/-PU/-PY/-PO/-PE/-PP/-PM)|Implemented
+ARP ping (no flag, local IPv4)|Implemented (auto)
 IPv6 (-6)|Implemented
 -iL / -iR|Implemented
---resume|Implemented (TCP connect, UDP, raw, IP-proto)
+--resume|Implemented (every port-scan kind)
 --traceroute|Implemented (system traceroute, concurrent)
 -O OS detection|Partial (IPv4 raw + DB scoring; IPv6 TTL heuristic)
 -A aggressive bundle|Implemented (no NSE/Lua)
@@ -801,7 +810,8 @@ IPv6 (-6)|Implemented
 --min-hostgroup / --max-hostgroup|Implemented
 --scanflags|Implemented (raw TCP scans only)
 Port specs (-p, -F, --top-ports, --port-ratio)|Implemented
-Evasion (-g, --ttl, --badsum, -D, -S, --data*, -f / --mtu, --spoof-mac)|Implemented (packet-level)
+Evasion (-g, --badsum, -D, -S, --data*, --spoof-mac)|Implemented (packet-level)
+--ttl, -f / --mtu, --ip-options, -e, --send-eth/--send-ip|Parsed only (not applied)
 --proxies / --proxy|Implemented (SOCKS4 + HTTP CONNECT)
 --dns-servers|Implemented (hickory-resolver)
 Auto privilege detection|Implemented
@@ -822,11 +832,6 @@ If you need authoritative nmap NSE/OS-DB behavior, use
 .BR nmap (1).
 .SH "14. ENVIRONMENT"
 .TP
-.B NMAPDIR
-Override the default
-.B \-\-datadir
-search path for nmap reference files.
-.TP
 .B NO_COLOR
 Suppress ANSI color in terminal output.
 .TP
@@ -836,25 +841,27 @@ Log filter (see
 EnvFilter).
 .SH "15. FILES"
 .TP
-.I ./data/nmap-services
-TCP/UDP service-port frequency list.
-.TP
 .I ./data/nmap-service-probes
-Service / version probe definitions.
+Service / version probe definitions, read by
+.BR \-sV .
+Not committed; fetch with
+.IR scripts/fetch_nmap_data.sh .
+Override the path with
+.BR \-\-versiondb .
 .TP
 .I ./data/nmap-os-db
-OS fingerprint database.
+OS fingerprint database, read by
+.BR \-O .
+Not committed; fetch with
+.IR scripts/fetch_nmap_data.sh .
 .TP
-.I ./data/nmap-protocols
-IP-protocol number/name list.
+.I ./data/top_ports.txt
+TCP port frequency list, compiled into the binary.
 .TP
 .I ./data/nmap_ip_protocols_fast.txt
-Embedded fast-mode protocol shortlist for
-.BR "\-sO \-F" .
-.TP
-.I nmaprs.checkpoint.json
-Default checkpoint path for
-.BR \-\-resume .
+Fast-mode protocol shortlist for
+.BR "\-sO \-F" ,
+compiled into the binary.
 .TP
 .I /usr/local/share/man/man1/nmaprs.1
 Short reference man page.
@@ -867,10 +874,11 @@ This man page.
 Scan completed (regardless of host/port states).
 .TP
 .B 1
-Invalid CLI usage, missing privileges, or fatal I/O error.
+Fatal error: missing privileges, no target resolved, no host responded to
+discovery, or an I/O error.
 .TP
 .B 2
-At least one target failed DNS resolution.
+Invalid CLI usage (unknown flag, missing or malformed argument value).
 .SH "17. EXAMPLES"
 .PP
 Basic TCP connect of common ports:
@@ -943,24 +951,25 @@ nmaprs \-\-dns-servers 1.1.1.1,8.8.8.8 \-\-data-length 64 target
 .fi
 .RE
 .PP
-NULL scan with custom TCP flags + fragmentation + spoofed source port:
+NULL scan with custom TCP flags + spoofed source port:
 .RS
 .nf
-sudo nmaprs \-sN \-\-scanflags "FIN URG PSH" \-f \-g 53 target
+sudo nmaprs \-sN \-\-scanflags "FIN URG PSH" \-g 53 target
 .fi
 .RE
 .PP
-Decoy cloaking + spoofed source IP + TTL evasion:
+Decoy cloaking + spoofed source IP:
 .RS
 .nf
-sudo nmaprs \-sS \-D RND:5,ME \-S 192.0.2.1 \-\-ttl 33 \-e eth0 target
+sudo nmaprs \-sS \-D RND:5,ME \-S 192.0.2.1 target
 .fi
 .RE
 .PP
-ARP-only host discovery on a local subnet:
+Host discovery on a local subnet (ARP ping runs automatically for
+local-subnet IPv4 hosts):
 .RS
 .nf
-sudo nmaprs \-sn \-PR 192.168.1.0/24
+sudo nmaprs \-sn 192.168.1.0/24
 .fi
 .RE
 .PP
@@ -1020,7 +1029,7 @@ for misuse.
 .BR strykeall (1),
 .BR zshrsall (1)
 .SH AUTHORS
-.B Jacob Menke
+.B MenkeTechnologies
 .RI < https://github.com/MenkeTechnologies >
 .SH BUGS
 Report bugs at
