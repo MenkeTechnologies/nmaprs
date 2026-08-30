@@ -3,67 +3,37 @@
 // Public docs reference internal constants by name for explanatory purposes
 // (`MAX_SYN_PARALLEL_SHARDS`, `MAX_TRACEROUTE_PARALLEL`). They don't need
 // to be hyperlinks — silence intra-doc-link lints in this crate.
-#![allow(rustdoc::broken_intra_doc_links)]
 #![allow(rustdoc::private_intra_doc_links)]
 
 pub mod argv_expand;
-/// `cli` submodule.
 pub mod cli;
-/// `config` submodule.
 pub mod config;
-/// `discovery` submodule.
 pub mod discovery;
-/// `fp_match` submodule.
 pub mod fp_match;
-/// `ftp_bounce` submodule.
 pub mod ftp_bounce;
-/// `help_tp` submodule.
 pub mod help_tp;
-/// `icmp_listen` submodule.
 pub mod icmp_listen;
-/// `icmp_ping` submodule.
 pub mod icmp_ping;
-/// `idle` submodule.
 pub mod idle;
-/// `ip_proto` submodule.
 pub mod ip_proto;
-/// `ipv6_l4` submodule.
 pub mod ipv6_l4;
-/// `net_util` submodule.
 pub mod net_util;
-/// `nse` submodule.
 pub mod nse;
-/// `os_db` submodule.
 pub mod os_db;
-/// `os_detect` submodule.
 pub mod os_detect;
-/// `os_fp_db` submodule.
 pub mod os_fp_db;
-/// `os_scan` submodule.
 pub mod os_scan;
-/// `output` submodule.
 pub mod output;
-/// `ping` submodule.
 pub mod ping;
-/// `ports` submodule.
 pub mod ports;
-/// `resume` submodule.
 pub mod resume;
-/// `scan` submodule.
 pub mod scan;
-/// `scanflags` submodule.
 pub mod scanflags;
-/// `sctp` submodule.
 pub mod sctp;
-/// `skiddie` submodule.
 pub mod skiddie;
-/// `syn` submodule.
 pub mod syn;
-/// `target` submodule.
 pub mod target;
-/// `trace` submodule.
 pub mod trace;
-/// `vscan` submodule.
 pub mod vscan;
 
 use std::collections::{HashMap, HashSet};
