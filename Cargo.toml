@@ -1,6 +1,6 @@
 [package]
 name = "nmaprs"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 authors = ["MenkeTechnologies <linux.dev25@gmail.com>"]
 description = "High-performance parallel network scanner with nmap-compatible CLI surface"
