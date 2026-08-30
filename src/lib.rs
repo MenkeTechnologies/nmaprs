@@ -1,10 +1,5 @@
 //! `nmaprs` — parallel network scanner with nmap-style CLI parsing.
 
-// Public docs reference internal constants by name for explanatory purposes
-// (`MAX_SYN_PARALLEL_SHARDS`, `MAX_TRACEROUTE_PARALLEL`). They don't need
-// to be hyperlinks — silence intra-doc-link lints in this crate.
-#![allow(rustdoc::private_intra_doc_links)]
-
 pub mod argv_expand;
 pub mod cli;
 pub mod config;

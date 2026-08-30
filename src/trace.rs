@@ -54,7 +54,7 @@ async fn traceroute_one(host: IpAddr) -> (String, String) {
 }
 
 /// Run system traceroute for each host, **bounded parallel** (`max_parallel` clamped to
-/// [`MAX_TRACEROUTE_PARALLEL`]), preserving scan output order.
+/// the private `MAX_TRACEROUTE_PARALLEL`), preserving scan output order.
 pub async fn run_traceroute(hosts: &[IpAddr], max_parallel: usize) -> Result<()> {
     if hosts.is_empty() {
         return Ok(());
