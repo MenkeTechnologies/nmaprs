@@ -188,18 +188,19 @@ async fn resolve_host(host: &str, opts: &ExpandOpts) -> Result<Vec<IpAddr>, Targ
         addrs.map(|a| a.ip()).collect()
     } else {
         // Custom DNS servers via hickory-resolver
-        use hickory_resolver::config::{NameServerConfigGroup, ResolverConfig};
-        use hickory_resolver::name_server::TokioConnectionProvider;
+        use hickory_resolver::config::{NameServerConfig, ResolverConfig};
+        use hickory_resolver::net::runtime::TokioRuntimeProvider;
         use hickory_resolver::Resolver;
 
-        let ns_group = NameServerConfigGroup::from_ips_clear(
-            &opts.dns_servers,
-            53,
-            true, // trust_negative_responses
-        );
-        let cfg = ResolverConfig::from_parts(None, vec![], ns_group);
-        let resolver =
-            Resolver::builder_with_config(cfg, TokioConnectionProvider::default()).build();
+        let servers = opts
+            .dns_servers
+            .iter()
+            .map(|ip| NameServerConfig::udp_and_tcp(*ip))
+            .collect();
+        let cfg = ResolverConfig::from_name_servers(servers);
+        let resolver = Resolver::builder_with_config(cfg, TokioRuntimeProvider::default())
+            .build()
+            .map_err(|e| TargetError::Dns(host.to_string(), e.to_string()))?;
         let lookup = resolver
             .lookup_ip(host)
             .await
