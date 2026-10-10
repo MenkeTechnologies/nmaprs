@@ -193,9 +193,9 @@ range|\fB10.0.0.1-100\fR or \fB10.0.0-255.1\fR
 .B \-\-iL \fIFILE\fR
 Read targets, one per line, from
 .IR FILE .
-Multiple
-.B \-iL
-flags merge in parallel (order preserved).
+Lines of
+.I FILE
+resolve in parallel (order preserved); the flag may be given once.
 .TP
 .B \-\-iR \fINUM\fR
 Pick
@@ -220,9 +220,7 @@ List-scan only \(em do not send probes.
 Ping scan: skip the port scan. Per-host raw ICMP echo via
 .B pnet
 (privileged), falls back to system
-.BR ping (8)
-/
-.BR ping6 (8).
+.BR ping (8).
 Output paths
 .RB ( \-oN ,
 .BR \-oG ,
@@ -234,10 +232,10 @@ write host-up lines like the port-scan path.
 Treat all hosts as online; skip discovery entirely.
 .TP
 .BI \-PS [ PORTLIST ]
-TCP SYN discovery on the given ports (default 80, 443).
+TCP SYN discovery on the given ports (default 80).
 .TP
 .BI \-PA [ PORTLIST ]
-TCP ACK discovery (RST/SYN-ACK indicates up).
+TCP ACK discovery (default port 80; RST/SYN-ACK indicates up).
 .TP
 .BI \-PU [ PORTLIST ]
 UDP discovery probe (default port 40125).
@@ -271,7 +269,7 @@ is not accepted.
 Never resolve DNS.
 .TP
 .B \-R
-Always resolve DNS (default: only for live hosts).
+Accepted for nmap parity; has no effect (no reverse-DNS stage).
 .TP
 .B \-\-dns-servers \fISERVERS\fR
 Comma-separated IPs of custom DNS resolvers (uses
@@ -291,9 +289,11 @@ binary. Up to
 hosts run concurrently; output stays in target order.
 .SH "4.  SCAN TECHNIQUES"
 .SS TCP connect (\-sT)
-Default when unprivileged. Async, parallel, timeout-bound.
+Default scan type. Async, parallel, timeout-bound.
 .SS TCP SYN (\-sS)
-Default when privileged. Raw IPv4 + IPv6 TCP via
+Selected with
+.BR \-sS ;
+requires root, otherwise falls back to connect. Raw IPv4 + IPv6 TCP via
 .BR pnet :
 RST \(-> closed, SYN/ACK \(-> open. Pipelined per family with dedicated
 recv thread + main-thread sends; sharded across up to 16 concurrent
@@ -492,7 +492,7 @@ Maximum OS detect tries.
 .TP
 .B \-\-timing \fI0-5\fR
 .TQ
-.B \-T \fI0-5\fR
+.B \-T0\fR .. \fB\-T5
 Timing template:
 .B T0
 paranoid,
@@ -750,13 +750,8 @@ when set.
 Override the default
 .B ./data
 directory for nmap reference files
-.RB ( nmap-services ,
-.BR nmap-service-probes ,
-.BR nmap-os-db ,
-.BR nmap-protocols ).
-Also honors the
-.B NMAPDIR
-env var.
+.RB ( nmap-service-probes ,
+.B nmap-os-db ).
 .TP
 .B \-\-versiondb \fIPATH\fR
 Specific version probe database file.
@@ -833,7 +828,7 @@ If you need authoritative nmap NSE/OS-DB behavior, use
 .SH "14. ENVIRONMENT"
 .TP
 .B NO_COLOR
-Suppress ANSI color in terminal output.
+Suppress ANSI color in \fB\-\-help\fR and \fB\-\-version\fR output.
 .TP
 .B RUST_LOG
 Log filter (see
@@ -874,8 +869,8 @@ This man page.
 Scan completed (regardless of host/port states).
 .TP
 .B 1
-Fatal error: missing privileges, no target resolved, no host responded to
-discovery, or an I/O error.
+Fatal error: missing privileges, no target specified or resolved, invalid
+option combination or value, or an I/O error.
 .TP
 .B 2
 Invalid CLI usage (unknown flag, missing or malformed argument value).

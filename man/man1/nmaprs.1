@@ -77,10 +77,10 @@ Ping scan only (no port scan).
 Treat all hosts as online; skip discovery.
 .TP
 .BI \-PS [ PORTLIST ]
-TCP SYN discovery on given ports.
+TCP SYN discovery on given ports (default port 80).
 .TP
 .BI \-PA [ PORTLIST ]
-TCP ACK discovery.
+TCP ACK discovery (default port 80).
 .TP
 .BI \-PU [ PORTLIST ]
 UDP discovery (default port 40125).
@@ -108,7 +108,7 @@ is not accepted.
 Never do DNS resolution.
 .TP
 .B \-R
-Always do DNS resolution.
+Accepted for nmap parity; has no effect.
 .TP
 .B \-\-dns-servers \fISERVERS\fR
 Use custom DNS resolvers (comma-separated IPs;
@@ -124,10 +124,10 @@ subprocesses).
 .SS Scan Techniques
 .TP
 .B \-sS
-TCP SYN scan (privileged raw; default when root).
+TCP SYN scan (privileged raw; falls back to connect when unprivileged).
 .TP
 .B \-sT
-TCP connect scan (default when unprivileged).
+TCP connect scan (default).
 .TP
 .B \-sU
 UDP scan.
@@ -238,9 +238,10 @@ paranoid \(->
 .B T5
 insane).
 .TP
-.B \-T \fI0-5\fR
+.B \-T0\fR .. \fB\-T5
 Same as
-.BR \-\-timing .
+.BR \-\-timing ,
+with the digit attached (a separate argument is not accepted).
 .TP
 .B \-\-min-rate \fIN\fR
 Send at least
@@ -452,8 +453,8 @@ nmaprs \-\-iflist
 Scan completed (regardless of host/port states).
 .TP
 .B 1
-Fatal error: required privileges missing, no target resolved, no host
-responded to discovery, or an I/O error.
+Fatal error: required privileges missing, no target specified or resolved,
+invalid option combination or value, or an I/O error.
 .TP
 .B 2
 Invalid CLI usage (unknown flag, missing or malformed argument value).
@@ -478,7 +479,7 @@ This man page + the full reference.
 .SH ENVIRONMENT
 .TP
 .B NO_COLOR
-Suppress ANSI color in terminal output.
+Suppress ANSI color in \fB\-\-help\fR and \fB\-\-version\fR output.
 .SH SEE ALSO
 .BR nmaprsall (1),
 .BR nmap (1),
