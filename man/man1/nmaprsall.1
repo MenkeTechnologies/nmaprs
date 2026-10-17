@@ -756,6 +756,29 @@ directory for nmap reference files
 .B \-\-versiondb \fIPATH\fR
 Specific version probe database file.
 .TP
+.B \-\-unique
+Deduplicate the expanded target list.
+.TP
+.BR \-\-randomize-hosts ", " \-\-rH
+Shuffle the expanded target list.
+.TP
+.B \-\-scan-type \fICHAR\fR
+Select scan technique by letter (repeatable): T S U N F X A W M Y Z.
+Letters O and I are rejected; use
+.B \-sO
+and
+.BR \-sI .
+.TP
+.B \-\-script-default
+Same as
+.BR \-sC .
+.TP
+.B \-\-servicedb \fIFILE\fR
+Accepted; a warning is logged and the embedded top-ports list is still used.
+.TP
+.BR \-\-packet-trace ", " \-\-route-dst \fIHOST\fR ", " \-\-release-memory ", " \-\-nogcc ", " \-\-adler32 ", " \-\-log-errors ", " \-\-noninteractive ", " \-\-deprecated-xml-osclass ", " \-\-discovery-ignore-rst ", " \-\-thc
+Accepted for nmap command-line parity; no effect on scan behavior.
+.TP
 .BR \-v ", " \-\-vv
 Increase verbosity.
 .TP
@@ -1023,9 +1046,6 @@ for misuse.
 .BR iftoprsall (1),
 .BR strykeall (1),
 .BR zshrsall (1)
-.SH AUTHORS
-.B MenkeTechnologies
-.RI < https://github.com/MenkeTechnologies >
 .SH BUGS
 Report bugs at
 .UR https://github.com/MenkeTechnologies/nmaprs/issues

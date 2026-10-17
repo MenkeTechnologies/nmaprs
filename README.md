@@ -28,10 +28,6 @@
 
 **nmaprs** is a Rust-native network scanner that speaks **nmap's CLI dialect** (`nmap --help` **plus** the long-option set from upstream **`nmap.cc`**, e.g. `--resolve-all`, `--defeat-rst-ratelimit`, `--versiondb`, `--oM` / `--oH`, `--vv`, `--proxy` as an alias of `--proxies`). **Evasion flags** (`-g` source port, `--badsum`, `-D` decoys, `-S` source spoofing, `--data`/`--data-string`/`--data-length`) are **wired at the packet level** for raw TCP scans; `--ttl`, `-f`/`--mtu` and `--ip-options` are **parsed and validated for CLI parity but not yet applied to the emitted packets**. **`--proxies`** routes TCP connect scans through SOCKS4 or HTTP CONNECT proxies; **`--dns-servers`** resolves targets via custom DNS servers (**hickory-resolver**); **`--spoof-mac`** spoofs the source MAC on ARP discovery frames; **`--stats-every`** prints periodic scan progress with ETC and probes/sec. Multiple `-iL` lines and CLI targets resolve **in parallel** (order preserved) with the same **`--max-parallelism` / `--min-parallelism` / timing template** cap as port probes. It is **not** a byte-for-byte reimplementation of Nmap: the full **NSE Lua runtime** is **not** embedded. **IPv4 `-O`** runs raw TCP/IP probes (SEQ/OPS/WIN subset plus extras in progress), builds a subject fingerprint, and scores **`nmap-os-db`** reference entries with **MatchPoints** + **expr_match** (not every Nmap probe or field is implemented yet). With Nmap's **`nmap-service-probes`** and **`nmap-os-db`** files under `--datadir` (default `./data`), **`-sV`** runs TCP and UDP probes with `ports` / `sslports` filtering, `tls` (**rustls**) for probe `sslports`, `rarity` vs `--version-intensity`, and `match` / `softmatch` handling (Rust `regex`; Perl-only patterns skipped). **`-O`** falls back to ICMP TTL heuristics and example DB titles when raw probes or matching are unavailable. This tool implements **real** TCP connect, UDP probes, ICMP ping discovery, raw IPv4/IPv6 half-open TCP including SYN / NULL / FIN / Xmas / ACK / Window / Maimon (privileged), target list / random hosts, IPv6, resume checkpoints, traceroute, and **built-in** Rust "scripts" (banner grab) for `--script` / `-sC`.
 
-Created by **[MenkeTechnologies](https://github.com/MenkeTechnologies)**.
-
----
-
 ## [0x01] TRUTH TABLE // READ THIS
 
  ┌──────────────────────────────────────────────────────────────┐
@@ -309,5 +305,3 @@ Those files are **not** committed; without them, **`-sV`** logs a warning and **
 ░░ >>> JACK IN. SCAN THE GRID. OWN EVERY PORT. <<<         ░░
 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ```
-
-##### created by [MenkeTechnologies](https://github.com/MenkeTechnologies)
